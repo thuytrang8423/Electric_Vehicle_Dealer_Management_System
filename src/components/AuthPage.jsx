@@ -104,6 +104,20 @@ const AuthPage = ({ onNavigateHome, onLoginSuccess }) => {
 
       {/* Centered Login Card */}
       <div className="login-card-container">
+        {/* Back to Home Button - Above Form */}
+        <motion.button 
+          className="back-to-home-above-form"
+          onClick={onNavigateHome}
+          initial={{ opacity: 0, y: -20 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ delay: 0.2 }}
+          whileHover={{ scale: 1.05 }}
+          whileTap={{ scale: 0.95 }}
+        >
+          <i className="bx bx-arrow-back"></i>
+          Back To Home
+        </motion.button>
+
         <motion.div
           className="login-card"
           initial={{ opacity: 0, scale: 0.95 }}
@@ -219,19 +233,6 @@ const AuthPage = ({ onNavigateHome, onLoginSuccess }) => {
                     'Login'
                   )}
                 </button>
-
-                <motion.button 
-                  className="back-to-home"
-                  onClick={onNavigateHome}
-                  initial={{ opacity: 0 }}
-                  animate={{ opacity: 1 }}
-                  transition={{ delay: 1 }}
-                  whileHover={{ scale: 1.05 }}
-                  whileTap={{ scale: 0.95 }}
-                >
-                  <i className="bx bx-arrow-back"></i>
-                  Back to Home
-                </motion.button>
               </form>
             </div>
           </div>

@@ -3,6 +3,7 @@ import './App.css'
 import HomePage from './components/HomePage'
 import AuthPage from './components/AuthPage'
 import ElectricVehicles from './components/ElectricVehicles'
+import Contact from './components/Contact'
 import DashboardApp from './components/DashboardApp'
 import { ToastContainer } from 'react-toastify'
 import 'react-toastify/dist/ReactToastify.css'
@@ -47,6 +48,15 @@ function App() {
     return <ElectricVehicles 
       onNavigateHome={() => setCurrentPage('home')} 
       onNavigateAuth={() => setCurrentPage('auth')} 
+      onNavigateContact={() => setCurrentPage('contact')}
+    />
+  }
+
+  if (currentPage === 'contact') {
+    return <Contact 
+      onNavigateHome={() => setCurrentPage('home')} 
+      onNavigateAuth={() => setCurrentPage('auth')} 
+      onNavigateVehicles={() => setCurrentPage('vehicles')}
     />
   }
 
@@ -59,6 +69,7 @@ function App() {
       <HomePage 
         onNavigateAuth={() => setCurrentPage('auth')}
         onNavigateVehicles={() => setCurrentPage('vehicles')}
+        onNavigateContact={() => setCurrentPage('contact')}
         onNavigateDashboard={() => {
           if (loggedInUser) {
             setCurrentPage('dashboard');

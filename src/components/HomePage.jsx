@@ -1,19 +1,10 @@
-import { useState, useEffect } from 'react';
 import { motion } from 'framer-motion';
 import 'boxicons/css/boxicons.min.css';
 import './HomePage.css';
+import Footer from './Footer';
+import Navbar from './Navbar';
 
-const HomePage = ({ onNavigateAuth, onNavigateVehicles, onNavigateDashboard }) => {
-  const [isScrolled, setIsScrolled] = useState(false);
-
-  useEffect(() => {
-    const handleScroll = () => {
-      setIsScrolled(window.scrollY > 100);
-    };
-
-    window.addEventListener('scroll', handleScroll);
-    return () => window.removeEventListener('scroll', handleScroll);
-  }, []);
+const HomePage = ({ onNavigateAuth, onNavigateVehicles, onNavigateContact, onNavigateDashboard }) => {
 
   const vehicles = [
     {
@@ -67,34 +58,7 @@ const HomePage = ({ onNavigateAuth, onNavigateVehicles, onNavigateDashboard }) =
   return (
     <div className="homepage">
       {/* Navbar */}
-      <nav className={`navbar ${isScrolled ? 'scrolled' : ''}`}>
-        <div className="nav-container">
-          <div className="logo">
-            <span className="logo-text">EVM</span>
-          </div>
-          <ul className="nav-menu">
-            <li className="nav-item active">Home</li>
-            <li className="nav-item" onClick={onNavigateVehicles} style={{ cursor: 'pointer' }}>Electric Vehicles</li>
-            <li className="nav-item">Technology</li>
-            <li className="nav-item">Dealer</li>
-            <li className="nav-item">Contact</li>
-          </ul>
-          <div className="nav-buttons">
-            <button 
-              className="btn-login"
-              onClick={onNavigateAuth}
-            >
-              Login
-            </button> 
-            <button 
-              className="btn-register"
-              onClick={onNavigateAuth}
-            >
-              Test Drive              
-            </button>
-          </div>
-        </div>
-      </nav>
+      <Navbar onNavigateAuth={onNavigateAuth} onNavigateVehicles={onNavigateVehicles} onNavigateContact={onNavigateContact} onNavigateHome={() => {}} currentPage="home" />
 
       {/* Hero Section */}
       <section className="hero-section">
@@ -132,6 +96,7 @@ const HomePage = ({ onNavigateAuth, onNavigateVehicles, onNavigateDashboard }) =
                 whileHover={{ scale: 1.05 }}
                 whileTap={{ scale: 0.95 }}
                 className="btn-hero-primary"
+                onClick={onNavigateVehicles}
               >
                 Explore EVs
               </motion.button>
@@ -139,6 +104,7 @@ const HomePage = ({ onNavigateAuth, onNavigateVehicles, onNavigateDashboard }) =
                 whileHover={{ scale: 1.05 }}
                 whileTap={{ scale: 0.95 }}
                 className="btn-hero-secondary"
+                onClick={onNavigateAuth}
               >
                 Book a Test Drive
               </motion.button>
@@ -234,6 +200,7 @@ const HomePage = ({ onNavigateAuth, onNavigateVehicles, onNavigateDashboard }) =
             whileHover={{ scale: 1.1 }}
             whileTap={{ scale: 0.9 }}
             className="btn-cta"
+            onClick={onNavigateAuth}
           >
             Get Started Today
           </motion.button>
@@ -241,65 +208,7 @@ const HomePage = ({ onNavigateAuth, onNavigateVehicles, onNavigateDashboard }) =
       </section>
 
       {/* Footer */}
-      <footer className="footer">
-        <div className="footer-container">
-          <div className="footer-section">
-            <h3 className="footer-title">
-              <i className="bx bxs-bolt"></i>
-              <span>EVM Motors</span>
-            </h3>
-            <p className="footer-description">
-              Leading electric vehicle distributor
-            </p>
-            <div className="social-links">
-              <a href="#" className="social-link">
-                <i className="bx bxl-facebook"></i>
-              </a>
-              <a href="#" className="social-link">
-                <i className="bx bxl-instagram"></i>
-              </a>
-              <a href="#" className="social-link">
-                <i className="bx bxl-youtube"></i>
-              </a>
-            </div>
-          </div>
-          <div className="footer-section">
-            <h4 className="footer-heading">Products</h4>
-            <ul className="footer-links">
-              <li><a href="#">Sedan</a></li>
-              <li><a href="#">SUV</a></li>
-              <li><a href="#">Sport</a></li>
-              <li><a href="#">Accessories</a></li>
-            </ul>
-          </div>
-          <div className="footer-section">
-            <h4 className="footer-heading">Services</h4>
-            <ul className="footer-links">
-              <li><a href="#">Test Drive</a></li>
-              <li><a href="#">Warranty</a></li>
-              <li><a href="#">Charging</a></li>
-              <li><a href="#">Support</a></li>
-            </ul>
-          </div>
-          <div className="footer-section">
-            <h4 className="footer-heading">Connect</h4>
-            <div className="social-icons">
-              <a href="#" className="social-icon">
-                <i className="bx bxl-facebook"></i>
-              </a>
-              <a href="#" className="social-icon">
-                <i className="bx bxl-instagram"></i>
-              </a>
-              <a href="#" className="social-icon">
-                <i className="bx bxl-youtube"></i>
-              </a>
-            </div>
-          </div>
-        </div>
-        <div className="footer-bottom">
-          <p>&copy; 2023 EVM MOTORS. All rights reserved.</p>
-        </div>
-      </footer>
+      <Footer />
     </div>
   );
 };

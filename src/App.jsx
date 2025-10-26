@@ -42,7 +42,10 @@ function App() {
   }
 
   if (currentPage === 'vehicles') {
-    return <ElectricVehicles onNavigateHome={() => setCurrentPage('home')} />
+    return <ElectricVehicles 
+      onNavigateHome={() => setCurrentPage('home')} 
+      onNavigateAuth={() => setCurrentPage('auth')} 
+    />
   }
 
   if (currentPage === 'dashboard') {

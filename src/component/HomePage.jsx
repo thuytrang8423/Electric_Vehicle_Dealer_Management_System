@@ -3,7 +3,7 @@ import { motion } from 'framer-motion';
 import 'boxicons/css/boxicons.min.css';
 import './HomePage.css';
 
-const HomePage = ({ onNavigateAuth, onNavigateVehicles }) => {
+const HomePage = ({ onNavigateAuth, onNavigateVehicles, onNavigateDashboard }) => {
   const [isScrolled, setIsScrolled] = useState(false);
 
   useEffect(() => {
@@ -88,9 +88,9 @@ const HomePage = ({ onNavigateAuth, onNavigateVehicles }) => {
             </button>
             <button 
               className="btn-register"
-              onClick={onNavigateAuth}
+              onClick={onNavigateDashboard}
             >
-              Test Drive
+              Dashboard
             </button>
           </div>
         </div>

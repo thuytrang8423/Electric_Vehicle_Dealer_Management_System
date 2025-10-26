@@ -2,7 +2,39 @@ import { useState } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import './AuthPage.css';
 
-const AuthPage = ({ onNavigateHome }) => {
+// Mock users database
+const mockUsers = [
+  {
+    email: 'dealer@staff.com',
+    password: 'staff123',
+    name: 'John Smith',
+    role: 'dealer-staff',
+    avatar: null
+  },
+  {
+    email: 'manager@dealer.com',
+    password: 'manager123',
+    name: 'Jane Doe',
+    role: 'dealer-manager',
+    avatar: null
+  },
+  {
+    email: 'staff@evm.com',
+    password: 'evm123',
+    name: 'Mike Johnson',
+    role: 'evm-staff',
+    avatar: null
+  },
+  {
+    email: 'admin@evms.com',
+    password: 'admin123',
+    name: 'Sarah Chen',
+    role: 'admin',
+    avatar: null
+  }
+];
+
+const AuthPage = ({ onNavigateHome, onLoginSuccess }) => {
   const [isSignIn, setIsSignIn] = useState(true);
   const [formData, setFormData] = useState({
     email: '',
@@ -75,10 +107,48 @@ const AuthPage = ({ onNavigateHome }) => {
     
     // Simulate API call
     setTimeout(() => {
-      setLoading(false);
-      alert(isSignIn ? 'Sign In successful!' : 'Sign Up successful!');
-      // In real app, handle authentication here
+      if (isSignIn) {
+        // Find user in mock database
+        const user = mockUsers.find(
+          u => u.email === formData.email && u.password === formData.password
+        );
+
+        if (user) {
+          // Store user in localStorage
+          localStorage.setItem('currentUser', JSON.stringify({
+            name: user.name,
+            email: user.email,
+            role: user.role
+          }));
+          setLoading(false);
+          // Call onLoginSuccess callback with user data
+          if (onLoginSuccess) {
+            onLoginSuccess(user);
+          }
+          return;
+        } else {
+          setLoading(false);
+          setErrors({ email: 'Invalid credentials' });
+          return;
+        }
+      } else {
+        setLoading(false);
+        alert('Sign Up successful!');
+        // Could optionally sign them in here
+      }
     }, 1500);
+  };
+
+  // Quick login function
+  const quickLogin = (user) => {
+    localStorage.setItem('currentUser', JSON.stringify({
+      name: user.name,
+      email: user.email,
+      role: user.role
+    }));
+    if (onLoginSuccess) {
+      onLoginSuccess(user);
+    }
   };
 
   return (
@@ -162,6 +232,59 @@ const AuthPage = ({ onNavigateHome }) => {
                     : 'Create your EVM account and start managing'}
                 </p>
               </div>
+
+              {/* Quick Login Section */}
+              {isSignIn && (
+                <div style={{ marginBottom: '24px' }}>
+                  <p style={{ fontSize: '13px', color: 'var(--color-text-muted)', marginBottom: '12px', textAlign: 'center' }}>
+                    Quick Login (Demo)
+                  </p>
+                  <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: '8px' }}>
+                    {mockUsers.map(user => (
+                      <motion.button
+                        key={user.email}
+                        type="button"
+                        onClick={() => quickLogin(user)}
+                        whileHover={{ scale: 1.02 }}
+                        whileTap={{ scale: 0.98 }}
+                        style={{
+                          padding: '12px',
+                          border: 'none',
+                          borderRadius: 'var(--radius)',
+                          background: user.role === 'dealer-staff' ? 'rgba(59, 130, 246, 0.1)' :
+                                      user.role === 'dealer-manager' ? 'rgba(108, 99, 255, 0.1)' :
+                                      user.role === 'evm-staff' ? 'rgba(0, 191, 166, 0.1)' :
+                                      'rgba(255, 193, 7, 0.1)',
+                          color: user.role === 'dealer-staff' ? 'var(--color-info)' :
+                                  user.role === 'dealer-manager' ? 'var(--color-primary)' :
+                                  user.role === 'evm-staff' ? 'var(--color-secondary)' :
+                                  'var(--color-accent)',
+                          cursor: 'pointer',
+                          display: 'flex',
+                          alignItems: 'center',
+                          gap: '8px',
+                          textAlign: 'left',
+                          fontSize: '12px'
+                        }}
+                      >
+                        <i className={`bx ${
+                          user.role === 'dealer-staff' ? 'bx-user' :
+                          user.role === 'dealer-manager' ? 'bx-user-check' :
+                          user.role === 'evm-staff' ? 'bx-cog' :
+                          'bx-shield'
+                        }`} style={{ fontSize: '20px' }}></i>
+                        <div>
+                          <div style={{ fontWeight: '600', fontSize: '13px' }}>{user.name}</div>
+                          <div style={{ fontSize: '11px', opacity: '0.8' }}>{user.email}</div>
+                        </div>
+                      </motion.button>
+                    ))}
+                  </div>
+                  <div style={{ margin: '16px 0', textAlign: 'center', fontSize: '12px', color: 'var(--color-text-muted)' }}>
+                    OR
+                  </div>
+                </div>
+              )}
 
               {/* Form */}
               <form onSubmit={handleSubmit} className="auth-form">
@@ -264,7 +387,7 @@ const AuthPage = ({ onNavigateHome }) => {
                     <div className="form-group">
                       <label className="form-label">Full Name</label>
                       <div className="input-wrapper">
-                        <span className="input-icon">👤</span>
+                        <span className="input-icon"></span>
                         <input
                           type="text"
                           name="fullName"

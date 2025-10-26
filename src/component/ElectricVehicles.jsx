@@ -1,14 +1,31 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { motion } from 'framer-motion';
 import 'boxicons/css/boxicons.min.css';
 import './ElectricVehicles.css';
+import Footer from './Footer';
 
-const ElectricVehicles = ({ onNavigateHome }) => {
+const ElectricVehicles = ({ onNavigateHome, onNavigateAuth }) => {
+  const [isScrolled, setIsScrolled] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedBrand, setSelectedBrand] = useState('All Brands');
-  const [selectedPrice, setSelectedPrice] = useState('All Prices');
-  const [selectedRange, setSelectedRange] = useState('All Battery Ranges');
-  const [selectedType, setSelectedType] = useState('All Types');
+  const [selectedPrice, setSelectedPrice] = useState('Price Range');
+  const [selectedRange, setSelectedRange] = useState('Battery Range');
+  const [selectedType, setSelectedType] = useState('Vehicle Type');
+  const [sortBy, setSortBy] = useState('Sort by: Newest');
+
+  useEffect(() => {
+    const handleScroll = () => {
+      setIsScrolled(window.scrollY > 100);
+    };
+
+    window.addEventListener('scroll', handleScroll);
+    return () => window.removeEventListener('scroll', handleScroll);
+  }, []);
+
+  // Scroll to top when component mounts
+  useEffect(() => {
+    window.scrollTo(0, 0);
+  }, []);
 
   const vehicles = [
     {
@@ -62,29 +79,89 @@ const ElectricVehicles = ({ onNavigateHome }) => {
   ];
 
   const filteredVehicles = vehicles.filter(vehicle => {
-    const matchesSearch = vehicle.name.toLowerCase().includes(searchQuery.toLowerCase());
+    const matchesSearch = vehicle.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
+                         vehicle.description.toLowerCase().includes(searchQuery.toLowerCase());
+    
     const matchesBrand = selectedBrand === 'All Brands' || vehicle.brand === selectedBrand;
-    const matchesType = selectedType === 'All Types' || vehicle.type === selectedType;
-    return matchesSearch && matchesBrand && matchesType;
+    
+    const matchesType = selectedType === 'Vehicle Type' || vehicle.type === selectedType;
+    
+    // Price filter logic
+    let matchesPrice = true;
+    if (selectedPrice !== 'Price Range') {
+      const price = parseFloat(vehicle.price.replace(/[$,]/g, ''));
+      switch (selectedPrice) {
+        case 'Under $200k':
+          matchesPrice = price < 200000;
+          break;
+        case '$200k - $350k':
+          matchesPrice = price >= 200000 && price <= 350000;
+          break;
+        case '$350k - $500k':
+          matchesPrice = price >= 350000 && price <= 500000;
+          break;
+        case 'Over $500k':
+          matchesPrice = price > 500000;
+          break;
+        default:
+          matchesPrice = true;
+      }
+    }
+    
+    // Battery range filter logic
+    let matchesRange = true;
+    if (selectedRange !== 'Battery Range') {
+      const range = parseInt(vehicle.battery);
+      switch (selectedRange) {
+        case 'Under 500km':
+          matchesRange = range < 500;
+          break;
+        case '500km - 600km':
+          matchesRange = range >= 500 && range <= 600;
+          break;
+        case 'Over 600km':
+          matchesRange = range > 600;
+          break;
+        default:
+          matchesRange = true;
+      }
+    }
+    
+    return matchesSearch && matchesBrand && matchesType && matchesPrice && matchesRange;
+  });
+
+  // Sort vehicles based on selected sort option
+  const sortedVehicles = [...filteredVehicles].sort((a, b) => {
+    switch (sortBy) {
+      case 'Sort by: Price Low to High':
+        return parseFloat(a.price.replace(/[$,]/g, '')) - parseFloat(b.price.replace(/[$,]/g, ''));
+      case 'Sort by: Price High to Low':
+        return parseFloat(b.price.replace(/[$,]/g, '')) - parseFloat(a.price.replace(/[$,]/g, ''));
+      case 'Sort by: Battery Range':
+        return parseInt(b.battery) - parseInt(a.battery);
+      case 'Sort by: Newest':
+      default:
+        return 0; // Keep original order
+    }
   });
 
   return (
     <div className="electric-vehicles-page">
       {/* Navbar */}
-      <nav className={`navbar ${false ? 'scrolled' : ''}`}>
+      <nav className={`navbar ${isScrolled ? 'scrolled' : ''}`}>
         <div className="nav-container">
           <div className="logo" onClick={onNavigateHome} style={{ cursor: 'pointer' }}>
             <span className="logo-text">EVM</span>
           </div>
           <ul className="nav-menu">
-            <li className="nav-item" onClick={onNavigateHome} style={{ cursor: 'pointer' }}>Home</li>
+            <li className="nav-item" onClick={() => { onNavigateHome(); window.scrollTo(0, 0); }} style={{ cursor: 'pointer' }}>Home</li>
             <li className="nav-item active">Electric Vehicles</li>
-            <li className="nav-item">Technology</li>
-            <li className="nav-item">Dealer</li>
-            <li className="nav-item">Contact</li>
+            <li className="nav-item" onClick={() => window.scrollTo(0, 0)} style={{ cursor: 'pointer' }}>Technology</li>
+            <li className="nav-item" onClick={() => window.scrollTo(0, 0)} style={{ cursor: 'pointer' }}>Dealer</li>
+            <li className="nav-item" onClick={() => window.scrollTo(0, 0)} style={{ cursor: 'pointer' }}>Contact</li>
           </ul>
           <div className="nav-buttons">
-            <button className="btn-login">Login</button>
+            <button className="btn-login" onClick={onNavigateAuth}>Login</button>
           </div>
         </div>
       </nav>
@@ -125,29 +202,45 @@ const ElectricVehicles = ({ onNavigateHome }) => {
           </div>
 
           <div className="filter-container">
-            <select className="filter-select" value={selectedBrand} onChange={(e) => setSelectedBrand(e.target.value)}>
+            <select 
+              className={`filter-select ${selectedBrand !== 'All Brands' ? 'filter-active' : ''}`} 
+              value={selectedBrand} 
+              onChange={(e) => setSelectedBrand(e.target.value)}
+            >
               <option>All Brands</option>
               <option>EVM</option>
             </select>
-            <select className="filter-select" value={selectedPrice} onChange={(e) => setSelectedPrice(e.target.value)}>
-              <option>Price Range</option>
-              <option>Under $200k</option>
-              <option>$200k - $350k</option>
-              <option>$350k - $500k</option>
-              <option>Over $500k</option>
+            <select 
+              className={`filter-select ${selectedPrice !== 'Price Range' ? 'filter-active' : ''}`} 
+              value={selectedPrice} 
+              onChange={(e) => setSelectedPrice(e.target.value)}
+            >
+              <option value="Price Range">Price Range</option>
+              <option value="Under $200k">Under $200k</option>
+              <option value="$200k - $350k">$200k - $350k</option>
+              <option value="$350k - $500k">$350k - $500k</option>
+              <option value="Over $500k">Over $500k</option>
             </select>
-            <select className="filter-select" value={selectedRange} onChange={(e) => setSelectedRange(e.target.value)}>
-              <option>Battery Range</option>
-              <option>Under 500km</option>
-              <option>500km - 600km</option>
-              <option>Over 600km</option>
+            <select 
+              className={`filter-select ${selectedRange !== 'Battery Range' ? 'filter-active' : ''}`} 
+              value={selectedRange} 
+              onChange={(e) => setSelectedRange(e.target.value)}
+            >
+              <option value="Battery Range">Battery Range</option>
+              <option value="Under 500km">Under 500km</option>
+              <option value="500km - 600km">500km - 600km</option>
+              <option value="Over 600km">Over 600km</option>
             </select>
-            <select className="filter-select" value={selectedType} onChange={(e) => setSelectedType(e.target.value)}>
-              <option>Vehicle Type</option>
-              <option>Sedan</option>
-              <option>SUV</option>
-              <option>Sport</option>
-              <option>City</option>
+            <select 
+              className={`filter-select ${selectedType !== 'Vehicle Type' ? 'filter-active' : ''}`} 
+              value={selectedType} 
+              onChange={(e) => setSelectedType(e.target.value)}
+            >
+              <option value="Vehicle Type">Vehicle Type</option>
+              <option value="Sedan">Sedan</option>
+              <option value="SUV">SUV</option>
+              <option value="Sport">Sport</option>
+              <option value="City">City</option>
             </select>
           </div>
         </motion.div>
@@ -156,17 +249,17 @@ const ElectricVehicles = ({ onNavigateHome }) => {
       {/* Vehicle Grid */}
       <section className="vehicles-grid-section">
         <div className="results-header">
-          <h2 className="results-count">Found {filteredVehicles.length} electric vehicles</h2>
-          <select className="sort-select">
-            <option>Sort by: Newest</option>
-            <option>Sort by: Price Low to High</option>
-            <option>Sort by: Price High to Low</option>
-            <option>Sort by: Battery Range</option>
+          <h2 className="results-count">Found <span className="results-number">{filteredVehicles.length}</span> electric vehicles</h2>
+          <select className="sort-select" value={sortBy} onChange={(e) => setSortBy(e.target.value)}>
+            <option value="Sort by: Newest">Sort by: Newest</option>
+            <option value="Sort by: Price Low to High">Sort by: Price Low to High</option>
+            <option value="Sort by: Price High to Low">Sort by: Price High to Low</option>
+            <option value="Sort by: Battery Range">Sort by: Battery Range</option>
           </select>
         </div>
 
         <div className="vehicles-grid">
-          {filteredVehicles.map((vehicle, index) => (
+          {sortedVehicles.map((vehicle, index) => (
             <motion.div
               key={index}
               initial={{ opacity: 0, y: 50 }}
@@ -197,6 +290,9 @@ const ElectricVehicles = ({ onNavigateHome }) => {
           ))}
         </div>
       </section>
+
+      {/* Footer */}
+      <Footer />
     </div>
   );
 };

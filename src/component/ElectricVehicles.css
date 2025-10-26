@@ -13,8 +13,16 @@
   top: 0;
   width: 100%;
   z-index: 1000;
+  background-color: rgba(42, 42, 42, 0);
+  backdrop-filter: blur(0);
+  transition: all 0.3s ease;
+  border-bottom: 1px solid transparent;
+}
+
+.navbar.scrolled {
   background-color: rgba(42, 42, 42, 0.95);
   backdrop-filter: blur(12px);
+  box-shadow: 0 4px 20px rgba(229, 9, 20, 0.3);
   border-bottom: 1px solid rgba(255, 30, 30, 0.3);
 }
 
@@ -28,14 +36,45 @@
   gap: 2rem;
 }
 
+.nav-container .logo {
+  margin-left: 0.5rem;
+  flex-shrink: 0;
+}
+
+.nav-container .nav-menu {
+  flex: 1;
+  justify-content: center;
+}
+
+.nav-container .nav-buttons {
+  margin-right: 0.5rem;
+  flex-shrink: 0;
+}
+
+.logo {
+  display: flex;
+  gap: 0.5rem;
+  font-family: 'Orbitron', sans-serif;
+  font-size: 2rem;
+  font-weight: 900;
+  cursor: pointer;
+  transition: all 0.3s ease;
+}
+
 .logo-text {
   background: linear-gradient(135deg, #FFFFFF, #FF1E1E);
   -webkit-background-clip: text;
   -webkit-text-fill-color: transparent;
   background-clip: text;
-  font-size: 2.5rem;
-  font-family: 'Orbitron', sans-serif;
-  font-weight: 900;
+  text-shadow: 0 0 30px rgba(255, 30, 30, 0.5);
+  font-size: 2rem;
+}
+
+.navbar.scrolled .logo-text {
+  background: linear-gradient(135deg, #FF1E1E, #FF0000);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  background-clip: text;
 }
 
 .nav-menu {
@@ -133,11 +172,14 @@
 .search-bar-container {
   display: flex;
   background: rgba(50, 50, 50, 0.9);
-  border-radius: 15px;
-  padding: 0.8rem;
+  border-radius: 12px;
+  padding: 0.4rem;
   margin-bottom: 1.5rem;
   border: 1px solid rgba(255, 30, 30, 0.2);
   transition: all 0.3s ease;
+  max-width: 800px;
+  margin-left: auto;
+  margin-right: auto;
 }
 
 .search-bar-container:focus-within {
@@ -146,9 +188,9 @@
 }
 
 .search-icon {
-  font-size: 1.5rem;
-  color: #B0B0B0;
-  margin: 0 1rem;
+  font-size: 1.2rem;
+  color: #FF1E1E;
+  margin: 0 0.6rem;
   display: flex;
   align-items: center;
 }
@@ -158,8 +200,9 @@
   background: transparent;
   border: none;
   color: #F5F5F5;
-  font-size: 1rem;
+  font-size: 0.85rem;
   outline: none;
+  padding: 0 0.5rem;
 }
 
 .search-input::placeholder {
@@ -170,11 +213,13 @@
   background: linear-gradient(135deg, #FF1E1E, #E50914);
   border: none;
   color: white;
-  padding: 0.8rem 2rem;
+  padding: 0.5rem 1.2rem;
   border-radius: 10px;
   font-weight: 600;
+  font-size: 0.85rem;
   cursor: pointer;
   transition: all 0.3s ease;
+  white-space: nowrap;
 }
 
 .btn-search:hover {
@@ -205,6 +250,11 @@
   background: rgba(50, 50, 50, 1);
 }
 
+.filter-select.filter-active {
+  border-color: #FF1E1E !important;
+  box-shadow: 0 0 8px rgba(255, 30, 30, 0.3);
+}
+
 /* Vehicles Grid Section */
 .vehicles-grid-section {
   padding: 3rem 2rem;
@@ -225,6 +275,11 @@
   font-size: 1.5rem;
   font-weight: 600;
   color: #F5F5F5;
+}
+
+.results-number {
+  color: #FF1E1E;
+  font-weight: 700;
 }
 
 .sort-select {

@@ -147,7 +147,7 @@
   border: 2px solid #FF1E1E;
   color: #FF1E1E;
   padding: 0.6rem 1.5rem;
-  border-radius: 25px;
+  border-radius: 8px;
   font-weight: 600;
   cursor: pointer;
   transition: all 0.3s ease;
@@ -311,7 +311,7 @@
   padding: 1.2rem 3rem;
   font-size: 1.1rem;
   font-weight: 600;
-  border-radius: 50px;
+  border-radius: 8px;
   cursor: pointer;
   position: relative;
   overflow: hidden;
@@ -346,7 +346,7 @@
   padding: 1.2rem 3rem;
   font-size: 1.1rem;
   font-weight: 600;
-  border-radius: 50px;
+  border-radius: 8px;
   cursor: pointer;
   transition: all 0.3s ease;
 }
@@ -743,7 +743,7 @@
   padding: 1.5rem 4rem;
   font-size: 1.2rem;
   font-weight: 700;
-  border-radius: 50px;
+  border-radius: 8px;
   cursor: pointer;
   transition: all 0.3s ease;
   box-shadow: 0 6px 30px rgba(229, 9, 20, 0.6);

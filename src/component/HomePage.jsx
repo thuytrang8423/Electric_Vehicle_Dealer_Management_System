@@ -85,12 +85,12 @@ const HomePage = ({ onNavigateAuth, onNavigateVehicles, onNavigateDashboard }) =
               onClick={onNavigateAuth}
             >
               Login
-            </button>
+            </button> 
             <button 
               className="btn-register"
-              onClick={onNavigateDashboard}
+              onClick={onNavigateAuth}
             >
-              Dashboard
+              Test Drive              
             </button>
           </div>
         </div>

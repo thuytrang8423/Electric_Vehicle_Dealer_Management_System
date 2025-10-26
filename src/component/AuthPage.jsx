@@ -3,7 +3,35 @@ import { motion } from 'framer-motion';
 import 'boxicons/css/boxicons.min.css';
 import './AuthPage.css';
 
-const AuthPage = ({ onNavigateHome }) => {
+// Mock users database
+const mockUsers = [
+  {
+    email: 'dealer@staff.com',
+    password: 'staff123',
+    name: 'John Smith',
+    role: 'dealer-staff'
+  },
+  {
+    email: 'manager@dealer.com',
+    password: 'manager123',
+    name: 'Jane Doe',
+    role: 'dealer-manager'
+  },
+  {
+    email: 'staff@evm.com',
+    password: 'evm123',
+    name: 'Mike Johnson',
+    role: 'evm-staff'
+  },
+  {
+    email: 'admin@evms.com',
+    password: 'admin123',
+    name: 'Sarah Chen',
+    role: 'admin'
+  }
+];
+
+const AuthPage = ({ onNavigateHome, onLoginSuccess }) => {
   const [formData, setFormData] = useState({
     email: '',
     password: '',
@@ -24,7 +52,7 @@ const AuthPage = ({ onNavigateHome }) => {
       setCurrentImageIndex((prevIndex) => 
         prevIndex === carouselImages.length - 1 ? 0 : prevIndex + 1
       );
-    }, 5000); // Change image every 5 seconds
+    }, 5000);
 
     return () => clearInterval(interval);
   }, [carouselImages.length]);
@@ -43,10 +71,28 @@ const AuthPage = ({ onNavigateHome }) => {
     
     // Simulate API call
     setTimeout(() => {
-      setIsLoading(false);
-      // Handle login logic here
-      console.log('Login data:', formData);
-    }, 2000);
+      // Find user in mock database
+      const user = mockUsers.find(
+        u => u.email === formData.email && u.password === formData.password
+      );
+
+      if (user) {
+        // Store user in localStorage
+        localStorage.setItem('currentUser', JSON.stringify({
+          name: user.name,
+          email: user.email,
+          role: user.role
+        }));
+        setIsLoading(false);
+        // Call onLoginSuccess callback with user data
+        if (onLoginSuccess) {
+          onLoginSuccess(user);
+        }
+      } else {
+        setIsLoading(false);
+        alert('Invalid credentials');
+      }
+    }, 1500);
   };
 
   return (
@@ -69,7 +115,6 @@ const AuthPage = ({ onNavigateHome }) => {
             <div className="logo-container">
               <span className="logo-text">EVM</span>
             </div>
-
 
             <div className="image-container">
               <motion.div 
@@ -192,7 +237,6 @@ const AuthPage = ({ onNavigateHome }) => {
           </div>
         </motion.div>
       </div>
-
     </div>
   );
 };

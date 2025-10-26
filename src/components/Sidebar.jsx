@@ -51,10 +51,7 @@ const Sidebar = ({ user, activeItem, onItemClick }) => {
   return (
     <div className="sidebar">
       <div className="sidebar__logo">
-        <div className="sidebar__logo-icon">
-          <i className="bx bx-bolt-circle"></i>
-        </div>
-        EV-DMS
+        <span className="sidebar__logo-text">EVM</span>
       </div>
       
       <nav className="sidebar__menu">

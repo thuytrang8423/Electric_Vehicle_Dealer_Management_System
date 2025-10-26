@@ -9,7 +9,7 @@
   --color-button: #FF6B6B;
   --color-button-hover: #FF5252;
   --color-bg: #F8F9FB;
-  --color-surface: #FFFFFF;
+  --color-surface: #F5F5F7;
   --color-border: #E5E7EB;
   --color-text: #1F2937;
   --color-text-muted: #6B7280;
@@ -66,24 +66,19 @@
 
 .sidebar__logo {
   font-weight: 700;
-  color: var(--color-primary);
   margin-bottom: 24px;
   font-size: 20px;
   display: flex;
   align-items: center;
-  gap: 8px;
 }
 
-.sidebar__logo-icon {
-  width: 24px;
-  height: 24px;
-  background: var(--color-primary);
-  border-radius: 4px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  color: white;
-  font-size: 16px;
+.sidebar__logo-text {
+    background: linear-gradient(135deg, #FFFFFF, #FF1E1E);
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+    background-clip: text;
+    text-shadow: 0 0 30px rgba(255, 30, 30, 0.5);
+    font-size: 2rem;
 }
 
 .sidebar__menu {
@@ -104,13 +99,13 @@
 }
 
 .sidebar__item:hover {
-  background: var(--color-primary);
+  background: linear-gradient(135deg, #FF6B9D, #E50914);
   color: #fff;
   transform: translateX(2px);
 }
 
 .sidebar__item--active {
-  background: var(--color-primary);
+  background: linear-gradient(135deg, #FF6B9D, #E50914);
   color: #fff;
   box-shadow: var(--shadow);
 }

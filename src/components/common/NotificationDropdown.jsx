@@ -1,4 +1,5 @@
 import React, { useState, useRef, useEffect } from 'react';
+import { showSuccessToast } from '../../utils/toast';
 import 'boxicons/css/boxicons.min.css';
 
 const NotificationDropdown = ({ notifications, onMarkAsRead, onMarkAllAsRead, onDeleteNotification }) => {
@@ -54,6 +55,7 @@ const NotificationDropdown = ({ notifications, onMarkAsRead, onMarkAllAsRead, on
   const handleMarkAllAsRead = () => {
     if (onMarkAllAsRead) {
       onMarkAllAsRead();
+      showSuccessToast('All notifications marked as read');
     }
   };
 
@@ -61,6 +63,7 @@ const NotificationDropdown = ({ notifications, onMarkAsRead, onMarkAllAsRead, on
     e.stopPropagation();
     if (onDeleteNotification) {
       onDeleteNotification(id);
+      showSuccessToast('Notification deleted');
     }
   };
 

@@ -4,6 +4,8 @@ import HomePage from './component/HomePage'
 import AuthPage from './component/AuthPage'
 import ElectricVehicles from './component/ElectricVehicles'
 import DashboardApp from './components/DashboardApp'
+import { ToastContainer } from 'react-toastify'
+import 'react-toastify/dist/ReactToastify.css'
 
 function App() {
   const [currentPage, setCurrentPage] = useState('home')
@@ -64,6 +66,18 @@ function App() {
             setCurrentPage('auth');
           }
         }}
+      />
+      <ToastContainer
+        position="top-right"
+        autoClose={3000}
+        hideProgressBar={false}
+        newestOnTop={false}
+        closeOnClick
+        rtl={false}
+        pauseOnFocusLoss
+        draggable
+        pauseOnHover
+        theme="colored"
       />
     </>
   )

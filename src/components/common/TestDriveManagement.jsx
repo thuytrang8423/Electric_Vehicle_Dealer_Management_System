@@ -1,15 +1,37 @@
 import React, { useState } from 'react';
+import { showSuccessToast } from '../../utils/toast';
 import 'boxicons/css/boxicons.min.css';
 
 const TestDriveManagement = ({ user }) => {
   const [selectedDate, setSelectedDate] = useState(new Date());
   const [showModal, setShowModal] = useState(false);
+  const [editingTestDrive, setEditingTestDrive] = useState(null);
+  const [formData, setFormData] = useState({
+    customer: '',
+    vehicle: '',
+    date: '',
+    time: '',
+    phone: '',
+    email: '',
+    notes: '',
+    status: 'scheduled'
+  });
   const [testDrives, setTestDrives] = useState([
-    { id: 1, customer: 'John Doe', vehicle: 'Tesla Model 3', date: '2024-01-20', time: '10:00 AM', status: 'scheduled', notes: '' },
-    { id: 2, customer: 'Jane Smith', vehicle: 'BMW i3', date: '2024-01-20', time: '2:00 PM', status: 'completed', notes: 'Customer showed high interest' },
-    { id: 3, customer: 'Mike Chen', vehicle: 'Nissan Leaf', date: '2024-01-18', time: '11:00 AM', status: 'scheduled', notes: '' },
-    { id: 4, customer: 'Lisa Brown', vehicle: 'Chevrolet Bolt', date: '2024-01-19', time: '3:00 PM', status: 'scheduled', notes: '' },
-    { id: 5, customer: 'Tom Wilson', vehicle: 'Tesla Model Y', date: '2024-01-22', time: '10:00 AM', status: 'scheduled', notes: '' }
+    { id: 1, customer: 'John Doe', vehicle: 'Tesla Model 3', date: '2025-10-12', time: '10:00 AM', status: 'scheduled', notes: '', phone: '+1-234-567-8901', email: 'john.doe@email.com' },
+    { id: 2, customer: 'Jane Smith', vehicle: 'BMW i3', date: '2025-10-12', time: '2:00 PM', status: 'completed', notes: 'Customer showed high interest', phone: '+1-234-567-8902', email: 'jane.smith@email.com' },
+    { id: 3, customer: 'Mike Chen', vehicle: 'Nissan Leaf', date: '2025-10-10', time: '11:00 AM', status: 'scheduled', notes: '', phone: '+1-234-567-8903', email: 'mike.chen@email.com' },
+    { id: 4, customer: 'Lisa Brown', vehicle: 'Chevrolet Bolt', date: '2025-10-11', time: '3:00 PM', status: 'scheduled', notes: '', phone: '+1-234-567-8904', email: 'lisa.brown@email.com' },
+    { id: 5, customer: 'Tom Wilson', vehicle: 'Tesla Model Y', date: '2025-10-14', time: '10:00 AM', status: 'scheduled', notes: '', phone: '+1-234-567-8905', email: 'tom.wilson@email.com' },
+    { id: 6, customer: 'Sarah Johnson', vehicle: 'Audi e-tron', date: '2025-10-08', time: '9:00 AM', status: 'scheduled', notes: 'First time buyer', phone: '+1-234-567-8906', email: 'sarah.j@email.com' },
+    { id: 7, customer: 'David Lee', vehicle: 'Tesla Model 3', date: '2025-10-08', time: '3:00 PM', status: 'completed', notes: 'Very satisfied with the drive', phone: '+1-234-567-8907', email: 'david.lee@email.com' },
+    { id: 8, customer: 'Emily Davis', vehicle: 'BMW i3', date: '2025-10-09', time: '11:00 AM', status: 'scheduled', notes: 'Follow up call needed', phone: '+1-234-567-8908', email: 'emily.davis@email.com' },
+    { id: 9, customer: 'Robert Martinez', vehicle: 'Ford Mustang Mach-E', date: '2025-10-09', time: '2:00 PM', status: 'scheduled', notes: '', phone: '+1-234-567-8909', email: 'robert.m@email.com' },
+    { id: 10, customer: 'Olivia Garcia', vehicle: 'Hyundai IONIQ 5', date: '2025-10-11', time: '10:00 AM', status: 'cancelled', notes: 'Customer had to reschedule', phone: '+1-234-567-8910', email: 'olivia.g@email.com' },
+    { id: 11, customer: 'James Anderson', vehicle: 'Tesla Model 3', date: '2025-10-13', time: '1:00 PM', status: 'scheduled', notes: '', phone: '+1-234-567-8911', email: 'james.a@email.com' },
+    { id: 12, customer: 'Sophia Taylor', vehicle: 'Nissan Leaf', date: '2025-10-13', time: '4:00 PM', status: 'scheduled', notes: 'Family test drive', phone: '+1-234-567-8912', email: 'sophia.t@email.com' },
+    { id: 13, customer: 'Michael White', vehicle: 'Chevrolet Bolt', date: '2025-10-15', time: '9:00 AM', status: 'scheduled', notes: '', phone: '+1-234-567-8913', email: 'michael.w@email.com' },
+    { id: 14, customer: 'Jessica Moore', vehicle: 'Tesla Model Y', date: '2025-10-15', time: '11:00 AM', status: 'scheduled', notes: 'Trade-in evaluation needed', phone: '+1-234-567-8914', email: 'jessica.m@email.com' },
+    { id: 15, customer: 'Christopher Harris', vehicle: 'Audi e-tron', date: '2025-10-16', time: '2:00 PM', status: 'scheduled', notes: '', phone: '+1-234-567-8915', email: 'christopher.h@email.com' }
   ]);
 
   // Get current month and year
@@ -84,6 +106,93 @@ const TestDriveManagement = ({ user }) => {
     return day === today.getDate() && 
            currentMonth === today.getMonth() && 
            currentYear === today.getFullYear();
+  };
+
+  const handleAddTestDrive = () => {
+    setEditingTestDrive(null);
+    setFormData({
+      customer: '',
+      vehicle: '',
+      date: selectedDate.toISOString().split('T')[0],
+      time: '',
+      phone: '',
+      email: '',
+      notes: '',
+      status: 'scheduled'
+    });
+    setShowModal(true);
+  };
+
+  const handleEditTestDrive = (testDrive) => {
+    setEditingTestDrive(testDrive);
+    setFormData({
+      customer: testDrive.customer,
+      vehicle: testDrive.vehicle,
+      date: testDrive.date,
+      time: testDrive.time,
+      phone: testDrive.phone,
+      email: testDrive.email,
+      notes: testDrive.notes,
+      status: testDrive.status
+    });
+    setShowModal(true);
+  };
+
+  const handleDeleteTestDrive = (testDriveId) => {
+    if (window.confirm('Are you sure you want to delete this test drive?')) {
+      setTestDrives(testDrives.filter(td => td.id !== testDriveId));
+      showSuccessToast('Test drive deleted successfully');
+    }
+  };
+
+  const handleSubmit = (e) => {
+    e.preventDefault();
+    
+    if (!formData.customer || !formData.vehicle || !formData.date || !formData.time) {
+      showSuccessToast('Please fill in all required fields');
+      return;
+    }
+
+    const testDriveData = {
+      customer: formData.customer,
+      vehicle: formData.vehicle,
+      date: formData.date,
+      time: formData.time,
+      phone: formData.phone,
+      email: formData.email,
+      notes: formData.notes,
+      status: formData.status
+    };
+
+    if (editingTestDrive) {
+      // Update existing test drive
+      setTestDrives(testDrives.map(td => 
+        td.id === editingTestDrive.id 
+          ? { ...td, ...testDriveData }
+          : td
+      ));
+      showSuccessToast('Test drive updated successfully');
+    } else {
+      // Add new test drive
+      const newTestDrive = {
+        id: Math.max(...testDrives.map(td => td.id)) + 1,
+        ...testDriveData
+      };
+      setTestDrives([...testDrives, newTestDrive]);
+      showSuccessToast('Test drive scheduled successfully');
+    }
+
+    setShowModal(false);
+    setFormData({
+      customer: '',
+      vehicle: '',
+      date: '',
+      time: '',
+      phone: '',
+      email: '',
+      notes: '',
+      status: 'scheduled'
+    });
   };
 
   return (
@@ -208,7 +317,7 @@ const TestDriveManagement = ({ user }) => {
           <div className="card" style={{ marginBottom: '24px' }}>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px' }}>
               <h3>Test Drives on {selectedDate.toLocaleDateString()}</h3>
-              <button className="btn btn-primary" onClick={() => setShowModal(true)}>
+              <button className="btn btn-primary" onClick={handleAddTestDrive}>
                 <i className="bx bx-plus"></i>
                 Schedule
               </button>
@@ -226,40 +335,79 @@ const TestDriveManagement = ({ user }) => {
                       border: '1px solid var(--color-border)'
                     }}
                   >
-                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '8px' }}>
-                      <div>
-                        <div style={{ fontSize: '16px', fontWeight: '600', color: 'var(--color-text)' }}>{drive.customer}</div>
-                        <div style={{ fontSize: '14px', color: 'var(--color-text-muted)' }}>{drive.vehicle}</div>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '12px' }}>
+                      <div style={{ flex: 1 }}>
+                        <div style={{ fontSize: '16px', fontWeight: '600', color: 'var(--color-text)', marginBottom: '4px' }}>{drive.customer}</div>
+                        <div style={{ fontSize: '14px', color: 'var(--color-text-muted)', marginBottom: '6px' }}>
+                          <i className="bx bx-car" style={{ marginRight: '4px' }}></i>
+                          {drive.vehicle}
+                        </div>
+                        <div style={{ fontSize: '13px', color: 'var(--color-text-muted)' }}>
+                          <i className="bx bx-phone" style={{ marginRight: '4px' }}></i>
+                          {drive.phone}
+                        </div>
+                        <div style={{ fontSize: '13px', color: 'var(--color-text-muted)' }}>
+                          <i className="bx bx-envelope" style={{ marginRight: '4px' }}></i>
+                          {drive.email}
+                        </div>
                       </div>
                       <span style={{
-                        padding: '4px 12px',
+                        padding: '6px 12px',
                         borderRadius: 'var(--radius)',
                         background: getStatusBg(drive.status),
                         color: getStatusColor(drive.status),
-                        fontSize: '12px',
+                        fontSize: '11px',
                         fontWeight: '600',
-                        textTransform: 'capitalize'
+                        textTransform: 'capitalize',
+                        whiteSpace: 'nowrap'
                       }}>
                         {drive.status}
                       </span>
                     </div>
-                    <div style={{ fontSize: '14px', color: 'var(--color-primary)', fontWeight: '600', marginBottom: '8px' }}>
-                      <i className="bx bx-time"></i> {drive.time}
+                    <div style={{ 
+                      fontSize: '14px', 
+                      color: 'var(--color-primary)', 
+                      fontWeight: '600', 
+                      marginBottom: '8px',
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: '6px'
+                    }}>
+                      <i className="bx bx-time"></i> 
+                      {drive.time}
                     </div>
                     {drive.notes && (
-                      <div style={{ fontSize: '13px', color: 'var(--color-text-muted)', fontStyle: 'italic', marginTop: '8px', paddingTop: '8px', borderTop: '1px solid var(--color-border)' }}>
+                      <div style={{ 
+                        fontSize: '13px', 
+                        color: 'var(--color-text-muted)', 
+                        fontStyle: 'italic', 
+                        marginTop: '8px', 
+                        padding: '8px',
+                        background: 'var(--color-surface)',
+                        borderRadius: 'var(--radius)',
+                        borderLeft: '3px solid var(--color-primary)'
+                      }}>
+                        <i className="bx bx-note" style={{ marginRight: '4px' }}></i>
                         {drive.notes}
                       </div>
                     )}
                     <div style={{ display: 'flex', gap: '8px', marginTop: '12px' }}>
-                      <button className="btn btn-outline" style={{ flex: 1, fontSize: '12px' }}>
-                        <i className="bx bx-edit"></i>
-                        Edit
-                      </button>
-                      <button className="btn btn-outline" style={{ flex: 1, fontSize: '12px' }}>
-                        <i className="bx bx-trash"></i>
-                        Cancel
-                      </button>
+                    <button 
+                      className="btn btn-outline" 
+                      style={{ flex: 1, fontSize: '12px' }}
+                      onClick={() => handleEditTestDrive(drive)}
+                    >
+                      <i className="bx bx-edit"></i>
+                      Edit
+                    </button>
+                    <button 
+                      className="btn btn-outline" 
+                      style={{ flex: 1, fontSize: '12px', color: 'var(--color-error)' }}
+                      onClick={() => handleDeleteTestDrive(drive.id)}
+                    >
+                      <i className="bx bx-trash"></i>
+                      Delete
+                    </button>
                     </div>
                   </div>
                 ))}
@@ -268,7 +416,7 @@ const TestDriveManagement = ({ user }) => {
               <div style={{ textAlign: 'center', padding: '40px', color: 'var(--color-text-muted)' }}>
                 <i className="bx bx-calendar-x" style={{ fontSize: '48px', marginBottom: '16px', opacity: '0.5' }}></i>
                 <div>No test drives scheduled for this date</div>
-                <button className="btn btn-primary" style={{ marginTop: '16px' }} onClick={() => setShowModal(true)}>
+                <button className="btn btn-primary" style={{ marginTop: '16px' }} onClick={handleAddTestDrive}>
                   <i className="bx bx-plus"></i>
                   Schedule Now
                 </button>
@@ -282,7 +430,10 @@ const TestDriveManagement = ({ user }) => {
             <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
               {[
                 { label: 'Total Scheduled', value: testDrives.filter(d => d.status === 'scheduled').length, icon: 'bx-calendar', color: 'var(--color-info)' },
-                { label: 'This Month', value: testDrives.filter(d => d.date.startsWith('2024-01')).length, icon: 'bx-calendar-alt', color: 'var(--color-primary)' },
+                { label: 'This Month', value: testDrives.filter(d => {
+                  const driveDate = new Date(d.date);
+                  return driveDate.getMonth() === currentMonth && driveDate.getFullYear() === currentYear;
+                }).length, icon: 'bx-calendar-alt', color: 'var(--color-primary)' },
                 { label: 'Completed', value: testDrives.filter(d => d.status === 'completed').length, icon: 'bx-check-circle', color: 'var(--color-success)' }
               ].map((stat, index) => (
                 <div key={index} style={{
@@ -316,6 +467,246 @@ const TestDriveManagement = ({ user }) => {
           </div>
         </div>
       </div>
+
+      {/* Add/Edit Modal */}
+      {showModal && (
+        <div style={{
+          position: 'fixed',
+          top: 0,
+          left: 0,
+          right: 0,
+          bottom: 0,
+          background: 'rgba(0, 0, 0, 0.5)',
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          zIndex: 1000
+        }}>
+          <div style={{
+            background: 'var(--color-surface)',
+            borderRadius: 'var(--radius)',
+            padding: '24px',
+            width: '90%',
+            maxWidth: '500px',
+            maxHeight: '90vh',
+            overflowY: 'auto'
+          }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '24px' }}>
+              <h3>{editingTestDrive ? 'Edit Test Drive' : 'Schedule New Test Drive'}</h3>
+              <button 
+                onClick={() => setShowModal(false)}
+                style={{ background: 'none', border: 'none', fontSize: '24px', cursor: 'pointer', color: 'var(--color-text-muted)' }}
+              >
+                <i className="bx bx-x"></i>
+              </button>
+            </div>
+
+            <form onSubmit={handleSubmit}>
+              <div style={{ display: 'grid', gap: '16px' }}>
+                <div>
+                  <label style={{ display: 'block', marginBottom: '8px', fontSize: '14px', fontWeight: '600', color: 'var(--color-text)' }}>
+                    Customer Name *
+                  </label>
+                  <input
+                    type="text"
+                    value={formData.customer}
+                    onChange={(e) => setFormData({...formData, customer: e.target.value})}
+                    style={{
+                      width: '100%',
+                      padding: '12px',
+                      border: '1px solid var(--color-border)',
+                      borderRadius: 'var(--radius)',
+                      background: 'var(--color-bg)',
+                      color: 'var(--color-text)',
+                      fontSize: '14px'
+                    }}
+                    placeholder="John Doe"
+                    required
+                  />
+                </div>
+
+                <div>
+                  <label style={{ display: 'block', marginBottom: '8px', fontSize: '14px', fontWeight: '600', color: 'var(--color-text)' }}>
+                    Vehicle *
+                  </label>
+                  <input
+                    type="text"
+                    value={formData.vehicle}
+                    onChange={(e) => setFormData({...formData, vehicle: e.target.value})}
+                    style={{
+                      width: '100%',
+                      padding: '12px',
+                      border: '1px solid var(--color-border)',
+                      borderRadius: 'var(--radius)',
+                      background: 'var(--color-bg)',
+                      color: 'var(--color-text)',
+                      fontSize: '14px'
+                    }}
+                    placeholder="Tesla Model 3"
+                    required
+                  />
+                </div>
+
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '16px' }}>
+                  <div>
+                    <label style={{ display: 'block', marginBottom: '8px', fontSize: '14px', fontWeight: '600', color: 'var(--color-text)' }}>
+                      Date *
+                    </label>
+                    <input
+                      type="date"
+                      value={formData.date}
+                      onChange={(e) => setFormData({...formData, date: e.target.value})}
+                      style={{
+                        width: '100%',
+                        padding: '12px',
+                        border: '1px solid var(--color-border)',
+                        borderRadius: 'var(--radius)',
+                        background: 'var(--color-bg)',
+                        color: 'var(--color-text)',
+                        fontSize: '14px'
+                      }}
+                      required
+                    />
+                  </div>
+
+                  <div>
+                    <label style={{ display: 'block', marginBottom: '8px', fontSize: '14px', fontWeight: '600', color: 'var(--color-text)' }}>
+                      Time *
+                    </label>
+                    <select
+                      value={formData.time}
+                      onChange={(e) => setFormData({...formData, time: e.target.value})}
+                      style={{
+                        width: '100%',
+                        padding: '12px',
+                        border: '1px solid var(--color-border)',
+                        borderRadius: 'var(--radius)',
+                        background: 'var(--color-bg)',
+                        color: 'var(--color-text)',
+                        fontSize: '14px'
+                      }}
+                      required
+                    >
+                      <option value="">Select Time</option>
+                      <option value="9:00 AM">9:00 AM</option>
+                      <option value="10:00 AM">10:00 AM</option>
+                      <option value="11:00 AM">11:00 AM</option>
+                      <option value="12:00 PM">12:00 PM</option>
+                      <option value="1:00 PM">1:00 PM</option>
+                      <option value="2:00 PM">2:00 PM</option>
+                      <option value="3:00 PM">3:00 PM</option>
+                      <option value="4:00 PM">4:00 PM</option>
+                      <option value="5:00 PM">5:00 PM</option>
+                    </select>
+                  </div>
+                </div>
+
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '16px' }}>
+                  <div>
+                    <label style={{ display: 'block', marginBottom: '8px', fontSize: '14px', fontWeight: '600', color: 'var(--color-text)' }}>
+                      Phone
+                    </label>
+                    <input
+                      type="tel"
+                      value={formData.phone}
+                      onChange={(e) => setFormData({...formData, phone: e.target.value})}
+                      style={{
+                        width: '100%',
+                        padding: '12px',
+                        border: '1px solid var(--color-border)',
+                        borderRadius: 'var(--radius)',
+                        background: 'var(--color-bg)',
+                        color: 'var(--color-text)',
+                        fontSize: '14px'
+                      }}
+                      placeholder="+1-234-567-8901"
+                    />
+                  </div>
+
+                  <div>
+                    <label style={{ display: 'block', marginBottom: '8px', fontSize: '14px', fontWeight: '600', color: 'var(--color-text)' }}>
+                      Email
+                    </label>
+                    <input
+                      type="email"
+                      value={formData.email}
+                      onChange={(e) => setFormData({...formData, email: e.target.value})}
+                      style={{
+                        width: '100%',
+                        padding: '12px',
+                        border: '1px solid var(--color-border)',
+                        borderRadius: 'var(--radius)',
+                        background: 'var(--color-bg)',
+                        color: 'var(--color-text)',
+                        fontSize: '14px'
+                      }}
+                      placeholder="john.doe@email.com"
+                    />
+                  </div>
+                </div>
+
+                <div>
+                  <label style={{ display: 'block', marginBottom: '8px', fontSize: '14px', fontWeight: '600', color: 'var(--color-text)' }}>
+                    Status
+                  </label>
+                  <select
+                    value={formData.status}
+                    onChange={(e) => setFormData({...formData, status: e.target.value})}
+                    style={{
+                      width: '100%',
+                      padding: '12px',
+                      border: '1px solid var(--color-border)',
+                      borderRadius: 'var(--radius)',
+                      background: 'var(--color-bg)',
+                      color: 'var(--color-text)',
+                      fontSize: '14px'
+                    }}
+                  >
+                    <option value="scheduled">Scheduled</option>
+                    <option value="completed">Completed</option>
+                    <option value="cancelled">Cancelled</option>
+                  </select>
+                </div>
+
+                <div>
+                  <label style={{ display: 'block', marginBottom: '8px', fontSize: '14px', fontWeight: '600', color: 'var(--color-text)' }}>
+                    Notes
+                  </label>
+                  <textarea
+                    value={formData.notes}
+                    onChange={(e) => setFormData({...formData, notes: e.target.value})}
+                    style={{
+                      width: '100%',
+                      padding: '12px',
+                      border: '1px solid var(--color-border)',
+                      borderRadius: 'var(--radius)',
+                      background: 'var(--color-bg)',
+                      color: 'var(--color-text)',
+                      fontSize: '14px',
+                      minHeight: '80px',
+                      resize: 'vertical'
+                    }}
+                    placeholder="Additional notes about the test drive..."
+                  />
+                </div>
+              </div>
+
+              <div style={{ display: 'flex', gap: '12px', marginTop: '24px', justifyContent: 'flex-end' }}>
+                <button 
+                  type="button" 
+                  className="btn btn-outline" 
+                  onClick={() => setShowModal(false)}
+                >
+                  Cancel
+                </button>
+                <button type="submit" className="btn btn-primary">
+                  {editingTestDrive ? 'Update Test Drive' : 'Schedule Test Drive'}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
     </div>
   );
 };

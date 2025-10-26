@@ -1,21 +1,33 @@
-import { useState } from 'react';
-import { motion, AnimatePresence } from 'framer-motion';
+import { useState, useEffect } from 'react';
+import { motion } from 'framer-motion';
+import 'boxicons/css/boxicons.min.css';
 import './AuthPage.css';
 
 const AuthPage = ({ onNavigateHome }) => {
-  const [isSignIn, setIsSignIn] = useState(true);
   const [formData, setFormData] = useState({
     email: '',
     password: '',
-    fullName: '',
-    username: '',
-    confirmPassword: '',
-    role: 'dealer',
-    dealerCode: '',
     rememberMe: false
   });
-  const [errors, setErrors] = useState({});
-  const [loading, setLoading] = useState(false);
+  const [isLoading, setIsLoading] = useState(false);
+  const [currentImageIndex, setCurrentImageIndex] = useState(0);
+  const [showPassword, setShowPassword] = useState(false);
+
+  const carouselImages = [
+    '/images/tesla2.jpg',
+    '/images/image.jpg',
+    '/images/vinfast-vf8-18.jpg'
+  ];
+
+  useEffect(() => {
+    const interval = setInterval(() => {
+      setCurrentImageIndex((prevIndex) => 
+        prevIndex === carouselImages.length - 1 ? 0 : prevIndex + 1
+      );
+    }, 5000); // Change image every 5 seconds
+
+    return () => clearInterval(interval);
+  }, [carouselImages.length]);
 
   const handleInputChange = (e) => {
     const { name, value, type, checked } = e.target;
@@ -23,392 +35,164 @@ const AuthPage = ({ onNavigateHome }) => {
       ...prev,
       [name]: type === 'checkbox' ? checked : value
     }));
-    // Clear error when user types
-    if (errors[name]) {
-      setErrors(prev => {
-        const newErrors = { ...prev };
-        delete newErrors[name];
-        return newErrors;
-      });
-    }
-  };
-
-  const validateForm = () => {
-    const newErrors = {};
-    
-    if (!formData.email.trim()) {
-      newErrors.email = 'Email is required';
-    } else if (!/\S+@\S+\.\S+/.test(formData.email)) {
-      newErrors.email = 'Email is invalid';
-    }
-    
-    if (!formData.password.trim()) {
-      newErrors.password = 'Password is required';
-    } else if (formData.password.length < 6) {
-      newErrors.password = 'Password must be at least 6 characters';
-    }
-    
-    if (!isSignIn) {
-      if (!formData.fullName.trim()) {
-        newErrors.fullName = 'Full name is required';
-      }
-      if (!formData.username.trim()) {
-        newErrors.username = 'Username is required';
-      }
-      if (formData.password !== formData.confirmPassword) {
-        newErrors.confirmPassword = 'Passwords do not match';
-      }
-    }
-    
-    return Object.keys(newErrors).length === 0;
   };
 
   const handleSubmit = async (e) => {
     e.preventDefault();
-    
-    if (!validateForm()) {
-      setErrors(errors);
-      return;
-    }
-    
-    setLoading(true);
+    setIsLoading(true);
     
     // Simulate API call
     setTimeout(() => {
-      setLoading(false);
-      alert(isSignIn ? 'Sign In successful!' : 'Sign Up successful!');
-      // In real app, handle authentication here
-    }, 1500);
+      setIsLoading(false);
+      // Handle login logic here
+      console.log('Login data:', formData);
+    }, 2000);
   };
 
   return (
     <div className="auth-page">
-      {/* Background with overlay */}
+      {/* Background */}
       <div className="auth-background">
-        <div className="auth-overlay"></div>
-        <div className="energy-particles"></div>
+        <div className="background-overlay"></div>
       </div>
 
-      {/* Back to Home Button */}
-      {onNavigateHome && (
-        <motion.button
-          className="back-to-home"
-          onClick={onNavigateHome}
-          whileHover={{ scale: 1.1 }}
-          whileTap={{ scale: 0.9 }}
-          title="Back to Home"
-        >
-          ← Back
-        </motion.button>
-      )}
-
-      <div className="auth-container">
-        {/* Left side - Brand Section */}
+      {/* Centered Login Card */}
+      <div className="login-card-container">
         <motion.div
-          initial={{ opacity: 0, x: -50 }}
-          animate={{ opacity: 1, x: 0 }}
-          transition={{ duration: 0.8 }}
-          className="auth-brand"
+          className="login-card"
+          initial={{ opacity: 0, scale: 0.95 }}
+          animate={{ opacity: 1, scale: 1 }}
+          transition={{ duration: 0.5 }}
         >
-          <div className="brand-content">
-            <div className="brand-logo">
-              <span className="logo-icon-large">⚡</span>
-              <h1 className="brand-title">EVM</h1>
+          {/* Left Section - Image */}
+          <div className="card-left">
+            <div className="logo-container">
+              <span className="logo-text">EVM</span>
             </div>
-            <p className="brand-subtitle">Management System</p>
-            {isSignIn && (
-              <div className="brand-features">
-                <div className="feature-item">
-                  <span className="feature-icon">🔐</span>
-                  <span>Secure Authentication</span>
-                </div>
-                <div className="feature-item">
-                  <span className="feature-icon">⚡</span>
-                  <span>Fast Access</span>
-                </div>
-                <div className="feature-item">
-                  <span className="feature-icon">🛡️</span>
-                  <span>Enterprise Security</span>
-                </div>
+
+
+            <div className="image-container">
+              <motion.div 
+                className="car-image"
+                key={currentImageIndex}
+                initial={{ opacity: 0 }}
+                animate={{ opacity: 1 }}
+                transition={{ duration: 0.5 }}
+                style={{
+                  backgroundImage: `url(${carouselImages[currentImageIndex]})`
+                }}
+              ></motion.div>
+              <div className="image-overlay"></div>
+              
+              {/* Carousel Dots */}
+              <div className="carousel-dots">
+                {carouselImages.map((_, index) => (
+                  <button
+                    key={index}
+                    className={`dot ${index === currentImageIndex ? 'active' : ''}`}
+                    onClick={() => setCurrentImageIndex(index)}
+                  />
+                ))}
               </div>
-            )}
+            </div>
+            
+            <div className="brand-content">
+              <h1 className="brand-slogan">
+                Experience <span className="red-text">The Future</span>
+              </h1>
+              
+              <p className="brand-description">
+                Experience the most advanced electric vehicle management system. Connect with the future of the electric vehicle industry.
+              </p>
+            </div>
+          </div>
+
+          {/* Right Section - Login Form */}
+          <div className="card-right">
+            <div className="form-container">
+              <div className="form-header">
+                <h2 className="form-title">Login</h2>
+                <p className="form-subtitle">Access the EVM management system</p>
+              </div>
+
+              <form onSubmit={handleSubmit} className="login-form">
+                <div className="input-group">
+                  <i className="bx bx-user input-icon"></i>
+                  <input
+                    type="email"
+                    name="email"
+                    placeholder="Username or Email"
+                    value={formData.email}
+                    onChange={handleInputChange}
+                    className="form-input"
+                    required
+                  />
+                </div>
+
+                <div className="input-group">
+                  <i className="bx bx-lock input-icon"></i>
+                  <input
+                    type={showPassword ? "text" : "password"}
+                    name="password"
+                    placeholder="Password"
+                    value={formData.password}
+                    onChange={handleInputChange}
+                    className="form-input"
+                    required
+                  />
+                  <i 
+                    className={`bx ${showPassword ? 'bx-hide' : 'bx-show'} password-toggle`}
+                    onClick={() => setShowPassword(!showPassword)}
+                  ></i>
+                </div>
+
+                <div className="form-options">
+                  <label className="checkbox-container">
+                    <input
+                      type="checkbox"
+                      name="rememberMe"
+                      checked={formData.rememberMe}
+                      onChange={handleInputChange}
+                    />
+                    <span className="checkmark"></span>
+                    Remember me
+                  </label>
+                  <a href="#" className="forgot-password">Forgot password?</a>
+                </div>
+
+                <button 
+                  type="submit" 
+                  className={`login-button ${isLoading ? 'loading' : ''}`}
+                  disabled={isLoading}
+                >
+                  {isLoading ? (
+                    <>
+                      <i className="bx bx-loader-alt loading-icon"></i>
+                      Loading...
+                    </>
+                  ) : (
+                    'Login'
+                  )}
+                </button>
+
+                <motion.button 
+                  className="back-to-home"
+                  onClick={onNavigateHome}
+                  initial={{ opacity: 0 }}
+                  animate={{ opacity: 1 }}
+                  transition={{ delay: 1 }}
+                  whileHover={{ scale: 1.05 }}
+                  whileTap={{ scale: 0.95 }}
+                >
+                  <i className="bx bx-arrow-back"></i>
+                  Back to Home
+                </motion.button>
+              </form>
+            </div>
           </div>
         </motion.div>
-
-        {/* Right side - Form Section */}
-        <motion.div
-          initial={{ opacity: 0, x: 50 }}
-          animate={{ opacity: 1, x: 0 }}
-          transition={{ duration: 0.8 }}
-          className="auth-form-container"
-        >
-          <AnimatePresence mode="wait">
-            <motion.div
-              key={isSignIn ? 'signin' : 'signup'}
-              initial={{ opacity: 0, x: 20 }}
-              animate={{ opacity: 1, x: 0 }}
-              exit={{ opacity: 0, x: -20 }}
-              transition={{ duration: 0.3 }}
-              className="auth-form-box"
-            >
-              {/* Header */}
-              <div className="form-header">
-                <h2 className="form-title">
-                  {isSignIn ? 'Welcome Back' : 'Join the Future'}
-                </h2>
-                <p className="form-subtitle">
-                  {isSignIn 
-                    ? 'Sign in to your EVM account' 
-                    : 'Create your EVM account and start managing'}
-                </p>
-              </div>
-
-              {/* Form */}
-              <form onSubmit={handleSubmit} className="auth-form">
-                {/* Sign In Form */}
-                {isSignIn ? (
-                  <>
-                    <div className="form-group">
-                      <label className="form-label">Email</label>
-                      <div className="input-wrapper">
-                        <span className="input-icon">📧</span>
-                        <input
-                          type="email"
-                          name="email"
-                          value={formData.email}
-                          onChange={handleInputChange}
-                          className={`form-input ${errors.email ? 'error' : ''}`}
-                          placeholder="you@example.com"
-                        />
-                      </div>
-                      {errors.email && <span className="error-message">{errors.email}</span>}
-                    </div>
-
-                    <div className="form-group">
-                      <label className="form-label">Password</label>
-                      <div className="input-wrapper">
-                        <span className="input-icon">🔒</span>
-                        <input
-                          type="password"
-                          name="password"
-                          value={formData.password}
-                          onChange={handleInputChange}
-                          className={`form-input ${errors.password ? 'error' : ''}`}
-                          placeholder="••••••••"
-                        />
-                      </div>
-                      {errors.password && <span className="error-message">{errors.password}</span>}
-                    </div>
-
-                    <div className="form-options">
-                      <label className="checkbox-label">
-                        <input
-                          type="checkbox"
-                          name="rememberMe"
-                          checked={formData.rememberMe}
-                          onChange={handleInputChange}
-                          className="checkbox-input"
-                        />
-                        <span>Remember me</span>
-                      </label>
-                      <a href="#" className="forgot-password">Forgot password?</a>
-                    </div>
-
-                    <motion.button
-                      type="submit"
-                      className="btn-primary"
-                      whileHover={{ scale: 1.02 }}
-                      whileTap={{ scale: 0.98 }}
-                      disabled={loading}
-                    >
-                      {loading ? (
-                        <span className="btn-loading">
-                          <span className="loading-spinner"></span>
-                          Signing in...
-                        </span>
-                      ) : (
-                        'Sign In'
-                      )}
-                    </motion.button>
-
-                    <div className="form-separator">
-                      <span>or continue with</span>
-                    </div>
-
-                    <div className="social-buttons">
-                      <button type="button" className="social-btn">
-                        <span>G</span>
-                      </button>
-                      <button type="button" className="social-btn">
-                        <span>M</span>
-                      </button>
-                      <button type="button" className="social-btn">
-                        <span>A</span>
-                      </button>
-                    </div>
-
-                    <div className="form-footer">
-                      <span>Don't have an account? </span>
-                      <button 
-                        type="button"
-                        className="link-button"
-                        onClick={() => setIsSignIn(false)}
-                      >
-                        Sign Up
-                      </button>
-                    </div>
-                  </>
-                ) : (
-                  /* Sign Up Form */
-                  <>
-                    <div className="form-group">
-                      <label className="form-label">Full Name</label>
-                      <div className="input-wrapper">
-                        <span className="input-icon">👤</span>
-                        <input
-                          type="text"
-                          name="fullName"
-                          value={formData.fullName}
-                          onChange={handleInputChange}
-                          className={`form-input ${errors.fullName ? 'error' : ''}`}
-                          placeholder="John Doe"
-                        />
-                      </div>
-                      {errors.fullName && <span className="error-message">{errors.fullName}</span>}
-                    </div>
-
-                    <div className="form-group">
-                      <label className="form-label">Email</label>
-                      <div className="input-wrapper">
-                        <span className="input-icon">📧</span>
-                        <input
-                          type="email"
-                          name="email"
-                          value={formData.email}
-                          onChange={handleInputChange}
-                          className={`form-input ${errors.email ? 'error' : ''}`}
-                          placeholder="you@example.com"
-                        />
-                      </div>
-                      {errors.email && <span className="error-message">{errors.email}</span>}
-                    </div>
-
-                    <div className="form-group">
-                      <label className="form-label">Username</label>
-                      <div className="input-wrapper">
-                        <span className="input-icon">🗣️</span>
-                        <input
-                          type="text"
-                          name="username"
-                          value={formData.username}
-                          onChange={handleInputChange}
-                          className={`form-input ${errors.username ? 'error' : ''}`}
-                          placeholder="johndoe"
-                        />
-                      </div>
-                      {errors.username && <span className="error-message">{errors.username}</span>}
-                    </div>
-
-                    <div className="form-row">
-                      <div className="form-group">
-                        <label className="form-label">Password</label>
-                        <div className="input-wrapper">
-                          <span className="input-icon">🔒</span>
-                          <input
-                            type="password"
-                            name="password"
-                            value={formData.password}
-                            onChange={handleInputChange}
-                            className={`form-input ${errors.password ? 'error' : ''}`}
-                            placeholder="••••••••"
-                          />
-                        </div>
-                        {errors.password && <span className="error-message">{errors.password}</span>}
-                      </div>
-
-                      <div className="form-group">
-                        <label className="form-label">Confirm</label>
-                        <div className="input-wrapper">
-                          <span className="input-icon">✓</span>
-                          <input
-                            type="password"
-                            name="confirmPassword"
-                            value={formData.confirmPassword}
-                            onChange={handleInputChange}
-                            className={`form-input ${errors.confirmPassword ? 'error' : ''}`}
-                            placeholder="••••••••"
-                          />
-                        </div>
-                        {errors.confirmPassword && <span className="error-message">{errors.confirmPassword}</span>}
-                      </div>
-                    </div>
-
-                    <div className="form-group">
-                      <label className="form-label">Role</label>
-                      <div className="input-wrapper">
-                        <span className="input-icon">🎭</span>
-                        <select
-                          name="role"
-                          value={formData.role}
-                          onChange={handleInputChange}
-                          className="form-input"
-                        >
-                          <option value="dealer">Dealer Staff</option>
-                          <option value="manager">Manager</option>
-                          <option value="evm">EVM Staff</option>
-                        </select>
-                      </div>
-                    </div>
-
-                    <div className="form-group">
-                      <label className="form-label">Dealer Code (optional)</label>
-                      <div className="input-wrapper">
-                        <span className="input-icon">🏢</span>
-                        <input
-                          type="text"
-                          name="dealerCode"
-                          value={formData.dealerCode}
-                          onChange={handleInputChange}
-                          className="form-input"
-                          placeholder="Enter dealer code"
-                        />
-                      </div>
-                    </div>
-
-                    <motion.button
-                      type="submit"
-                      className="btn-primary"
-                      whileHover={{ scale: 1.02 }}
-                      whileTap={{ scale: 0.98 }}
-                      disabled={loading}
-                    >
-                      {loading ? (
-                        <span className="btn-loading">
-                          <span className="loading-spinner"></span>
-                          Creating account...
-                        </span>
-                      ) : (
-                        'Create Account'
-                      )}
-                    </motion.button>
-
-                    <div className="form-footer">
-                      <span>Already have an account? </span>
-                      <button 
-                        type="button"
-                        className="link-button"
-                        onClick={() => setIsSignIn(true)}
-                      >
-                        Sign In
-                      </button>
-                    </div>
-                  </>
-                )}
-              </form>
-            </motion.div>
-          </AnimatePresence>
-        </motion.div>
       </div>
+
     </div>
   );
 };

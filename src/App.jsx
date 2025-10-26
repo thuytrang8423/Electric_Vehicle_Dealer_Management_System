@@ -3,9 +3,28 @@ import './App.css'
 import HomePage from './components/HomePage'
 import AuthPage from './components/AuthPage'
 import ElectricVehicles from './components/ElectricVehicles'
-import DashboardApp from './components/DashboardApp'
+import DashboardApp from './components/dashboard-layout/DashboardApp'
 import { ToastContainer } from 'react-toastify'
 import 'react-toastify/dist/ReactToastify.css'
+
+// Global ToastContainer - wraps the entire app
+const AppWithToast = ({ children }) => (
+  <>
+    {children}
+    <ToastContainer
+      position="top-right"
+      autoClose={3000}
+      hideProgressBar={false}
+      newestOnTop={false}
+      closeOnClick
+      rtl={false}
+      pauseOnFocusLoss
+      draggable
+      pauseOnHover
+      theme="colored"
+    />
+  </>
+)
 
 function App() {
   const [currentPage, setCurrentPage] = useState('home')
@@ -37,10 +56,14 @@ function App() {
   };
 
   if (currentPage === 'auth') {
-    return <AuthPage 
-      onNavigateHome={() => setCurrentPage('home')}
-      onLoginSuccess={handleLoginSuccess}
-    />
+    return (
+      <AppWithToast>
+        <AuthPage 
+          onNavigateHome={() => setCurrentPage('home')}
+          onLoginSuccess={handleLoginSuccess}
+        />
+      </AppWithToast>
+    )
   }
 
   if (currentPage === 'vehicles') {
@@ -51,11 +74,15 @@ function App() {
   }
 
   if (currentPage === 'dashboard') {
-    return <DashboardApp user={loggedInUser} onLogout={handleLogout} />
+    return (
+      <AppWithToast>
+        <DashboardApp user={loggedInUser} onLogout={handleLogout} />
+      </AppWithToast>
+    )
   }
 
   return (
-    <>
+    <AppWithToast>
       <HomePage 
         onNavigateAuth={() => setCurrentPage('auth')}
         onNavigateVehicles={() => setCurrentPage('vehicles')}
@@ -67,19 +94,7 @@ function App() {
           }
         }}
       />
-      <ToastContainer
-        position="top-right"
-        autoClose={3000}
-        hideProgressBar={false}
-        newestOnTop={false}
-        closeOnClick
-        rtl={false}
-        pauseOnFocusLoss
-        draggable
-        pauseOnHover
-        theme="colored"
-      />
-    </>
+    </AppWithToast>
   )
 }
 

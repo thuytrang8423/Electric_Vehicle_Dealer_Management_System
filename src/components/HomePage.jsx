@@ -96,6 +96,7 @@ const HomePage = ({ onNavigateAuth, onNavigateVehicles, onNavigateContact, onNav
                 whileHover={{ scale: 1.05 }}
                 whileTap={{ scale: 0.95 }}
                 className="btn-hero-primary"
+                onClick={onNavigateVehicles}
               >
                 Explore EVs
               </motion.button>
@@ -103,6 +104,7 @@ const HomePage = ({ onNavigateAuth, onNavigateVehicles, onNavigateContact, onNav
                 whileHover={{ scale: 1.05 }}
                 whileTap={{ scale: 0.95 }}
                 className="btn-hero-secondary"
+                onClick={onNavigateAuth}
               >
                 Book a Test Drive
               </motion.button>
@@ -198,6 +200,7 @@ const HomePage = ({ onNavigateAuth, onNavigateVehicles, onNavigateContact, onNav
             whileHover={{ scale: 1.1 }}
             whileTap={{ scale: 0.9 }}
             className="btn-cta"
+            onClick={onNavigateAuth}
           >
             Get Started Today
           </motion.button>

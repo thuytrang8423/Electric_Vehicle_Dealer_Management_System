@@ -36,17 +36,17 @@ const Contact = ({ onNavigateHome, onNavigateAuth, onNavigateVehicles }) => {
     const newErrors = {};
     
     if (!formData.name.trim()) {
-      newErrors.name = 'Vui lòng nhập họ và tên';
+      newErrors.name = 'Please enter your full name';
     }
     
     if (!formData.email.trim()) {
-      newErrors.email = 'Vui lòng nhập email';
+      newErrors.email = 'Please enter your email';
     } else if (!/\S+@\S+\.\S+/.test(formData.email)) {
-      newErrors.email = 'Email không đúng định dạng';
+      newErrors.email = 'Please enter a valid email address';
     }
     
     if (!formData.message.trim()) {
-      newErrors.message = 'Vui lòng nhập nội dung tin nhắn';
+      newErrors.message = 'Please enter your message';
     }
     
     setErrors(newErrors);
@@ -69,7 +69,7 @@ const Contact = ({ onNavigateHome, onNavigateAuth, onNavigateVehicles }) => {
       setShowToast({
         show: true,
         type: 'success',
-        message: 'Tin nhắn đã gửi thành công ✅'
+        message: 'Message sent successfully ✅'
       });
       
       // Reset form
@@ -84,7 +84,7 @@ const Contact = ({ onNavigateHome, onNavigateAuth, onNavigateVehicles }) => {
       setShowToast({
         show: true,
         type: 'error',
-        message: 'Có lỗi xảy ra ⚠️'
+        message: 'An error occurred ⚠️'
       });
     } finally {
       setIsSubmitting(false);
@@ -132,7 +132,7 @@ const Contact = ({ onNavigateHome, onNavigateAuth, onNavigateVehicles }) => {
             Contact Us
           </h1>
           <p className="contact-subtitle">
-            Chúng tôi luôn sẵn sàng hỗ trợ bạn về quản lý xe điện
+            We are always ready to support you with electric vehicle management
           </p>
         </motion.div>
 
@@ -144,7 +144,7 @@ const Contact = ({ onNavigateHome, onNavigateAuth, onNavigateVehicles }) => {
             transition={{ duration: 0.6, delay: 0.2 }}
             className="contact-info-section"
           >
-            <h2 className="section-title">Thông tin liên hệ</h2>
+            <h2 className="section-title">Contact Information</h2>
             
             <div className="contact-info-grid">
               <div className="contact-info-card">
@@ -152,8 +152,8 @@ const Contact = ({ onNavigateHome, onNavigateAuth, onNavigateVehicles }) => {
                   <i className="bx bx-map"></i>
                 </div>
                 <div className="contact-details">
-                  <h3>Địa chỉ văn phòng</h3>
-                  <p>123 Đường ABC, Quận XYZ<br />TP. Hồ Chí Minh, Việt Nam</p>
+                  <h3>Office Address</h3>
+                  <p>FPT University HCMC<br />Ho Chi Minh City, Vietnam</p>
                 </div>
               </div>
 
@@ -162,7 +162,7 @@ const Contact = ({ onNavigateHome, onNavigateAuth, onNavigateVehicles }) => {
                   <i className="bx bx-phone"></i>
                 </div>
                 <div className="contact-details">
-                  <h3>Số điện thoại hỗ trợ</h3>
+                  <h3>Support Phone</h3>
                   <p>+84 123 456 789<br />+84 987 654 321</p>
                 </div>
               </div>
@@ -172,7 +172,7 @@ const Contact = ({ onNavigateHome, onNavigateAuth, onNavigateVehicles }) => {
                   <i className="bx bx-envelope"></i>
                 </div>
                 <div className="contact-details">
-                  <h3>Email liên hệ</h3>
+                  <h3>Contact Email</h3>
                   <p>support@evm.com<br />info@evm.com</p>
                 </div>
               </div>
@@ -196,11 +196,11 @@ const Contact = ({ onNavigateHome, onNavigateAuth, onNavigateVehicles }) => {
             transition={{ duration: 0.6, delay: 0.4 }}
             className="contact-form-section"
           >
-            <h2 className="section-title">Gửi tin nhắn cho chúng tôi</h2>
+            <h2 className="section-title">Send us a message</h2>
             
             <form onSubmit={handleSubmit} className="contact-form">
               <div className="form-group">
-                <label htmlFor="name">Họ & Tên *</label>
+                <label htmlFor="name">Full Name *</label>
                 <input
                   type="text"
                   id="name"
@@ -208,7 +208,7 @@ const Contact = ({ onNavigateHome, onNavigateAuth, onNavigateVehicles }) => {
                   value={formData.name}
                   onChange={handleInputChange}
                   className={errors.name ? 'error' : ''}
-                  placeholder="Nhập họ và tên của bạn"
+                  placeholder="Enter your full name"
                 />
                 {errors.name && <span className="error-message">{errors.name}</span>}
               </div>
@@ -222,32 +222,32 @@ const Contact = ({ onNavigateHome, onNavigateAuth, onNavigateVehicles }) => {
                   value={formData.email}
                   onChange={handleInputChange}
                   className={errors.email ? 'error' : ''}
-                  placeholder="Nhập địa chỉ email"
+                  placeholder="Enter your email address"
                 />
                 {errors.email && <span className="error-message">{errors.email}</span>}
               </div>
 
               <div className="form-group">
-                <label htmlFor="phone">Số điện thoại</label>
+                <label htmlFor="phone">Phone Number</label>
                 <input
                   type="tel"
                   id="phone"
                   name="phone"
                   value={formData.phone}
                   onChange={handleInputChange}
-                  placeholder="Nhập số điện thoại (tùy chọn)"
+                  placeholder="Enter your phone number (optional)"
                 />
               </div>
 
               <div className="form-group">
-                <label htmlFor="message">Nội dung tin nhắn *</label>
+                <label htmlFor="message">Message *</label>
                 <textarea
                   id="message"
                   name="message"
                   value={formData.message}
                   onChange={handleInputChange}
                   className={errors.message ? 'error' : ''}
-                  placeholder="Nhập nội dung tin nhắn của bạn..."
+                  placeholder="Enter your message..."
                   rows="6"
                 />
                 {errors.message && <span className="error-message">{errors.message}</span>}
@@ -263,12 +263,12 @@ const Contact = ({ onNavigateHome, onNavigateAuth, onNavigateVehicles }) => {
                 {isSubmitting ? (
                   <>
                     <i className="bx bx-loader-alt bx-spin"></i>
-                    Đang gửi...
+                    Sending...
                   </>
                 ) : (
                   <>
                     <i className="bx bx-send"></i>
-                    Gửi tin nhắn
+                    Send Message
                   </>
                 )}
               </motion.button>
@@ -283,17 +283,17 @@ const Contact = ({ onNavigateHome, onNavigateAuth, onNavigateVehicles }) => {
           transition={{ duration: 0.6, delay: 0.6 }}
           className="map-section"
         >
-          <h2 className="section-title">Vị trí văn phòng</h2>
+          <h2 className="section-title">Office Location</h2>
           <div className="map-container">
             <iframe
-              src="https://www.google.com/maps/embed?pb=!1m18!1m12!1m3!1d3919.325123456789!2d106.6297!3d10.8231!2m3!1f0!2f0!3f0!3m2!1i1024!2i768!4f13.1!3m3!1m2!1s0x31752a4567890abc%3A0x1234567890abcdef!2sHo%20Chi%20Minh%20City!5e0!3m2!1sen!2s!4v1234567890123!5m2!1sen!2s"
+              src="https://www.google.com/maps/embed?pb=!1m18!1m12!1m3!1d3918.6099415305193!2d106.80730807583886!3d10.841132857995213!2m3!1f0!2f0!3f0!3m2!1i1024!2i768!4f13.1!3m3!1m2!1s0x31752731176b07b1%3A0xb752b24b379bae5e!2sFPT%20University%20HCMC!5e0!3m2!1sen!2s!4v1761500982273!5m2!1sen!2s"
               width="100%"
               height="300"
               style={{ border: 0 }}
               allowFullScreen=""
               loading="lazy"
               referrerPolicy="no-referrer-when-downgrade"
-              title="EVM Office Location"
+              title="EVM Office Location - FPT University HCMC"
             />
           </div>
         </motion.div>

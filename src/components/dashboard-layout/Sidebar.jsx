@@ -39,7 +39,7 @@ const Sidebar = ({ user, activeItem, onItemClick }) => {
         return allItems.filter(item => 
           ['overview', 'activity', 'vehicles', 'quotes', 'orders', 'sales-contracts', 'customers', 'customer-feedback', 'test-drives', 'payments', 'debt-management', 'promotions', 'dealers', 'users', 'reports', 'settings'].includes(item.id)
         );
-      case 'evm-staff':
+      case 'evm-manager':
         // EVM Staff: Common features + vehicles (CRUD), vehicle-orders, vehicle-distribution, orders, customers, payments, promotions, dealers, users, reports, delivery-tracking
         return allItems.filter(item => 
           ['overview', 'activity', 'vehicles', 'vehicle-orders', 'vehicle-distribution', 'orders', 'customers', 'payments', 'promotions', 'dealers', 'users', 'reports', 'delivery-tracking', 'settings'].includes(item.id)

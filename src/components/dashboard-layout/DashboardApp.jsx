@@ -116,7 +116,7 @@ const DashboardApp = ({ user: propUser, onLogout }) => {
       case 'activity':
         return <ActivityHistory user={user} />;
       case 'vehicles':
-        if (user.role === 'evm-staff' || user.role === 'admin') {
+        if (user.role === 'evm-manager' || user.role === 'admin') {
           return <VehicleManagement user={user} />;
         }
         return <ProductCatalog user={user} />;
@@ -145,7 +145,7 @@ const DashboardApp = ({ user: propUser, onLogout }) => {
           </div>
         );
       case 'vehicle-orders':
-        if (user.role === 'evm-staff' || user.role === 'admin') {
+        if (user.role === 'evm-manager' || user.role === 'admin') {
           return <VehicleOrders user={user} />;
         }
         return (
@@ -157,7 +157,7 @@ const DashboardApp = ({ user: propUser, onLogout }) => {
           </div>
         );
       case 'delivery-tracking':
-        if (user.role === 'evm-staff' || user.role === 'admin') {
+        if (user.role === 'evm-manager' || user.role === 'admin') {
           return <DeliveryTracking user={user} />;
         }
         return (
@@ -169,7 +169,7 @@ const DashboardApp = ({ user: propUser, onLogout }) => {
           </div>
         );
       case 'vehicle-distribution':
-        if (user.role === 'evm-staff' || user.role === 'admin') {
+        if (user.role === 'evm-manager' || user.role === 'admin') {
           return <VehicleDistribution user={user} />;
         }
         return (

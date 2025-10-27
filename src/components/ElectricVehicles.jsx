@@ -1,11 +1,12 @@
 import { useState, useEffect } from 'react';
 import { motion } from 'framer-motion';
+import { useNavigate } from 'react-router-dom';
 import 'boxicons/css/boxicons.min.css';
 import './ElectricVehicles.css';
 import Footer from './Footer';
 import Navbar from './Navbar';
 
-const ElectricVehicles = ({ onNavigateHome, onNavigateAuth, onNavigateContact }) => {
+const ElectricVehicles = () => {
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedBrand, setSelectedBrand] = useState('All Brands');
   const [selectedPrice, setSelectedPrice] = useState('Price Range');
@@ -139,13 +140,7 @@ const ElectricVehicles = ({ onNavigateHome, onNavigateAuth, onNavigateContact })
   return (
     <div className="electric-vehicles-page">
       {/* Navbar */}
-      <Navbar 
-        onNavigateAuth={onNavigateAuth} 
-        onNavigateVehicles={() => {}} 
-        onNavigateContact={onNavigateContact} 
-        onNavigateHome={onNavigateHome}
-        currentPage="vehicles"
-      />
+      <Navbar />
 
       {/* Page Header */}
       <div className="page-header">

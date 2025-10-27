@@ -1,6 +1,6 @@
 import React, { useState, useRef, useEffect } from 'react';
-import { useTheme } from '../hooks/useTheme';
-import NotificationDropdown from './common/NotificationDropdown';
+import { useTheme } from '../../hooks/useTheme';
+import NotificationDropdown from '../common/NotificationDropdown';
 import 'boxicons/css/boxicons.min.css';
 
 const Header = ({ user, onLogout, onProfileClick, notifications, onMarkAsRead, onMarkAllAsRead, onDeleteNotification }) => {

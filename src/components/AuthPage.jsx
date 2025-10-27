@@ -1,37 +1,14 @@
 import { useState, useEffect } from 'react';
 import { motion } from 'framer-motion';
+import { useNavigate } from 'react-router-dom';
 import 'boxicons/css/boxicons.min.css';
 import './AuthPage.css';
+import { authAPI, handleAPIError } from '../utils/api';
+import { showErrorToast } from '../utils/toast';
 
-// Mock users database
-const mockUsers = [
-  {
-    email: 'dealer@staff.com',
-    password: 'staff123',
-    name: 'John Smith',
-    role: 'dealer-staff'
-  },
-  {
-    email: 'manager@dealer.com',
-    password: 'manager123',
-    name: 'Jane Doe',
-    role: 'dealer-manager'
-  },
-  {
-    email: 'staff@evm.com',
-    password: 'evm123',
-    name: 'Mike Johnson',
-    role: 'evm-staff'
-  },
-  {
-    email: 'admin@evms.com',
-    password: 'admin123',
-    name: 'Sarah Chen',
-    role: 'admin'
-  }
-];
 
-const AuthPage = ({ onNavigateHome, onLoginSuccess }) => {
+const AuthPage = ({ onLoginSuccess }) => {
+  const navigate = useNavigate();
   const [formData, setFormData] = useState({
     email: '',
     password: '',
@@ -69,30 +46,41 @@ const AuthPage = ({ onNavigateHome, onLoginSuccess }) => {
     e.preventDefault();
     setIsLoading(true);
     
-    // Simulate API call
-    setTimeout(() => {
-      // Find user in mock database
-      const user = mockUsers.find(
-        u => u.email === formData.email && u.password === formData.password
-      );
-
-      if (user) {
-        // Store user in localStorage
-        localStorage.setItem('currentUser', JSON.stringify({
-          name: user.name,
-          email: user.email,
-          role: user.role
-        }));
-        setIsLoading(false);
-        // Call onLoginSuccess callback with user data
-        if (onLoginSuccess) {
-          onLoginSuccess(user);
-        }
-      } else {
-        setIsLoading(false);
-        alert('Invalid credentials');
-      }
-    }, 1500);
+    try {
+      const userData = await authAPI.login(formData.email, formData.password);
+      
+      // Store user in localStorage
+      const userToStore = {
+        id: userData['user Id'] || userData.userId || userData.id || userData.user?.id,
+        name: userData.name || userData.user?.name,
+        email: userData.email || userData.user?.email,
+        role: userData.role || userData.user?.role,
+        token: userData.token
+      };
+      
+      localStorage.setItem('currentUser', JSON.stringify(userToStore));
+      
+      setIsLoading(false);
+      
+      // Call onLoginSuccess callback with user data
+      if (onLoginSuccess) {
+        onLoginSuccess({
+          id: userData['user Id'] || userData.userId || userData.id || userData.user?.id,
+          name: userData.name || userData.user?.name,
+          email: userData.email || userData.user?.email,
+          role: userData.role || userData.user?.role
+        });
+      }      
+      // Navigate to dashboard after successful login
+      navigate('/dashboard');
+    } catch (error) {
+      console.error('Login failed:', error);
+      setIsLoading(false);
+      
+      // Show API error message
+      const errorMessage = handleAPIError(error);
+      showErrorToast(errorMessage);
+    }
   };
 
   return (
@@ -107,7 +95,7 @@ const AuthPage = ({ onNavigateHome, onLoginSuccess }) => {
         {/* Back to Home Button - Above Form */}
         <motion.button 
           className="back-to-home-above-form"
-          onClick={onNavigateHome}
+          onClick={() => navigate('/')}
           initial={{ opacity: 0, y: -20 }}
           animate={{ opacity: 1, y: 0 }}
           transition={{ delay: 0.2 }}

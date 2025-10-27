@@ -1,12 +1,14 @@
 import { useState, useEffect } from 'react';
 import { motion } from 'framer-motion';
+import { useNavigate } from 'react-router-dom';
 import 'boxicons/css/boxicons.min.css';
 import './AuthPage.css';
 import { authAPI, handleAPIError } from '../utils/api';
 import { showErrorToast } from '../utils/toast';
 
 
-const AuthPage = ({ onNavigateHome, onLoginSuccess }) => {
+const AuthPage = ({ onLoginSuccess }) => {
+  const navigate = useNavigate();
   const [formData, setFormData] = useState({
     email: '',
     password: '',
@@ -69,6 +71,9 @@ const AuthPage = ({ onNavigateHome, onLoginSuccess }) => {
           role: userData.role || userData.user?.role
         });
       }
+      
+      // Navigate to dashboard after successful login
+      navigate('/dashboard');
     } catch (error) {
       console.error('Login failed:', error);
       setIsLoading(false);
@@ -206,7 +211,7 @@ const AuthPage = ({ onNavigateHome, onLoginSuccess }) => {
 
                 <motion.button 
                   className="back-to-home"
-                  onClick={onNavigateHome}
+                  onClick={() => navigate('/')}
                   initial={{ opacity: 0 }}
                   animate={{ opacity: 1 }}
                   transition={{ delay: 1 }}

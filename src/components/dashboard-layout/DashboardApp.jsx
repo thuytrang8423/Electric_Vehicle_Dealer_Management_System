@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { useTheme } from '../../hooks/useTheme';
 import Sidebar from './Sidebar';
 import Header from './Header';
@@ -14,11 +15,15 @@ import PaymentManagement from '../common/PaymentManagement';
 import PromotionManagement from '../common/PromotionManagement';
 import DealerManagement from '../common/DealerManagement';
 import Reports from '../common/Reports';
+import DeliveryTracking from '../common/DeliveryTracking';
+import CustomerFeedback from '../common/CustomerFeedback';
+import DebtManagement from '../common/DebtManagement';
 
 // Dealer Staff components
 import ProductCatalog from '../dealer-staff/ProductCatalog';
 import Quotes from '../dealer-staff/Quotes';
 import Orders from '../dealer-staff/Orders';
+import SalesContracts from '../dealer-staff/SalesContracts';
 
 // Admin components
 import UserManagement from '../admin/UserManagement';
@@ -26,11 +31,14 @@ import SystemLogs from '../admin/SystemLogs';
 
 // EVM Staff components
 import VehicleManagement from '../evm-staff/VehicleManagement';
+import VehicleOrders from '../evm-staff/VehicleOrders';
+import VehicleDistribution from '../evm-staff/VehicleDistribution';
 
 // Dealer Manager components
 import ApprovalSystem from '../dealer-manager/ApprovalSystem';
 
 const DashboardApp = ({ user: propUser, onLogout }) => {
+  const navigate = useNavigate();
   const { isDarkMode } = useTheme();
   const [activeItem, setActiveItem] = useState('overview');
   const [showProfileModal, setShowProfileModal] = useState(false);
@@ -72,12 +80,8 @@ const DashboardApp = ({ user: propUser, onLogout }) => {
   };
 
   const handleLogout = () => {
-    if (onLogout) {
-      onLogout();
-    } else {
-      localStorage.removeItem('currentUser');
-      window.location.href = '/';
-    }
+    localStorage.removeItem('currentUser');
+    navigate('/');
   };
 
   const handleProfileClick = () => {
@@ -128,6 +132,54 @@ const DashboardApp = ({ user: propUser, onLogout }) => {
             </div>
           </div>
         );
+      case 'sales-contracts':
+        if (user.role === 'dealer-staff' || user.role === 'dealer-manager' || user.role === 'admin') {
+          return <SalesContracts user={user} />;
+        }
+        return (
+          <div className="main">
+            <div className="card">
+              <h2>Sales Contracts</h2>
+              <p>Access restricted to dealer staff and managers.</p>
+            </div>
+          </div>
+        );
+      case 'vehicle-orders':
+        if (user.role === 'evm-staff' || user.role === 'admin') {
+          return <VehicleOrders user={user} />;
+        }
+        return (
+          <div className="main">
+            <div className="card">
+              <h2>Vehicle Orders</h2>
+              <p>Access restricted to EVM staff.</p>
+            </div>
+          </div>
+        );
+      case 'delivery-tracking':
+        if (user.role === 'evm-staff' || user.role === 'admin') {
+          return <DeliveryTracking user={user} />;
+        }
+        return (
+          <div className="main">
+            <div className="card">
+              <h2>Delivery Tracking</h2>
+              <p>Access restricted to EVM staff.</p>
+            </div>
+          </div>
+        );
+      case 'vehicle-distribution':
+        if (user.role === 'evm-staff' || user.role === 'admin') {
+          return <VehicleDistribution user={user} />;
+        }
+        return (
+          <div className="main">
+            <div className="card">
+              <h2>Vehicle Distribution</h2>
+              <p>Access restricted to EVM staff.</p>
+            </div>
+          </div>
+        );
       case 'quotes':
         if (user.role === 'dealer-staff' || user.role === 'admin') {
           return <Quotes user={user} />;
@@ -145,10 +197,14 @@ const DashboardApp = ({ user: propUser, onLogout }) => {
         );
       case 'customers':
         return <CustomerManagement user={user} />;
+      case 'customer-feedback':
+        return <CustomerFeedback user={user} />;
       case 'test-drives':
         return <TestDriveManagement user={user} />;
       case 'payments':
         return <PaymentManagement user={user} />;
+      case 'debt-management':
+        return <DebtManagement user={user} />;
       case 'promotions':
         return <PromotionManagement user={user} />;
       case 'dealers':

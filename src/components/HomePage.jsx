@@ -1,9 +1,11 @@
 import { useState, useEffect } from 'react';
 import { motion } from 'framer-motion';
+import { Link, useNavigate } from 'react-router-dom';
 import 'boxicons/css/boxicons.min.css';
 import './HomePage.css';
 
-const HomePage = ({ onNavigateAuth, onNavigateVehicles, onNavigateDashboard }) => {
+const HomePage = ({ loggedInUser, onLogout }) => {
+  const navigate = useNavigate();
   const [isScrolled, setIsScrolled] = useState(false);
 
   useEffect(() => {
@@ -74,24 +76,47 @@ const HomePage = ({ onNavigateAuth, onNavigateVehicles, onNavigateDashboard }) =
           </div>
           <ul className="nav-menu">
             <li className="nav-item active">Home</li>
-            <li className="nav-item" onClick={onNavigateVehicles} style={{ cursor: 'pointer' }}>Electric Vehicles</li>
+            <li className="nav-item">
+              <Link to="/vehicles" style={{ textDecoration: 'none', color: 'inherit' }}>
+                Electric Vehicles
+              </Link>
+            </li>
             <li className="nav-item">Technology</li>
             <li className="nav-item">Dealer</li>
             <li className="nav-item">Contact</li>
           </ul>
           <div className="nav-buttons">
-            <button 
-              className="btn-login"
-              onClick={onNavigateAuth}
-            >
-              Login
-            </button> 
-            <button 
-              className="btn-register"
-              onClick={onNavigateAuth}
-            >
-              Test Drive              
-            </button>
+            {loggedInUser ? (
+              <>
+                <button 
+                  className="btn-login"
+                  onClick={() => navigate('/dashboard')}
+                >
+                  Dashboard
+                </button>
+                <button 
+                  className="btn-register"
+                  onClick={onLogout}
+                >
+                  Logout
+                </button>
+              </>
+            ) : (
+              <>
+                <button 
+                  className="btn-login"
+                  onClick={() => navigate('/auth')}
+                >
+                  Login
+                </button> 
+                <button 
+                  className="btn-register"
+                  onClick={() => navigate('/auth')}
+                >
+                  Test Drive              
+                </button>
+              </>
+            )}
           </div>
         </div>
       </nav>

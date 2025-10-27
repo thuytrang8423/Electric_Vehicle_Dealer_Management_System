@@ -1,10 +1,12 @@
 import { useState, useEffect } from 'react';
 import { motion } from 'framer-motion';
+import { useNavigate } from 'react-router-dom';
 import 'boxicons/css/boxicons.min.css';
 import './ElectricVehicles.css';
 import Footer from './Footer';
 
-const ElectricVehicles = ({ onNavigateHome, onNavigateAuth }) => {
+const ElectricVehicles = () => {
+  const navigate = useNavigate();
   const [isScrolled, setIsScrolled] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedBrand, setSelectedBrand] = useState('All Brands');
@@ -150,18 +152,18 @@ const ElectricVehicles = ({ onNavigateHome, onNavigateAuth }) => {
       {/* Navbar */}
       <nav className={`navbar ${isScrolled ? 'scrolled' : ''}`}>
         <div className="nav-container">
-          <div className="logo" onClick={onNavigateHome} style={{ cursor: 'pointer' }}>
+          <div className="logo" onClick={() => navigate('/')} style={{ cursor: 'pointer' }}>
             <span className="logo-text">EVM</span>
           </div>
           <ul className="nav-menu">
-            <li className="nav-item" onClick={() => { onNavigateHome(); window.scrollTo(0, 0); }} style={{ cursor: 'pointer' }}>Home</li>
+            <li className="nav-item" onClick={() => { navigate('/'); window.scrollTo(0, 0); }} style={{ cursor: 'pointer' }}>Home</li>
             <li className="nav-item active">Electric Vehicles</li>
             <li className="nav-item" onClick={() => window.scrollTo(0, 0)} style={{ cursor: 'pointer' }}>Technology</li>
             <li className="nav-item" onClick={() => window.scrollTo(0, 0)} style={{ cursor: 'pointer' }}>Dealer</li>
             <li className="nav-item" onClick={() => window.scrollTo(0, 0)} style={{ cursor: 'pointer' }}>Contact</li>
           </ul>
           <div className="nav-buttons">
-            <button className="btn-login" onClick={onNavigateAuth}>Login</button>
+            <button className="btn-login" onClick={() => navigate('/auth')}>Login</button>
           </div>
         </div>
       </nav>

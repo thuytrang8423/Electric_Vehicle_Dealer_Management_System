@@ -7,6 +7,7 @@ export { customersAPI } from './customersAPI';
 export { promotionsAPI } from './promotionsAPI';
 export { dealersAPI } from './dealersAPI';
 export { usersAPI } from './usersAPI';
+export { default as auditLogsAPI } from './auditLogsAPI';
 
 // Export utilities
 export { handleAPIError, API_BASE_URL, apiClient } from '../apiConfig';

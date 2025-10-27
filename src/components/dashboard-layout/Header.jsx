@@ -26,7 +26,7 @@ const Header = ({ user, onLogout, onProfileClick, notifications, onMarkAsRead, o
     const roleMap = {
       'dealer-staff': 'Dealer Staff',
       'dealer-manager': 'Dealer Manager',
-      'evm-staff': 'EVM Staff',
+      'evm-manager': 'EVM Manager',
       'admin': 'Administrator'
     };
     return roleMap[role] || role;

@@ -52,6 +52,11 @@ const Sidebar = ({ user, activeItem, onItemClick }) => {
         return allItems.filter(item => 
           ['overview', 'activity', 'vehicles', 'vehicle-management', 'vehicle-types', 'vehicle-orders', 'vehicle-distribution', 'orders', 'customers', 'payments', 'promotions', 'dealers', 'users', 'reports', 'delivery-tracking', 'settings'].includes(item.id)
         );
+      case 'evm-manager':
+        // EVM Manager: Same as EVM Staff but with additional management permissions
+        return allItems.filter(item => 
+          ['overview', 'activity', 'vehicles', 'vehicle-management', 'vehicle-types', 'vehicle-orders', 'vehicle-distribution', 'orders', 'customers', 'payments', 'promotions', 'dealers', 'users', 'reports', 'delivery-tracking', 'settings'].includes(item.id)
+        );
       case 'admin':
         // Admin: Full system access including logs
         return allItems;

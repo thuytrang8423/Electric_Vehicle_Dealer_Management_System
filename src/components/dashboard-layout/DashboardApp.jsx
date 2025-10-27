@@ -13,7 +13,7 @@ import CustomerManagement from '../common/CustomerManagement';
 import TestDriveManagement from '../common/TestDriveManagement';
 import PaymentManagement from '../common/PaymentManagement';
 import PromotionManagement from '../common/PromotionManagement';
-import DealerManagement from '../common/DealerManagement';
+import DealerManagement from '../admin/dealers/DealerManagement';
 import Reports from '../common/Reports';
 import DeliveryTracking from '../common/DeliveryTracking';
 import CustomerFeedback from '../common/CustomerFeedback';
@@ -26,7 +26,7 @@ import Orders from '../dealer-staff/Orders';
 import SalesContracts from '../dealer-staff/SalesContracts';
 
 // Admin components
-import UserManagement from '../admin/UserManagement';
+import UserManagement from '../admin/users/UserManagement';
 import AuditLogs from '../admin/AuditLogs';
 
 // EVM Staff components
@@ -120,7 +120,7 @@ const DashboardApp = ({ user: propUser, onLogout }) => {
       case 'vehicles':
         return <ProductCatalog user={user} />;
       case 'vehicle-management':
-        if (user.role === 'EVM_MANAGER' || user.role === 'ADMIN') {
+        if (user.role === 'EVM_MANAGER' || user.role === 'ADMIN' || user.role === 'evm-staff' || user.role === 'admin') {
           return <VehicleManagement user={user} />;
         }
       case 'vehicle-types':
@@ -172,7 +172,7 @@ const DashboardApp = ({ user: propUser, onLogout }) => {
           </div>
         );
       case 'delivery-tracking':
-        if (user.role === 'evm-staff' || user.role === 'admin') {
+        if (user.role === 'evm-manager' || user.role === 'admin') {
           return <DeliveryTracking user={user} />;
         }
         return (
@@ -184,7 +184,7 @@ const DashboardApp = ({ user: propUser, onLogout }) => {
           </div>
         );
       case 'vehicle-distribution':
-        if (user.role === 'evm-staff' || user.role === 'admin') {
+        if (user.role === 'evm-manager' || user.role === 'admin') {
           return <VehicleDistribution user={user} />;
         }
         return (

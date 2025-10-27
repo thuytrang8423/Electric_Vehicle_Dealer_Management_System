@@ -27,15 +27,17 @@ import SalesContracts from '../dealer-staff/SalesContracts';
 
 // Admin components
 import UserManagement from '../admin/UserManagement';
-import SystemLogs from '../admin/SystemLogs';
+import AuditLogs from '../admin/AuditLogs';
 
 // EVM Staff components
 import VehicleManagement from '../evm-staff/VehicleManagement';
+import VehicleTypeManagement from '../evm-staff/VehicleTypeManagement';
 import VehicleOrders from '../evm-staff/VehicleOrders';
 import VehicleDistribution from '../evm-staff/VehicleDistribution';
 
 // Dealer Manager components
 import ApprovalSystem from '../dealer-manager/ApprovalSystem';
+
 
 const DashboardApp = ({ user: propUser, onLogout }) => {
   const navigate = useNavigate();
@@ -116,12 +118,25 @@ const DashboardApp = ({ user: propUser, onLogout }) => {
       case 'activity':
         return <ActivityHistory user={user} />;
       case 'vehicles':
-        if (user.role === 'evm-staff' || user.role === 'admin') {
+        return <ProductCatalog user={user} />;
+      case 'vehicle-management':
+        if (user.role === 'EVM_MANAGER' || user.role === 'ADMIN') {
           return <VehicleManagement user={user} />;
         }
-        return <ProductCatalog user={user} />;
+      case 'vehicle-types':
+        if (user.role === 'EVM_MANAGER' || user.role === 'ADMIN' || user.role === 'evm-staff' || user.role === 'admin') {
+          return <VehicleTypeManagement user={user} />;
+        }
+        return (
+          <div className="main">
+            <div className="card">
+              <h2>Vehicle Types</h2>
+              <p>Access restricted to EVM staff.</p>
+            </div>
+          </div>
+        );
       case 'orders':
-        if (user.role === 'dealer-staff' || user.role === 'admin') {
+        if (user.role === 'dealer-staff' || user.role === 'dealer-manager' || user.role === 'evm-staff' || user.role === 'admin') {
           return <Orders user={user} />;
         }
         return (
@@ -145,7 +160,7 @@ const DashboardApp = ({ user: propUser, onLogout }) => {
           </div>
         );
       case 'vehicle-orders':
-        if (user.role === 'evm-staff' || user.role === 'admin') {
+        if (user.role === 'evm-staff' || user.role === 'EVM_MANAGER' || user.role === 'ADMIN' || user.role === 'admin') {
           return <VehicleOrders user={user} />;
         }
         return (
@@ -211,8 +226,8 @@ const DashboardApp = ({ user: propUser, onLogout }) => {
         return <DealerManagement user={user} />;
       case 'users':
         return <UserManagement user={user} />;
-      case 'logs':
-        return <SystemLogs user={user} />;
+      case 'audit-logs':
+        return <AuditLogs user={user} />;
       case 'reports':
         return <Reports user={user} />;
       case 'settings':

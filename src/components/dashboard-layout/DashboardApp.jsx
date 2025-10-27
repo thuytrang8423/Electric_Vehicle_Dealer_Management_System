@@ -9,7 +9,7 @@ import '../../styles/dashboard.css';
 // Common components
 import Profile from '../common/Profile';
 import ActivityHistory from '../common/ActivityHistory';
-import CustomerManagement from '../common/CustomerManagement';
+import CustomerManagement from '../dealer-staff/customers/CustomerManagement';
 import TestDriveManagement from '../common/TestDriveManagement';
 import PaymentManagement from '../common/PaymentManagement';
 import PromotionManagement from '../common/PromotionManagement';

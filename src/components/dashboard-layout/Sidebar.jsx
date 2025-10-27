@@ -67,6 +67,7 @@ const Sidebar = ({ user, activeItem, onItemClick }) => {
     // Role-based filtering based on requirements
     switch (role) {
       case 'dealer-staff':
+      case 'DEALER_STAFF':
         // Dealer Staff: Common features + vehicles (catalog), quotes, orders, sales-contracts, customers, test-drives, view payments/promotions, customer-feedback
         return allItems.filter(item => 
           ['overview', 'activity', 'vehicles', 'quotes', 'orders', 'sales-contracts', 'customers', 'customer-feedback', 'test-drives', 'payments', 'promotions', 'settings'].includes(item.id)
@@ -78,9 +79,10 @@ const Sidebar = ({ user, activeItem, onItemClick }) => {
           ['overview', 'activity', 'vehicles', 'vehicle-management', 'vehicle-types', 'vehicle-orders', 'vehicle-distribution', 'quotes', 'orders', 'sales-contracts', 'payments', 'debt-management', 'promotions', 'dealers', 'users', 'audit-logs', 'reports', 'delivery-tracking', 'settings'].includes(item.id)
         );
       case 'dealer-manager':
-        // Dealer Manager: All dealer staff permissions + dealers, users (staff management), reports, debt-management
+      case 'DEALER_MANAGER':
+        // Dealer Manager: All dealer staff permissions + reports, debt-management
         return allItems.filter(item => 
-          ['overview', 'activity', 'vehicles', 'quotes', 'orders', 'sales-contracts', 'customers', 'customer-feedback', 'test-drives', 'payments', 'debt-management', 'promotions', 'dealers', 'users', 'reports', 'settings'].includes(item.id)
+          ['overview', 'activity', 'vehicles', 'quotes', 'orders', 'sales-contracts', 'customers', 'customer-feedback', 'test-drives', 'payments', 'debt-management', 'promotions', 'reports', 'settings'].includes(item.id)
         );
       case 'evm-staff':
         // EVM Staff: Common features + vehicles (CRUD), vehicle-management (CRUD), vehicle-types (CRUD), vehicle-orders, vehicle-distribution, orders, customers, payments, promotions, dealers, users, reports, delivery-tracking
@@ -187,9 +189,11 @@ const Sidebar = ({ user, activeItem, onItemClick }) => {
       </div>
       
       <nav className="sidebar__menu">
-        {Object.keys(groupLabels).map(groupName => 
-          renderGroup(groupName, groupedItems[groupName] || [])
-        )}
+        {Object.keys(groupedItems)
+          .filter(groupName => groupedItems[groupName] && groupedItems[groupName].length > 0)
+          .map(groupName => 
+            renderGroup(groupName, groupedItems[groupName] || [])
+          )}
       </nav>
     </div>
   );

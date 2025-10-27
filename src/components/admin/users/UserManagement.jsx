@@ -1,10 +1,11 @@
 import React, { useState, useEffect } from 'react';
-import { usersAPI } from '../../utils/api/usersAPI';
-import { showSuccessToast, showErrorToast } from '../../utils/toast';
-import { handleAPIError } from '../../utils/apiConfig';
+import { usersAPI } from '../../../utils/api/usersAPI';
+import { showSuccessToast, showErrorToast } from '../../../utils/toast';
+import { handleAPIError } from '../../../utils/apiConfig';
 import CreateAccountUser from './CreateAccountUser';
 import EditAccountUser from './EditAccountUser';
 import DeleteUserModal from './DeleteUserModal';
+import Pagination from '../../common/Pagination';
 import 'boxicons/css/boxicons.min.css';
 
 const UserManagement = ({ user }) => {
@@ -18,6 +19,8 @@ const UserManagement = ({ user }) => {
   const [showDeleteModal, setShowDeleteModal] = useState(false);
   const [editingUser, setEditingUser] = useState(null);
   const [deletingUser, setDeletingUser] = useState(null);
+  const [currentPage, setCurrentPage] = useState(1);
+  const [itemsPerPage] = useState(6);
 
   // Fetch users on component mount
   useEffect(() => {
@@ -79,6 +82,21 @@ const UserManagement = ({ user }) => {
     const matchesStatus = filterStatus === 'all' || normalizeStatus(u.status) === normalizeStatus(filterStatus);
     return matchesSearch && matchesRole && matchesStatus;
   });
+
+  // Pagination logic
+  const totalPages = Math.ceil(filteredUsers.length / itemsPerPage);
+  const startIndex = (currentPage - 1) * itemsPerPage;
+  const endIndex = startIndex + itemsPerPage;
+  const paginatedUsers = filteredUsers.slice(startIndex, endIndex);
+
+  // Reset to first page when filters change
+  useEffect(() => {
+    setCurrentPage(1);
+  }, [searchTerm, filterRole, filterStatus]);
+
+  const handlePageChange = (page) => {
+    setCurrentPage(page);
+  };
 
   const getStatusColor = (status) => {
     const normalizedStatus = normalizeStatus(status);
@@ -144,7 +162,7 @@ const UserManagement = ({ user }) => {
 
   const handleDeleteUser = (userToDelete) => {
     // Prevent user from deleting themselves
-    if (user && (user.id === userToDelete.id || user.userId === userToDelete.userId)) {
+    if (isCurrentUser(userToDelete)) {
       showErrorToast('You cannot delete your own account');
       return;
     }
@@ -171,6 +189,17 @@ const UserManagement = ({ user }) => {
   const cancelDeleteUser = () => {
     setShowDeleteModal(false);
     setDeletingUser(null);
+  };
+
+  // Helper function to check if user is trying to delete themselves
+  const isCurrentUser = (userItem) => {
+    if (!user) return false;
+    
+    // Check multiple possible ID fields
+    const currentUserId = user.id || user.userId;
+    const itemUserId = userItem.id || userItem.userId;
+    
+    return currentUserId === itemUserId;
   };
 
 
@@ -335,7 +364,7 @@ const UserManagement = ({ user }) => {
                   </tr>
                 </thead>
                 <tbody>
-                  {filteredUsers.map((userItem) => (
+                  {paginatedUsers.map((userItem) => (
                     <tr key={userItem.id || userItem.userId} style={{ borderBottom: '1px solid var(--color-border)' }}>
                       <td style={{ padding: '12px', fontSize: '14px', fontWeight: '600', color: 'var(--color-text)' }}>{userItem.fullName}</td>
                       <td style={{ padding: '12px', fontSize: '14px', color: 'var(--color-text)' }}>{userItem.email}</td>
@@ -390,29 +419,32 @@ const UserManagement = ({ user }) => {
                           >
                             <i className="bx bx-edit"></i>
                           </button>
-                          <button 
-                            className="btn btn-outline" 
-                            style={{ 
-                              padding: '6px', 
-                              fontSize: '14px', 
-                              color: 'var(--color-error)', 
-                              background: 'transparent',
-                              transition: 'all 0.2s ease'
-                            }}
-                            onMouseEnter={(e) => {
-                              e.target.style.background = 'transparent';
-                              e.target.querySelector('i').style.transform = 'scale(1.2)';
-                              e.target.querySelector('i').style.transition = 'transform 0.2s ease';
-                            }}
-                            onMouseLeave={(e) => {
-                              e.target.style.background = 'transparent';
-                              e.target.querySelector('i').style.transform = 'scale(1)';
-                            }}
-                            onClick={() => handleDeleteUser(userItem)}
-                            title="Delete User"
-                          >
-                            <i className="bx bx-trash"></i>
-                          </button>
+                          {/* Only show delete button if user is not deleting themselves */}
+                          {!isCurrentUser(userItem) && (
+                            <button 
+                              className="btn btn-outline" 
+                              style={{ 
+                                padding: '6px', 
+                                fontSize: '14px', 
+                                color: 'var(--color-error)', 
+                                background: 'transparent',
+                                transition: 'all 0.2s ease'
+                              }}
+                              onMouseEnter={(e) => {
+                                e.target.style.background = 'transparent';
+                                e.target.querySelector('i').style.transform = 'scale(1.2)';
+                                e.target.querySelector('i').style.transition = 'transform 0.2s ease';
+                              }}
+                              onMouseLeave={(e) => {
+                                e.target.style.background = 'transparent';
+                                e.target.querySelector('i').style.transform = 'scale(1)';
+                              }}
+                              onClick={() => handleDeleteUser(userItem)}
+                              title="Delete User"
+                            >
+                              <i className="bx bx-trash"></i>
+                            </button>
+                          )}
                         </div>
                       </td>
                     </tr>
@@ -429,6 +461,35 @@ const UserManagement = ({ user }) => {
                   <i className="bx bx-plus"></i>
                   Add First User
                 </button>
+              </div>
+            )}
+
+            {/* Pagination Info - Always show info even if only one page */}
+            {filteredUsers.length > 0 && (
+              <div style={{
+                display: 'flex',
+                justifyContent: 'space-between',
+                alignItems: 'center',
+                marginTop: '24px',
+                padding: '16px 0',
+                borderTop: '1px solid var(--color-border)'
+              }}>
+                <div style={{
+                  fontSize: '14px',
+                  color: 'var(--color-text-muted)'
+                }}>
+                  Showing {Math.min((currentPage - 1) * itemsPerPage + 1, filteredUsers.length)} to {Math.min(currentPage * itemsPerPage, filteredUsers.length)} of {filteredUsers.length} entries
+                </div>
+                
+                {totalPages > 1 && (
+                  <Pagination
+                    currentPage={currentPage}
+                    totalPages={totalPages}
+                    onPageChange={handlePageChange}
+                    itemsPerPage={itemsPerPage}
+                    totalItems={filteredUsers.length}
+                  />
+                )}
               </div>
             )}
           </>

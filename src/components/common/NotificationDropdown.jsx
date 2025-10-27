@@ -332,7 +332,7 @@ const NotificationDropdown = ({ notifications, onMarkAsRead, onMarkAllAsRead, on
       )}
 
       {/* CSS Animations and Scrollbar */}
-      <style jsx>{`
+      <style>{`
         @keyframes slideDown {
           from {
             opacity: 0;

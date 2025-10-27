@@ -1,5 +1,6 @@
-import React, { useState } from 'react';
-import { showSuccessToast, showInfoToast } from '../../utils/toast';
+import React, { useState, useCallback, useEffect } from 'react';
+import { showSuccessToast, showInfoToast, showErrorToast } from '../../utils/toast';
+import { vehiclesAPI } from '../../utils/api/vehiclesAPI';
 import 'boxicons/css/boxicons.min.css';
 
 const ProductCatalog = ({ user }) => {
@@ -7,105 +8,45 @@ const ProductCatalog = ({ user }) => {
   const [selectedModels, setSelectedModels] = useState([]);
   const [viewMode, setViewMode] = useState('grid'); // 'grid' or 'list'
   const [showCompareModal, setShowCompareModal] = useState(false);
+  const [processingClick, setProcessingClick] = useState(new Set());
+  const [vehicles, setVehicles] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [vehicleTypes, setVehicleTypes] = useState([]);
 
-  const vehicles = [
-    { 
-      id: 1, 
-      name: 'Tesla Model 3', 
-      price: 45000, 
-      battery: '60 kWh', 
-      range: '358 km', 
-      power: '283 hp', 
-      charging: 'Fast charging',
-      image: '/images/image.jpg',
-      brand: 'Tesla',
-      year: '2024'
-    },
-    { 
-      id: 2, 
-      name: 'Tesla Model Y', 
-      price: 52000, 
-      battery: '75 kWh', 
-      range: '480 km', 
-      power: '384 hp', 
-      charging: 'Fast charging',
-      image: '/images/vinfast-vf8-18.jpg',
-      brand: 'Tesla',
-      year: '2024'
-    },
-    { 
-      id: 3, 
-      name: 'BMW i3', 
-      price: 42000, 
-      battery: '42 kWh', 
-      range: '300 km', 
-      power: '170 hp', 
-      charging: 'Fast charging',
-      image: '/images/honda-dien_thanhnien-2_WXZA.jpg',
-      brand: 'BMW',
-      year: '2024'
-    },
-    { 
-      id: 4, 
-      name: 'Nissan Leaf', 
-      price: 32000, 
-      battery: '40 kWh', 
-      range: '240 km', 
-      power: '110 hp', 
-      charging: 'Standard',
-      image: '/images/xe-o-to-dien-dau-tien-cua-nuoc-phap.jpg',
-      brand: 'Nissan',
-      year: '2024'
-    },
-    { 
-      id: 5, 
-      name: 'Chevrolet Bolt', 
-      price: 38000, 
-      battery: '66 kWh', 
-      range: '383 km', 
-      power: '200 hp', 
-      charging: 'Standard',
-      image: '/images/image.jpg',
-      brand: 'Chevrolet',
-      year: '2024'
-    },
-    { 
-      id: 6, 
-      name: 'Audi e-tron', 
-      price: 68000, 
-      battery: '95 kWh', 
-      range: '435 km', 
-      power: '355 hp', 
-      charging: 'Standard',
-      image: '/images/vinfast-vf8-18.jpg',
-      brand: 'Audi',
-      year: '2024'
-    },
-    { 
-      id: 7, 
-      name: 'Ford Mustang Mach-E', 
-      price: 48000, 
-      battery: '70 kWh', 
-      range: '400 km', 
-      power: '290 hp', 
-      charging: 'Fast charging',
-      image: '/images/honda-dien_thanhnien-2_WXZA.jpg',
-      brand: 'Ford',
-      year: '2024'
-    },
-    { 
-      id: 8, 
-      name: 'Hyundai IONIQ 5', 
-      price: 41000, 
-      battery: '58 kWh', 
-      range: '350 km', 
-      power: '225 hp', 
-      charging: 'Fast charging',
-      image: '/images/xe-o-to-dien-dau-tien-cua-nuoc-phap.jpg',
-      brand: 'Hyundai',
-      year: '2024'
+  // Fetch vehicles from API
+  const fetchVehicles = useCallback(async () => {
+    try {
+      setLoading(true);
+      const data = await vehiclesAPI.getAll();
+      setVehicles(data || []);
+    } catch (error) {
+      console.error('Error fetching vehicles:', error);
+      showErrorToast('Failed to load vehicles');
+      // Fallback to empty array
+      setVehicles([]);
+    } finally {
+      setLoading(false);
     }
-  ];
+  }, []);
+
+  // Fetch vehicle types from API
+  const fetchVehicleTypes = useCallback(async () => {
+    try {
+      const data = await vehiclesAPI.getAllTypes();
+      // Filter to only include active vehicle types
+      const activeTypes = (data || []).filter(type => type.status === 'true');
+      setVehicleTypes(activeTypes);
+    } catch (error) {
+      console.error('Error fetching vehicle types:', error);
+      showErrorToast('Failed to load vehicle types');
+      setVehicleTypes([]);
+    }
+  }, []);
+
+  useEffect(() => {
+    fetchVehicles();
+    fetchVehicleTypes();
+  }, [fetchVehicles, fetchVehicleTypes]);
 
   const promotions = [
     { vehicleId: 1, discount: '5%', endDate: '2024-02-01' },
@@ -116,7 +57,19 @@ const ProductCatalog = ({ user }) => {
     return promotions.find(p => p.vehicleId === vehicleId);
   };
 
-  const toggleCompare = (vehicleId) => {
+  const toggleCompare = useCallback((vehicleId, event) => {
+    if (event) {
+      event.stopPropagation();
+      event.preventDefault();
+    }
+    
+    // Prevent duplicate calls
+    if (processingClick.has(vehicleId)) {
+      return;
+    }
+    
+    setProcessingClick(prev => new Set(prev).add(vehicleId));
+    
     const vehicle = vehicles.find(v => v.id === vehicleId);
     setSelectedModels(prev => {
       const isSelected = prev.includes(vehicleId);
@@ -128,7 +81,16 @@ const ProductCatalog = ({ user }) => {
         return [...prev, vehicleId];
       }
     });
-  };
+    
+    // Clear the processing flag after a short delay
+    setTimeout(() => {
+      setProcessingClick(prev => {
+        const newSet = new Set(prev);
+        newSet.delete(vehicleId);
+        return newSet;
+      });
+    }, 100);
+  }, [vehicles, processingClick]);
 
   const handleCompareClick = () => {
     if (selectedModels.length >= 2) {
@@ -137,11 +99,55 @@ const ProductCatalog = ({ user }) => {
     }
   };
 
-  const filteredVehicles = vehicles.filter(vehicle =>
+  // Transform API data to match VehicleManagement fields
+  const transformedVehicles = vehicles.map(vehicle => {
+    // Parse versions and colors from JSON (same as VehicleManagement)
+    let versions = ['Standard'];
+    let colors = ['White', 'Black'];
+    
+    try {
+      if (vehicle.versionJson) {
+        const versionData = JSON.parse(vehicle.versionJson);
+        versions = Array.isArray(versionData.features) ? versionData.features : ['Standard'];
+      }
+    } catch (e) {
+      console.warn('Error parsing versionJson:', e);
+    }
+    
+    try {
+      if (vehicle.availableColorsJson) {
+        colors = JSON.parse(vehicle.availableColorsJson);
+      }
+    } catch (e) {
+      console.warn('Error parsing availableColorsJson:', e);
+    }
+
+    // Find vehicle type name from vehicleTypes array
+    const vehicleTypeName = vehicleTypes.find(type => type.id === vehicle.vehicleType?.id)?.typeName || 
+                           vehicle.vehicleType?.typeName || 
+                           vehicle.vehicleType || 
+                           'Unknown Type';
+
+    return {
+      id: vehicle.id,
+      name: vehicle.modelName || 'Unknown Model',
+      price: vehicle.listedPrice || 0,
+      battery: vehicle.batteryCapacity ? `${vehicle.batteryCapacity} kWh` : 'N/A',
+      image: vehicle.specifications?.images?.[0] || '/images/image.jpg',
+      brand: vehicle.brand || 'Unknown Brand',
+      year: vehicle.yearOfManufacture || new Date().getFullYear(),
+      status: vehicle.status || 'AVAILABLE',
+      vehicleType: vehicleTypeName,
+      versions: versions,
+      colors: colors
+    };
+  });
+
+  const filteredVehicles = transformedVehicles.filter(vehicle =>
     vehicle.name.toLowerCase().includes(searchTerm.toLowerCase())
   );
 
-  const selectedVehicles = vehicles.filter(v => selectedModels.includes(v.id));
+  const selectedVehicles = transformedVehicles.filter(v => selectedModels.includes(v.id));
 
   return (
     <div className="main">
@@ -168,37 +174,48 @@ const ProductCatalog = ({ user }) => {
           </div>
         </div>
 
-        {/* Search */}
-        <div style={{ marginBottom: '24px', display: 'flex', gap: '12px' }}>
-          <div style={{ position: 'relative', flex: 1 }}>
-            <i className="bx bx-search" style={{ position: 'absolute', left: '12px', top: '50%', transform: 'translateY(-50%)', color: 'var(--color-text-muted)' }}></i>
-            <input
-              type="text"
-              placeholder="Search vehicles..."
-              value={searchTerm}
-              onChange={(e) => setSearchTerm(e.target.value)}
-              style={{
-                width: '100%',
-                padding: '12px 12px 12px 40px',
-                border: '1px solid var(--color-border)',
-                borderRadius: 'var(--radius)',
-                background: 'var(--color-bg)',
-                color: 'var(--color-text)',
-                fontSize: '14px'
-              }}
-            />
+        {/* Loading State */}
+        {loading && (
+          <div style={{ textAlign: 'center', padding: '40px' }}>
+            <i className="bx bx-loader-alt bx-spin" style={{ fontSize: '48px', marginBottom: '16px', color: 'var(--color-primary)' }}></i>
+            <div style={{ fontSize: '16px', color: 'var(--color-text-muted)' }}>Loading vehicles...</div>
           </div>
-          {selectedModels.length >= 2 && (
-            <button 
-              className="btn btn-primary" 
-              style={{ display: 'flex', alignItems: 'center', gap: '8px' }}
-              onClick={handleCompareClick}
-            >
-              <i className="bx bx-bar-chart-alt-2"></i>
-              Compare {selectedModels.length} models
-            </button>
-          )}
-        </div>
+        )}
+
+        {/* Content when not loading */}
+        {!loading && (
+          <>
+            {/* Search */}
+            <div style={{ marginBottom: '24px', display: 'flex', gap: '12px' }}>
+              <div style={{ position: 'relative', flex: 1 }}>
+                <i className="bx bx-search" style={{ position: 'absolute', left: '12px', top: '50%', transform: 'translateY(-50%)', color: 'var(--color-text-muted)' }}></i>
+                <input
+                  type="text"
+                  placeholder="Search vehicles..."
+                  value={searchTerm}
+                  onChange={(e) => setSearchTerm(e.target.value)}
+                  style={{
+                    width: '100%',
+                    padding: '12px 12px 12px 40px',
+                    border: '1px solid var(--color-border)',
+                    borderRadius: 'var(--radius)',
+                    background: 'var(--color-bg)',
+                    color: 'var(--color-text)',
+                    fontSize: '14px'
+                  }}
+                />
+              </div>
+              {selectedModels.length >= 2 && (
+                <button 
+                  className="btn btn-primary" 
+                  style={{ display: 'flex', alignItems: 'center', gap: '8px' }}
+                  onClick={handleCompareClick}
+                >
+                  <i className="bx bx-bar-chart-alt-2"></i>
+                  Compare {selectedModels.length} models
+                </button>
+              )}
+            </div>
 
         {/* Vehicle Grid */}
         {viewMode === 'grid' ? (
@@ -213,6 +230,11 @@ const ProductCatalog = ({ user }) => {
                   overflow: 'hidden',
                   transition: 'all 0.2s ease',
                   cursor: 'pointer'
+                }}
+                onClick={(e) => {
+                  // Prevent any default card click behavior
+                  e.preventDefault();
+                  e.stopPropagation();
                 }}
                 onMouseEnter={(e) => {
                   e.currentTarget.style.transform = 'translateY(-4px)';
@@ -232,6 +254,10 @@ const ProductCatalog = ({ user }) => {
                     <img 
                       src={vehicle.image} 
                       alt={vehicle.name}
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        e.preventDefault();
+                      }}
                       style={{
                         width: '100%',
                         height: '100%',
@@ -260,10 +286,8 @@ const ProductCatalog = ({ user }) => {
                     
                     {/* Compare Button */}
                     <button
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        toggleCompare(vehicle.id);
-                      }}
+                      onClick={(e) => toggleCompare(vehicle.id, e)}
+                      disabled={processingClick.has(vehicle.id)}
                       style={{
                         position: 'absolute',
                         top: '12px',
@@ -274,12 +298,13 @@ const ProductCatalog = ({ user }) => {
                         border: selectedModels.includes(vehicle.id) ? '2px solid var(--color-primary)' : '1px solid rgba(255,255,255,0.3)',
                         background: selectedModels.includes(vehicle.id) ? 'var(--color-primary)' : 'rgba(0,0,0,0.5)',
                         color: 'white',
-                        cursor: 'pointer',
+                        cursor: processingClick.has(vehicle.id) ? 'not-allowed' : 'pointer',
                         display: 'flex',
                         alignItems: 'center',
                         justifyContent: 'center',
                         fontSize: '16px',
-                        transition: 'all 0.2s ease'
+                        transition: 'all 0.2s ease',
+                        opacity: processingClick.has(vehicle.id) ? 0.6 : 1
                       }}
                     >
                       <i className="bx bx-check"></i>
@@ -305,13 +330,16 @@ const ProductCatalog = ({ user }) => {
                   </div>
 
                   {/* Card Content */}
-                  <div style={{ padding: '16px' }}>
+                  <div style={{ padding: '16px' }} onClick={(e) => {
+                    e.stopPropagation();
+                    e.preventDefault();
+                  }}>
                     <h3 style={{ margin: '0 0 8px 0', fontSize: '16px', fontWeight: '600', color: 'var(--color-text)' }}>
                       {vehicle.name}
                     </h3>
                     
                     <div style={{ marginBottom: '12px', fontSize: '20px', fontWeight: '700', color: 'var(--color-primary)' }}>
-                      ${vehicle.price.toLocaleString()}
+                      {vehicle.price.toLocaleString('vi-VN')} VND
                     </div>
                     
                     <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '8px', fontSize: '11px', color: 'var(--color-text-muted)', marginBottom: '16px' }}>
@@ -320,23 +348,26 @@ const ProductCatalog = ({ user }) => {
                         {vehicle.battery}
                       </div>
                       <div style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
-                        <i className="bx bx-current-location" style={{ fontSize: '12px' }}></i>
-                        {vehicle.range}
+                        <i className="bx bx-category" style={{ fontSize: '12px' }}></i>
+                        {vehicle.vehicleType}
                       </div>
                       <div style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
-                        <i className="bx bx-flash" style={{ fontSize: '12px' }}></i>
-                        {vehicle.power}
+                        <i className="bx bx-calendar" style={{ fontSize: '12px' }}></i>
+                        {vehicle.year}
                       </div>
                       <div style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
-                        <i className="bx bx-time" style={{ fontSize: '12px' }}></i>
-                        {vehicle.charging}
+                        <i className="bx bx-check-circle" style={{ fontSize: '12px' }}></i>
+                        {vehicle.status.replace('_', ' ')}
                       </div>
                     </div>
                     
                     <button 
                       className="btn btn-primary" 
                       style={{ width: '100%', padding: '10px', fontSize: '14px' }}
-                      onClick={() => showSuccessToast(`${vehicle.name} added to quote`)}
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        showSuccessToast(`${vehicle.name} added to quote`);
+                      }}
                     >
                       <i className="bx bx-cart-add"></i>
                       Add to Quote
@@ -370,6 +401,10 @@ const ProductCatalog = ({ user }) => {
                     <img 
                       src={vehicle.image} 
                       alt={vehicle.name}
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        e.preventDefault();
+                      }}
                       style={{
                         width: '100%',
                         height: '100%',
@@ -400,7 +435,7 @@ const ProductCatalog = ({ user }) => {
                     <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '8px' }}>
                       <h3 style={{ margin: 0, fontSize: '18px', fontWeight: '600', color: 'var(--color-text)' }}>{vehicle.name}</h3>
                       <div style={{ fontSize: '20px', fontWeight: '700', color: 'var(--color-primary)' }}>
-                        ${vehicle.price.toLocaleString()}
+                        {vehicle.price.toLocaleString('vi-VN')} VND
                       </div>
                     </div>
                     {promo && (
@@ -410,16 +445,21 @@ const ProductCatalog = ({ user }) => {
                     )}
                     <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: '16px', fontSize: '14px', color: 'var(--color-text-muted)' }}>
                       <div><i className="bx bx-battery" style={{ marginRight: '4px' }}></i> {vehicle.battery}</div>
-                      <div><i className="bx bx-current-location" style={{ marginRight: '4px' }}></i> {vehicle.range}</div>
-                      <div><i className="bx bx-flash" style={{ marginRight: '4px' }}></i> {vehicle.power}</div>
-                      <div><i className="bx bx-time" style={{ marginRight: '4px' }}></i> {vehicle.charging}</div>
+                      <div><i className="bx bx-category" style={{ marginRight: '4px' }}></i> {vehicle.vehicleType}</div>
+                      <div><i className="bx bx-calendar" style={{ marginRight: '4px' }}></i> {vehicle.year}</div>
+                      <div><i className="bx bx-check-circle" style={{ marginRight: '4px' }}></i> {vehicle.status.replace('_', ' ')}</div>
                     </div>
                   </div>
                   <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
                     <button
-                      onClick={() => toggleCompare(vehicle.id)}
+                      onClick={(e) => toggleCompare(vehicle.id, e)}
+                      disabled={processingClick.has(vehicle.id)}
                       className={`btn ${selectedModels.includes(vehicle.id) ? 'btn-primary' : 'btn-outline'}`}
-                      style={{ minWidth: '100px' }}
+                      style={{ 
+                        minWidth: '100px',
+                        opacity: processingClick.has(vehicle.id) ? 0.6 : 1,
+                        cursor: processingClick.has(vehicle.id) ? 'not-allowed' : 'pointer'
+                      }}
                     >
                       <i className="bx bx-check"></i>
                       Compare
@@ -427,7 +467,10 @@ const ProductCatalog = ({ user }) => {
                     <button 
                       className="btn btn-secondary" 
                       style={{ minWidth: '100px' }}
-                      onClick={() => showSuccessToast(`${vehicle.name} added to quote`)}
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        showSuccessToast(`${vehicle.name} added to quote`);
+                      }}
                     >
                       <i className="bx bx-cart-add"></i>
                       Add to Quote
@@ -439,11 +482,13 @@ const ProductCatalog = ({ user }) => {
           </div>
         )}
 
-        {filteredVehicles.length === 0 && (
+        {filteredVehicles.length === 0 && !loading && (
           <div style={{ textAlign: 'center', padding: '40px', color: 'var(--color-text-muted)' }}>
             <i className="bx bx-search" style={{ fontSize: '48px', marginBottom: '16px', opacity: 0.5 }}></i>
             <div>No vehicles found</div>
           </div>
+        )}
+          </>
         )}
       </div>
 
@@ -632,7 +677,7 @@ const ProductCatalog = ({ user }) => {
                             fontWeight: '700',
                             color: 'var(--color-primary)'
                           }}>
-                            ${v.price.toLocaleString()}
+                            {v.price.toLocaleString('vi-VN')} VND
                           </td>
                         ))}
                       </tr>
@@ -660,10 +705,10 @@ const ProductCatalog = ({ user }) => {
                           left: 0,
                           zIndex: 1
                         }}>
-                          Range
+                          Vehicle Type
                         </td>
                         {selectedVehicles.map(v => (
-                          <td key={v.id} style={{ padding: '16px', textAlign: 'center' }}>{v.range}</td>
+                          <td key={v.id} style={{ padding: '16px', textAlign: 'center' }}>{v.vehicleType}</td>
                         ))}
                       </tr>
                       <tr style={{ borderBottom: '1px solid var(--color-border)' }}>
@@ -675,10 +720,24 @@ const ProductCatalog = ({ user }) => {
                           left: 0,
                           zIndex: 1
                         }}>
-                          Power
+                          Available Versions
                         </td>
                         {selectedVehicles.map(v => (
-                          <td key={v.id} style={{ padding: '16px', textAlign: 'center' }}>{v.power}</td>
+                          <td key={v.id} style={{ padding: '16px', textAlign: 'center' }}>
+                            <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
+                              {v.versions.map((version, idx) => (
+                                <span key={idx} style={{
+                                  padding: '2px 8px',
+                                  background: 'var(--color-surface)',
+                                  borderRadius: 'var(--radius)',
+                                  fontSize: '12px',
+                                  color: 'var(--color-text)'
+                                }}>
+                                  {version}
+                                </span>
+                              ))}
+                            </div>
+                          </td>
                         ))}
                       </tr>
                       <tr style={{ borderBottom: '1px solid var(--color-border)' }}>
@@ -690,10 +749,54 @@ const ProductCatalog = ({ user }) => {
                           left: 0,
                           zIndex: 1
                         }}>
-                          Charging Type
+                          Available Colors
                         </td>
                         {selectedVehicles.map(v => (
-                          <td key={v.id} style={{ padding: '16px', textAlign: 'center' }}>{v.charging}</td>
+                          <td key={v.id} style={{ padding: '16px', textAlign: 'center' }}>
+                            <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
+                              {v.colors.map((color, idx) => (
+                                <span key={idx} style={{
+                                  padding: '2px 8px',
+                                  background: 'var(--color-surface)',
+                                  borderRadius: 'var(--radius)',
+                                  fontSize: '12px',
+                                  color: 'var(--color-text)'
+                                }}>
+                                  {color}
+                                </span>
+                              ))}
+                            </div>
+                          </td>
+                        ))}
+                      </tr>
+                      <tr style={{ borderBottom: '1px solid var(--color-border)' }}>
+                        <td style={{ 
+                          padding: '16px', 
+                          fontWeight: '600',
+                          background: 'var(--color-bg)',
+                          position: 'sticky',
+                          left: 0,
+                          zIndex: 1
+                        }}>
+                          Battery Capacity (kWh)
+                        </td>
+                        {selectedVehicles.map(v => (
+                          <td key={v.id} style={{ padding: '16px', textAlign: 'center' }}>{v.battery}</td>
+                        ))}
+                      </tr>
+                      <tr style={{ borderBottom: '1px solid var(--color-border)' }}>
+                        <td style={{ 
+                          padding: '16px', 
+                          fontWeight: '600',
+                          background: 'var(--color-bg)',
+                          position: 'sticky',
+                          left: 0,
+                          zIndex: 1
+                        }}>
+                          Year of Manufacture
+                        </td>
+                        {selectedVehicles.map(v => (
+                          <td key={v.id} style={{ padding: '16px', textAlign: 'center' }}>{v.year}</td>
                         ))}
                       </tr>
                     </tbody>

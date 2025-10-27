@@ -66,6 +66,10 @@
   width: 100%;
   max-width: 1400px;
   padding: 2rem;
+  padding-top: 1rem;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
 }
 
 .login-card {
@@ -109,13 +113,14 @@
   background-clip: text;
 }
 
-.back-to-home {
-  background: rgba(26, 26, 26, 0.8);
-  border: 1px solid rgba(255, 30, 30, 0.3);
+/* Back to Home Button - Above Form */
+.back-to-home-above-form {
+  background: rgba(26, 26, 26, 0.9);
+  border: 1px solid rgba(255, 30, 30, 0.4);
   border-radius: 12px;
-  padding: 1rem;
+  padding: 0.75rem 1.5rem;
   color: #F5F5F5;
-  font-size: 1rem;
+  font-size: 0.95rem;
   font-weight: 600;
   cursor: pointer;
   transition: all 0.3s ease;
@@ -124,14 +129,21 @@
   align-items: center;
   justify-content: center;
   gap: 0.5rem;
-  width: 100%;
-  margin-top: 0.5rem;
+  margin-bottom: 0.5rem;
+  margin-top: -0.5rem;
+  align-self: flex-start;
+  box-shadow: 0 4px 15px rgba(0, 0, 0, 0.3);
 }
 
-.back-to-home:hover {
-  background: rgba(255, 30, 30, 0.1);
+.back-to-home-above-form:hover {
+  background: rgba(255, 30, 30, 0.15);
   border-color: #FF1E1E;
   transform: translateY(-2px);
+  box-shadow: 0 6px 20px rgba(255, 30, 30, 0.4);
+}
+
+.back-to-home-above-form i {
+  font-size: 1.1rem;
 }
 
 .image-container {

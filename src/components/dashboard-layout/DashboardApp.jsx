@@ -13,7 +13,7 @@ import CustomerManagement from '../common/CustomerManagement';
 import TestDriveManagement from '../common/TestDriveManagement';
 import PaymentManagement from '../common/PaymentManagement';
 import PromotionManagement from '../common/PromotionManagement';
-import DealerManagement from '../common/DealerManagement';
+import DealerManagement from '../admin/dealers/DealerManagement';
 import Reports from '../common/Reports';
 import DeliveryTracking from '../common/DeliveryTracking';
 import CustomerFeedback from '../common/CustomerFeedback';
@@ -26,8 +26,8 @@ import Orders from '../dealer-staff/Orders';
 import SalesContracts from '../dealer-staff/SalesContracts';
 
 // Admin components
-import UserManagement from '../admin/UserManagement';
-import SystemLogs from '../admin/SystemLogs';
+import UserManagement from '../admin/users/UserManagement';
+import SystemLogs from '../admin/users/SystemLogs';
 
 // EVM Staff components
 import VehicleManagement from '../evm-staff/VehicleManagement';

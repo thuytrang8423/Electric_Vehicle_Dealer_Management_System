@@ -1,11 +1,11 @@
 import React, { useState, useEffect } from 'react';
-import { usersAPI } from '../../utils/api/usersAPI';
-import { dealersAPI } from '../../utils/api/dealersAPI';
-import { showSuccessToast, showErrorToast } from '../../utils/toast';
-import { handleAPIError } from '../../utils/apiConfig';
+import { usersAPI } from '../../../utils/api/usersAPI';
+import { dealersAPI } from '../../../utils/api/dealersAPI';
+import { showSuccessToast, showErrorToast } from '../../../utils/toast';
+import { handleAPIError } from '../../../utils/apiConfig';
 import 'boxicons/css/boxicons.min.css';
 
-const CreateAccountUser = ({ onClose, onSuccess }) => {
+const EditAccountUser = ({ user, onClose, onSuccess }) => {
   const [dealers, setDealers] = useState([]);
   const [loading, setLoading] = useState(false);
   const [showPassword, setShowPassword] = useState(false);
@@ -20,6 +20,22 @@ const CreateAccountUser = ({ onClose, onSuccess }) => {
     status: 'ACTIVE',
     dealerId: ''
   });
+
+  // Initialize form data when user prop changes
+  useEffect(() => {
+    if (user) {
+      setFormData({
+        username: user.fullName || user.username || '',
+        email: user.email || '',
+        fullName: user.fullName || '',
+        phoneNumber: user.phoneNumber || '',
+        role: user.role || 'DEALER_STAFF',
+        status: user.status || 'ACTIVE',
+        dealerId: user.dealerId?.toString() || '',
+        password: ''
+      });
+    }
+  }, [user]);
 
   // Fetch dealers on component mount
   useEffect(() => {
@@ -38,14 +54,8 @@ const CreateAccountUser = ({ onClose, onSuccess }) => {
   const handleSubmit = async (e) => {
     e.preventDefault();
     
-    if (!formData.username || !formData.password || !formData.email || !formData.fullName || !formData.phoneNumber || !formData.role) {
+    if (!formData.username || !formData.email || !formData.fullName || !formData.phoneNumber || !formData.role) {
       showErrorToast('Please fill in all required fields');
-      return;
-    }
-
-    // Only require dealerId for non-admin and non-evm roles
-    if (formData.role !== 'ADMIN' && formData.role !== 'EVM_MANAGER' && !formData.dealerId) {
-      showErrorToast('Please select a dealer');
       return;
     }
 
@@ -68,7 +78,6 @@ const CreateAccountUser = ({ onClose, onSuccess }) => {
       
       const userData = {
         username: formData.username,
-        password: formData.password,
         email: formData.email,
         fullName: formData.fullName,
         phoneNumber: formData.phoneNumber,
@@ -76,13 +85,19 @@ const CreateAccountUser = ({ onClose, onSuccess }) => {
         status: formData.status
       };
 
+      // Only include password if it's being updated
+      if (formData.password) {
+        userData.password = formData.password;
+      }
+
       // Only include dealerId if it's provided (not required for ADMIN and EVM_MANAGER)
       if (formData.dealerId) {
         userData.dealerId = parseInt(formData.dealerId);
       }
 
-      await usersAPI.create(userData);
-      showSuccessToast('User created successfully');
+      const userId = user.id || user.userId;
+      await usersAPI.update(userId, userData);
+      showSuccessToast('User updated successfully');
       
       if (onSuccess) {
         onSuccess();
@@ -132,20 +147,20 @@ const CreateAccountUser = ({ onClose, onSuccess }) => {
         }
       }}
     >
-        <div 
-          style={{
-            background: 'var(--color-surface)',
-            borderRadius: 'var(--radius)',
-            padding: '32px',
-            width: '98%',
-            maxWidth: '1000px',
-            maxHeight: '95vh',
-            overflowY: 'auto'
-          }}
-          onClick={(e) => e.stopPropagation()}
-        >
+      <div 
+        style={{
+          background: 'var(--color-surface)',
+          borderRadius: 'var(--radius)',
+          padding: '32px',
+          width: '98%',
+          maxWidth: '1000px',
+          maxHeight: '95vh',
+          overflowY: 'auto'
+        }}
+        onClick={(e) => e.stopPropagation()}
+      >
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '24px' }}>
-          <h3 style={{ margin: 0, fontSize: '22px' }}>Create New User Account</h3>
+          <h3 style={{ margin: 0, fontSize: '22px' }}>Edit User Account</h3>
           <button 
             onClick={onClose}
             style={{ 
@@ -226,7 +241,7 @@ const CreateAccountUser = ({ onClose, onSuccess }) => {
                 color: 'var(--color-text)'
               }}>
                 <i className="bx bx-lock" style={{ fontSize: '16px', color: '#ef4444' }}></i>
-                Password <span style={{ color: 'var(--color-error)' }}>*</span>
+                Password <span style={{ color: 'var(--color-text-muted)', fontSize: '12px' }}>(Leave blank to keep current)</span>
               </label>
               <div style={{ position: 'relative' }}>
                 <input
@@ -244,8 +259,7 @@ const CreateAccountUser = ({ onClose, onSuccess }) => {
                     transition: 'all 0.2s ease',
                     outline: 'none'
                   }}
-                  placeholder="Enter password"
-                  required
+                  placeholder="Enter new password"
                   onFocus={(e) => e.target.style.borderColor = '#ef4444'}
                   onBlur={(e) => e.target.style.borderColor = 'var(--color-border)'}
                 />
@@ -289,9 +303,9 @@ const CreateAccountUser = ({ onClose, onSuccess }) => {
               <label style={{ 
                 display: 'flex',
                 alignItems: 'center',
-                gap: '4px',
-                marginBottom: '6px', 
-                fontSize: '13px', 
+                gap: '6px',
+                marginBottom: '10px', 
+                fontSize: '15px', 
                 fontWeight: '600', 
                 color: 'var(--color-text)'
               }}>
@@ -325,9 +339,9 @@ const CreateAccountUser = ({ onClose, onSuccess }) => {
               <label style={{ 
                 display: 'flex',
                 alignItems: 'center',
-                gap: '4px',
-                marginBottom: '6px', 
-                fontSize: '13px', 
+                gap: '6px',
+                marginBottom: '10px', 
+                fontSize: '15px', 
                 fontWeight: '600', 
                 color: 'var(--color-text)'
               }}>
@@ -361,9 +375,9 @@ const CreateAccountUser = ({ onClose, onSuccess }) => {
               <label style={{ 
                 display: 'flex',
                 alignItems: 'center',
-                gap: '4px',
-                marginBottom: '6px', 
-                fontSize: '13px', 
+                gap: '6px',
+                marginBottom: '10px', 
+                fontSize: '15px', 
                 fontWeight: '600', 
                 color: 'var(--color-text)'
               }}>
@@ -397,9 +411,9 @@ const CreateAccountUser = ({ onClose, onSuccess }) => {
               <label style={{ 
                 display: 'flex',
                 alignItems: 'center',
-                gap: '4px',
-                marginBottom: '6px', 
-                fontSize: '13px', 
+                gap: '6px',
+                marginBottom: '10px', 
+                fontSize: '15px', 
                 fontWeight: '600', 
                 color: 'var(--color-text)'
               }}>
@@ -442,9 +456,9 @@ const CreateAccountUser = ({ onClose, onSuccess }) => {
               <label style={{ 
                 display: 'flex',
                 alignItems: 'center',
-                gap: '4px',
-                marginBottom: '6px', 
-                fontSize: '13px', 
+                gap: '6px',
+                marginBottom: '10px', 
+                fontSize: '15px', 
                 fontWeight: '600', 
                 color: 'var(--color-text)'
               }}>
@@ -497,37 +511,37 @@ const CreateAccountUser = ({ onClose, onSuccess }) => {
                   <i className="bx bx-store" style={{ fontSize: '16px', color: '#ef4444' }}></i>
                   Dealer <span style={{ color: 'var(--color-error)' }}>*</span>
                 </label>
-              <select
-                value={formData.dealerId}
-                onChange={(e) => handleInputChange('dealerId', e.target.value)}
-                style={{
-                  width: '100%',
-                  padding: '14px 16px',
-                  border: '2px solid var(--color-border)',
-                  borderRadius: '8px',
-                  background: 'var(--color-bg)',
-                  color: 'var(--color-text)',
-                  fontSize: '15px',
-                  cursor: 'pointer',
-                  transition: 'all 0.2s ease',
-                  outline: 'none',
-                  appearance: 'none',
-                  backgroundImage: `url("data:image/svg+xml,%3csvg xmlns='http://www.w3.org/2000/svg' fill='none' viewBox='0 0 20 20'%3e%3cpath stroke='%236b7280' stroke-linecap='round' stroke-linejoin='round' stroke-width='1.5' d='m6 8 4 4 4-4'/%3e%3c/svg%3e")`,
-                  backgroundPosition: 'right 12px center',
-                  backgroundRepeat: 'no-repeat',
-                  backgroundSize: '16px'
-                }}
-                required
-                onFocus={(e) => e.target.style.borderColor = '#ef4444'}
-                onBlur={(e) => e.target.style.borderColor = 'var(--color-border)'}
-              >
-                <option value="">Select a dealer</option>
-                {dealers.map((dealer) => (
-                  <option key={dealer.dealerId} value={dealer.dealerId}>
-                    {dealer.name} - {dealer.region}
-                  </option>
-                ))}
-              </select>
+                <select
+                  value={formData.dealerId}
+                  onChange={(e) => handleInputChange('dealerId', e.target.value)}
+                  style={{
+                    width: '100%',
+                    padding: '14px 16px',
+                    border: '2px solid var(--color-border)',
+                    borderRadius: '8px',
+                    background: 'var(--color-bg)',
+                    color: 'var(--color-text)',
+                    fontSize: '15px',
+                    cursor: 'pointer',
+                    transition: 'all 0.2s ease',
+                    outline: 'none',
+                    appearance: 'none',
+                    backgroundImage: `url("data:image/svg+xml,%3csvg xmlns='http://www.w3.org/2000/svg' fill='none' viewBox='0 0 20 20'%3e%3cpath stroke='%236b7280' stroke-linecap='round' stroke-linejoin='round' stroke-width='1.5' d='m6 8 4 4 4-4'/%3e%3c/svg%3e")`,
+                    backgroundPosition: 'right 12px center',
+                    backgroundRepeat: 'no-repeat',
+                    backgroundSize: '16px'
+                  }}
+                  required
+                  onFocus={(e) => e.target.style.borderColor = '#ef4444'}
+                  onBlur={(e) => e.target.style.borderColor = 'var(--color-border)'}
+                >
+                  <option value="">Select a dealer</option>
+                  {dealers.map((dealer) => (
+                    <option key={dealer.dealerId} value={dealer.dealerId}>
+                      {dealer.name} - {dealer.region}
+                    </option>
+                  ))}
+                </select>
               </div>
             )}
           </div>
@@ -602,19 +616,19 @@ const CreateAccountUser = ({ onClose, onSuccess }) => {
                 if (!loading) {
                   e.target.style.background = 'var(--color-error)';
                   e.target.style.transform = 'translateY(0)';
-                  e.target.style.boxShadow = '0 2px 4px -1px rgba(0, 0, 0, 0.1)';
+                  e.target.style.boxShadow = '0 4px 6px -1px rgba(0, 0, 0, 0.1)';
                 }
               }}
             >
               {loading ? (
                 <>
                   <i className="bx bx-loader-alt bx-spin"></i>
-                  Creating...
+                  Updating...
                 </>
               ) : (
                 <>
-                  <i className="bx bx-plus"></i>
-                  Create User
+                  <i className="bx bx-check"></i>
+                  Update User
                 </>
               )}
             </button>
@@ -625,4 +639,4 @@ const CreateAccountUser = ({ onClose, onSuccess }) => {
   );
 };
 
-export default CreateAccountUser;
+export default EditAccountUser;

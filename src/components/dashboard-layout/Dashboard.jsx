@@ -82,7 +82,7 @@ const Dashboard = ({ user }) => {
     switch (user?.role) {
       case 'dealer-staff': return dealerStaffData;
       case 'dealer-manager': return dealerManagerData;
-      case 'evm-staff': return evmStaffData;
+      case 'evm-manager': return evmStaffData;
       case 'admin': return adminData;
       default: return dealerManagerData;
     }
@@ -253,7 +253,7 @@ const Dashboard = ({ user }) => {
         </div>
       )}
 
-      {user?.role === 'evm-staff' && (
+      {user?.role === 'evm-manager' && (
         <div className="charts-grid">
           <div className="chart-card">
             <h3 className="chart-card__title">Top Performing Dealers</h3>

@@ -10,14 +10,13 @@ import { ToastContainer } from 'react-toastify'
 import 'react-toastify/dist/ReactToastify.css'
 
 function App() {
-  const [loggedInUser, setLoggedInUser] = useState(null)
-
-  useEffect(() => {
+  const [loggedInUser, setLoggedInUser] = useState(() => {
     try {
-      const user = JSON.parse(localStorage.getItem('currentUser'))
-      if (user) setLoggedInUser(user)
-    } catch {}
-  }, [])
+      return JSON.parse(localStorage.getItem('currentUser')) || null
+    } catch {
+      return null
+    }
+  })
 
   const handleLoginSuccess = (user) => {
     setLoggedInUser(user)

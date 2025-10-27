@@ -1,10 +1,12 @@
 import { motion } from 'framer-motion';
+import { Link, useNavigate } from 'react-router-dom';
 import 'boxicons/css/boxicons.min.css';
 import './HomePage.css';
 import Footer from './Footer';
 import Navbar from './Navbar';
 
-const HomePage = ({ onNavigateAuth, onNavigateVehicles, onNavigateContact, onNavigateDashboard }) => {
+const HomePage = ({ loggedInUser, onLogout }) => {
+  const navigate = useNavigate();
 
   const vehicles = [
     {
@@ -58,7 +60,7 @@ const HomePage = ({ onNavigateAuth, onNavigateVehicles, onNavigateContact, onNav
   return (
     <div className="homepage">
       {/* Navbar */}
-      <Navbar onNavigateAuth={onNavigateAuth} onNavigateVehicles={onNavigateVehicles} onNavigateContact={onNavigateContact} onNavigateHome={() => {}} currentPage="home" />
+      <Navbar />
 
       {/* Hero Section */}
       <section className="hero-section">
@@ -96,7 +98,7 @@ const HomePage = ({ onNavigateAuth, onNavigateVehicles, onNavigateContact, onNav
                 whileHover={{ scale: 1.05 }}
                 whileTap={{ scale: 0.95 }}
                 className="btn-hero-primary"
-                onClick={onNavigateVehicles}
+                onClick={() => navigate('/vehicles')}
               >
                 Explore EVs
               </motion.button>
@@ -104,7 +106,7 @@ const HomePage = ({ onNavigateAuth, onNavigateVehicles, onNavigateContact, onNav
                 whileHover={{ scale: 1.05 }}
                 whileTap={{ scale: 0.95 }}
                 className="btn-hero-secondary"
-                onClick={onNavigateAuth}
+                onClick={() => navigate('/auth')}
               >
                 Book a Test Drive
               </motion.button>
@@ -200,7 +202,7 @@ const HomePage = ({ onNavigateAuth, onNavigateVehicles, onNavigateContact, onNav
             whileHover={{ scale: 1.1 }}
             whileTap={{ scale: 0.9 }}
             className="btn-cta"
-            onClick={onNavigateAuth}
+            onClick={() => navigate('/auth')}
           >
             Get Started Today
           </motion.button>

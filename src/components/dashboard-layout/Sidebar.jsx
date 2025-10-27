@@ -10,11 +10,17 @@ const Sidebar = ({ user, activeItem, onItemClick }) => {
       { id: 'vehicles', label: 'Vehicles', icon: 'bx-car' },
       { id: 'quotes', label: 'Quotes', icon: 'bx-file' },
       { id: 'orders', label: 'Orders', icon: 'bx-clipboard' },
+      { id: 'sales-contracts', label: 'Sales Contracts', icon: 'bx-file-blank' },
+      { id: 'vehicle-orders', label: 'Vehicle Orders', icon: 'bx-package' },
+      { id: 'delivery-tracking', label: 'Delivery Tracking', icon: 'bx-truck' },
       { id: 'customers', label: 'Customers', icon: 'bx-group' },
+      { id: 'customer-feedback', label: 'Customer Feedback', icon: 'bx-message' },
       { id: 'test-drives', label: 'Test Drives', icon: 'bx-car' },
       { id: 'payments', label: 'Payments', icon: 'bx-credit-card' },
+      { id: 'debt-management', label: 'Debt Management', icon: 'bx-dollar-circle' },
       { id: 'promotions', label: 'Promotions', icon: 'bx-gift' },
       { id: 'dealers', label: 'Dealers', icon: 'bx-store' },
+      { id: 'vehicle-distribution', label: 'Vehicle Distribution', icon: 'bx-package' },
       { id: 'users', label: 'Users', icon: 'bx-user' },
       { id: 'logs', label: 'System Logs', icon: 'bx-terminal' },
       { id: 'reports', label: 'Reports', icon: 'bx-bar-chart-alt-2' },
@@ -24,19 +30,19 @@ const Sidebar = ({ user, activeItem, onItemClick }) => {
     // Role-based filtering based on requirements
     switch (role) {
       case 'dealer-staff':
-        // Dealer Staff: Common features + vehicles (catalog), quotes, orders, customers, test-drives, view payments/promotions
+        // Dealer Staff: Common features + vehicles (catalog), quotes, orders, sales-contracts, customers, test-drives, view payments/promotions, customer-feedback
         return allItems.filter(item => 
-          ['overview', 'activity', 'vehicles', 'quotes', 'orders', 'customers', 'test-drives', 'payments', 'promotions', 'settings'].includes(item.id)
+          ['overview', 'activity', 'vehicles', 'quotes', 'orders', 'sales-contracts', 'customers', 'customer-feedback', 'test-drives', 'payments', 'promotions', 'settings'].includes(item.id)
         );
       case 'dealer-manager':
-        // Dealer Manager: All dealer staff permissions + dealers, users (staff management), reports
+        // Dealer Manager: All dealer staff permissions + dealers, users (staff management), reports, debt-management
         return allItems.filter(item => 
-          ['overview', 'activity', 'vehicles', 'quotes', 'orders', 'customers', 'test-drives', 'payments', 'promotions', 'dealers', 'users', 'reports', 'settings'].includes(item.id)
+          ['overview', 'activity', 'vehicles', 'quotes', 'orders', 'sales-contracts', 'customers', 'customer-feedback', 'test-drives', 'payments', 'debt-management', 'promotions', 'dealers', 'users', 'reports', 'settings'].includes(item.id)
         );
       case 'evm-staff':
-        // EVM Staff: Common features + vehicles (CRUD), orders, customers, payments, promotions, dealers, users, reports
+        // EVM Staff: Common features + vehicles (CRUD), vehicle-orders, vehicle-distribution, orders, customers, payments, promotions, dealers, users, reports, delivery-tracking
         return allItems.filter(item => 
-          ['overview', 'activity', 'vehicles', 'orders', 'customers', 'payments', 'promotions', 'dealers', 'users', 'reports', 'settings'].includes(item.id)
+          ['overview', 'activity', 'vehicles', 'vehicle-orders', 'vehicle-distribution', 'orders', 'customers', 'payments', 'promotions', 'dealers', 'users', 'reports', 'delivery-tracking', 'settings'].includes(item.id)
         );
       case 'admin':
         // Admin: Full system access including logs

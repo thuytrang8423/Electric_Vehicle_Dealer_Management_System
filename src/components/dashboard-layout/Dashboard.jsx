@@ -1,9 +1,8 @@
-import React, { useState } from 'react';
+import React from 'react';
 import { LineChart, Line, AreaChart, Area, BarChart, Bar, PieChart, Pie, Cell, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer } from 'recharts';
 import 'boxicons/css/boxicons.min.css';
 
 const Dashboard = ({ user }) => {
-
   // Role-specific data
   const dealerStaffData = {
     stats: [

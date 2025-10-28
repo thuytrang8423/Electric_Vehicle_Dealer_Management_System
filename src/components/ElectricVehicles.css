@@ -303,6 +303,27 @@
   gap: 1.5rem;
 }
 
+/* Loading and Error States */
+.loading-message,
+.error-message,
+.no-vehicles-message {
+  text-align: center;
+  padding: 3rem;
+  font-size: 1.2rem;
+  color: #F5F5F5;
+  background: rgba(42, 42, 42, 0.8);
+  border-radius: 12px;
+  margin: 2rem auto;
+  max-width: 400px;
+  border: 1px solid rgba(229, 9, 20, 0.3);
+  grid-column: 1 / -1;
+}
+
+.error-message {
+  color: #ff6b6b;
+  border-color: #ff6b6b;
+}
+
 .vehicle-card {
   background: rgba(40, 40, 40, 0.95);
   border-radius: 15px;
@@ -365,6 +386,16 @@
 
 .vehicle-status.preorder {
   background: rgba(255, 165, 0, 0.9);
+  color: white;
+}
+
+.vehicle-status.out_of_stock {
+  background: rgba(255, 0, 0, 0.9);
+  color: white;
+}
+
+.vehicle-status.discontinued {
+  background: rgba(128, 128, 128, 0.9);
   color: white;
 }
 

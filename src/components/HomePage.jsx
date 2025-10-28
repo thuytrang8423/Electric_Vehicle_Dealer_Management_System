@@ -1,43 +1,36 @@
 import { motion } from 'framer-motion';
 import { Link, useNavigate } from 'react-router-dom';
+import { useState, useEffect } from 'react';
 import 'boxicons/css/boxicons.min.css';
 import './HomePage.css';
 import Footer from './Footer';
 import Navbar from './Navbar';
+import { vehiclesAPI } from '../utils/api/vehiclesAPI';
 
 const HomePage = ({ loggedInUser, onLogout }) => {
   const navigate = useNavigate();
+  const [vehicles, setVehicles] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState(null);
 
-  const vehicles = [
-    {
-      name: 'EVM Sedan Pro',
-      image: '/images/honda-dien_thanhnien-2_WXZA.jpg',
-      description: 'Premium electric sedan',
-      range: '650km range',
-      price: '$280,000'
-    },
-    {
-      name: 'EVM SUV Max',
-      image: '/images/vinfast-vf8-18.jpg',
-      description: '7-seat electric SUV',
-      range: '580km range',
-      price: '$320,000'
-    },
-    {
-      name: 'EVM Sport GT',
-      image: '/images/xe-o-to-dien-dau-tien-cua-nuoc-phap.jpg',
-      description: 'Sports coupe',
-      range: '0-100km/h in 3.2s',
-      price: '$450,000'
-    },
-    {
-      name: 'EVM City Mini',
-      image: '/images/image.jpg',
-      description: 'Compact city car',
-      range: '450km range',
-      price: '$150,000'
-    }
-  ];
+  // Fetch vehicles from API
+  useEffect(() => {
+    const fetchVehicles = async () => {
+      try {
+        setLoading(true);
+        const data = await vehiclesAPI.getAll();
+        setVehicles(data);
+      } catch (err) {
+        console.error('Error fetching vehicles:', err);
+        setError('Failed to load vehicles');
+        setVehicles([]);
+      } finally {
+        setLoading(false);
+      }
+    };
+
+    fetchVehicles();
+  }, []);
 
   const features = [
     {
@@ -157,29 +150,44 @@ const HomePage = ({ loggedInUser, onLogout }) => {
           </p>
         </div>
         <div className="vehicle-carousel">
-          {vehicles.map((vehicle, index) => (
-            <motion.div
-              key={index}
-              initial={{ opacity: 0, scale: 0.9 }}
-              whileInView={{ opacity: 1, scale: 1 }}
-              transition={{ duration: 0.5, delay: index * 0.2 }}
-              viewport={{ once: true }}
-              className="vehicle-card"
-            >
-              <div className="vehicle-image">
-                <div className="vehicle-type-label">{vehicle.name}</div>
-                <img src={vehicle.image} alt={vehicle.name} />
-              </div>
-              <div className="vehicle-info">
-                <h3 className="vehicle-name-main">{vehicle.name}</h3>
-                <p className="vehicle-description">
-                  {vehicle.description}, {vehicle.range}
-                </p>
-                <div className="vehicle-price">{vehicle.price}</div>
-                <button className="btn-details">Details</button>
-              </div>
-            </motion.div>
-          ))}
+          {loading ? (
+            <div className="loading-message">Loading vehicles...</div>
+          ) : error ? (
+            <div className="error-message">{error}</div>
+          ) : vehicles.length === 0 ? (
+            <div className="no-vehicles-message">No vehicles available</div>
+          ) : (
+            vehicles.map((vehicle, index) => {
+              // Get the first image from specifications.images array
+              const vehicleImage = vehicle.specifications?.images?.[0] || '/images/image.jpg';
+              const range = vehicle.specifications?.battery?.range_km || 0;
+              const price = vehicle.listedPrice ? `$${vehicle.listedPrice.toLocaleString()}` : 'Price TBD';
+              
+              return (
+                <motion.div
+                  key={vehicle.id || index}
+                  initial={{ opacity: 0, scale: 0.9 }}
+                  whileInView={{ opacity: 1, scale: 1 }}
+                  transition={{ duration: 0.5, delay: index * 0.2 }}
+                  viewport={{ once: true }}
+                  className="vehicle-card"
+                >
+                  <div className="vehicle-image">
+                    <div className="vehicle-type-label">{vehicle.modelName}</div>
+                    <img src={vehicleImage} alt={vehicle.modelName} />
+                  </div>
+                  <div className="vehicle-info">
+                    <h3 className="vehicle-name-main">{vehicle.modelName}</h3>
+                    <p className="vehicle-description">
+                      {vehicle.brand} {vehicle.yearOfManufacture}, {range}km range
+                    </p>
+                    <div className="vehicle-price">{price}</div>
+                    <button className="btn-details">Details</button>
+                  </div>
+                </motion.div>
+              );
+            })
+          )}
         </div>
       </section>
 

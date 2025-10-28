@@ -401,6 +401,37 @@
   background: linear-gradient(180deg, #2A2A2A 0%, #404040 100%);
 }
 
+/* Loading and Error States */
+.loading-message,
+.error-message {
+  text-align: center;
+  padding: 3rem;
+  font-size: 1.2rem;
+  color: #F5F5F5;
+  background: rgba(42, 42, 42, 0.8);
+  border-radius: 12px;
+  margin: 2rem auto;
+  max-width: 400px;
+  border: 1px solid rgba(229, 9, 20, 0.3);
+}
+
+.error-message {
+  color: #ff6b6b;
+  border-color: #ff6b6b;
+}
+
+.no-vehicles-message {
+  text-align: center;
+  padding: 3rem;
+  font-size: 1.2rem;
+  color: #F5F5F5;
+  background: rgba(42, 42, 42, 0.8);
+  border-radius: 12px;
+  margin: 2rem auto;
+  max-width: 400px;
+  border: 1px solid rgba(229, 9, 20, 0.3);
+}
+
 .section-header {
   text-align: center;
   margin-bottom: 4rem;

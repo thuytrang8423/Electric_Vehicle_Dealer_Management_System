@@ -5,6 +5,7 @@ import 'boxicons/css/boxicons.min.css';
 import './ElectricVehicles.css';
 import Footer from './Footer';
 import Navbar from './Navbar';
+import { vehiclesAPI } from '../utils/api/vehiclesAPI';
 
 const ElectricVehicles = () => {
   const [searchQuery, setSearchQuery] = useState('');
@@ -13,75 +14,47 @@ const ElectricVehicles = () => {
   const [selectedRange, setSelectedRange] = useState('Battery Range');
   const [selectedType, setSelectedType] = useState('Vehicle Type');
   const [sortBy, setSortBy] = useState('Sort by: Newest');
+  const [vehicles, setVehicles] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState(null);
 
   // Scroll to top when component mounts
   useEffect(() => {
     window.scrollTo(0, 0);
   }, []);
 
-  const vehicles = [
-    {
-      name: 'EVM Sedan Pro',
-      image: '/images/honda-dien_thanhnien-2_WXZA.jpg',
-      brand: 'EVM',
-      type: 'Sedan',
-      description: 'Premium electric sedan',
-      range: '650km range',
-      price: '$280,000',
-      battery: '650km',
-      status: 'New',
-      statusColor: 'new'
-    },
-    {
-      name: 'EVM SUV Max',
-      image: '/images/vinfast-vf8-18.jpg',
-      brand: 'EVM',
-      type: 'SUV',
-      description: '7-seat electric SUV',
-      range: '580km range',
-      price: '$320,000',
-      battery: '580km',
-      status: 'Available',
-      statusColor: 'available'
-    },
-    {
-      name: 'EVM Sport GT',
-      image: '/images/xe-o-to-dien-dau-tien-cua-nuoc-phap.jpg',
-      brand: 'EVM',
-      type: 'Sport',
-      description: 'Sports coupe',
-      range: '0-100km/h in 3.2s',
-      price: '$450,000',
-      battery: '520km',
-      status: 'Pre-order',
-      statusColor: 'preorder'
-    },
-    {
-      name: 'EVM City Mini',
-      image: '/images/image.jpg',
-      brand: 'EVM',
-      type: 'City',
-      description: 'Compact city car',
-      range: '450km range',
-      price: '$150,000',
-      battery: '450km',
-      status: 'Promotion',
-      statusColor: 'promotion'
-    }
-  ];
+  // Fetch vehicles from API
+  useEffect(() => {
+    const fetchVehicles = async () => {
+      try {
+        setLoading(true);
+        const data = await vehiclesAPI.getAll();
+        setVehicles(data);
+      } catch (err) {
+        console.error('Error fetching vehicles:', err);
+        setError('Failed to load vehicles');
+        setVehicles([]);
+      } finally {
+        setLoading(false);
+      }
+    };
+
+    fetchVehicles();
+  }, []);
+
 
   const filteredVehicles = vehicles.filter(vehicle => {
-    const matchesSearch = vehicle.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
-                         vehicle.description.toLowerCase().includes(searchQuery.toLowerCase());
+    const matchesSearch = vehicle.modelName?.toLowerCase().includes(searchQuery.toLowerCase()) ||
+                         vehicle.brand?.toLowerCase().includes(searchQuery.toLowerCase());
     
     const matchesBrand = selectedBrand === 'All Brands' || vehicle.brand === selectedBrand;
     
-    const matchesType = selectedType === 'Vehicle Type' || vehicle.type === selectedType;
+    const matchesType = selectedType === 'Vehicle Type' || vehicle.vehicleType?.name === selectedType;
     
     // Price filter logic
     let matchesPrice = true;
     if (selectedPrice !== 'Price Range') {
-      const price = parseFloat(vehicle.price.replace(/[$,]/g, ''));
+      const price = vehicle.listedPrice || 0;
       switch (selectedPrice) {
         case 'Under $200k':
           matchesPrice = price < 200000;
@@ -103,7 +76,7 @@ const ElectricVehicles = () => {
     // Battery range filter logic
     let matchesRange = true;
     if (selectedRange !== 'Battery Range') {
-      const range = parseInt(vehicle.battery);
+      const range = vehicle.specifications?.battery?.range_km || 0;
       switch (selectedRange) {
         case 'Under 500km':
           matchesRange = range < 500;
@@ -126,14 +99,14 @@ const ElectricVehicles = () => {
   const sortedVehicles = [...filteredVehicles].sort((a, b) => {
     switch (sortBy) {
       case 'Sort by: Price Low to High':
-        return parseFloat(a.price.replace(/[$,]/g, '')) - parseFloat(b.price.replace(/[$,]/g, ''));
+        return (a.listedPrice || 0) - (b.listedPrice || 0);
       case 'Sort by: Price High to Low':
-        return parseFloat(b.price.replace(/[$,]/g, '')) - parseFloat(a.price.replace(/[$,]/g, ''));
+        return (b.listedPrice || 0) - (a.listedPrice || 0);
       case 'Sort by: Battery Range':
-        return parseInt(b.battery) - parseInt(a.battery);
+        return (b.specifications?.battery?.range_km || 0) - (a.specifications?.battery?.range_km || 0);
       case 'Sort by: Newest':
       default:
-        return 0; // Keep original order
+        return new Date(b.yearOfManufacture || 0) - new Date(a.yearOfManufacture || 0);
     }
   });
 
@@ -235,35 +208,52 @@ const ElectricVehicles = () => {
         </div>
 
         <div className="vehicles-grid">
-          {sortedVehicles.map((vehicle, index) => (
-            <motion.div
-              key={index}
-              initial={{ opacity: 0, y: 50 }}
-              whileInView={{ opacity: 1, y: 0 }}
-              transition={{ duration: 0.5, delay: index * 0.1 }}
-              viewport={{ once: true }}
-              className="vehicle-card"
-            >
-              <div className="vehicle-image-container">
-                <div className={`vehicle-status ${vehicle.statusColor}`}>{vehicle.status}</div>
-                <img src={vehicle.image} alt={vehicle.name} className="vehicle-image" />
-              </div>
-              <div className="vehicle-info">
-                <h3 className="vehicle-name">{vehicle.name}</h3>
-                <p className="vehicle-description">{vehicle.description}, {vehicle.range}</p>
-                <div className="vehicle-specs">
-                  <span className="spec-item">
-                    <i className="bx bxs-battery"></i> {vehicle.battery}
-                  </span>
-                  <span className="spec-item">
-                    <i className="bx bxs-bolt"></i> 18 min
-                  </span>
-                </div>
-                <div className="vehicle-price">{vehicle.price}</div>
-                <button className="btn-details">Details</button>
-              </div>
-            </motion.div>
-          ))}
+          {loading ? (
+            <div className="loading-message">Loading vehicles...</div>
+          ) : error ? (
+            <div className="error-message">{error}</div>
+          ) : vehicles.length === 0 ? (
+            <div className="no-vehicles-message">No vehicles available</div>
+          ) : (
+            sortedVehicles.map((vehicle, index) => {
+              // Get the first image from specifications.images array
+              const vehicleImage = vehicle.specifications?.images?.[0] || '/images/image.jpg';
+              const range = vehicle.specifications?.battery?.range_km || 0;
+              const price = vehicle.listedPrice ? `$${vehicle.listedPrice.toLocaleString()}` : 'Price TBD';
+              const status = vehicle.status || 'Available';
+              const statusColor = status.toLowerCase().replace(/\s+/g, '').replace(/_/g, '_');
+              
+              return (
+                <motion.div
+                  key={vehicle.id || index}
+                  initial={{ opacity: 0, y: 50 }}
+                  whileInView={{ opacity: 1, y: 0 }}
+                  transition={{ duration: 0.5, delay: index * 0.1 }}
+                  viewport={{ once: true }}
+                  className="vehicle-card"
+                >
+                  <div className="vehicle-image-container">
+                    <div className={`vehicle-status ${statusColor}`}>{status}</div>
+                    <img src={vehicleImage} alt={vehicle.modelName} className="vehicle-image" />
+                  </div>
+                  <div className="vehicle-info">
+                    <h3 className="vehicle-name">{vehicle.modelName}</h3>
+                    <p className="vehicle-description">{vehicle.brand} {vehicle.yearOfManufacture}, {range}km range</p>
+                    <div className="vehicle-specs">
+                      <span className="spec-item">
+                        <i className="bx bxs-battery"></i> {range}km
+                      </span>
+                      <span className="spec-item">
+                        <i className="bx bxs-bolt"></i> 18 min
+                      </span>
+                    </div>
+                    <div className="vehicle-price">{price}</div>
+                    <button className="btn-details">Details</button>
+                  </div>
+                </motion.div>
+              );
+            })
+          )}
         </div>
       </section>
 

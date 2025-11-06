@@ -8,6 +8,7 @@ import Navbar from './Navbar';
 import { vehiclesAPI } from '../utils/api/vehiclesAPI';
 
 const ElectricVehicles = () => {
+  const navigate = useNavigate();
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedBrand, setSelectedBrand] = useState('All Brands');
   const [selectedPrice, setSelectedPrice] = useState('Price Range');
@@ -219,6 +220,7 @@ const ElectricVehicles = () => {
               // Get the first image from specifications.images array
               const vehicleImage = vehicle.specifications?.images?.[0] || '/images/image.jpg';
               const range = vehicle.specifications?.battery?.range_km || 0;
+              const capacity_kWh = vehicle.specifications?.battery?.capacity_kWh || 0;
               const price = vehicle.listedPrice ? `$${vehicle.listedPrice.toLocaleString()}` : 'Price TBD';
               const status = vehicle.status || 'Available';
               const statusColor = status.toLowerCase().replace(/\s+/g, '').replace(/_/g, '_');
@@ -244,11 +246,11 @@ const ElectricVehicles = () => {
                         <i className="bx bxs-battery"></i> {range}km
                       </span>
                       <span className="spec-item">
-                        <i className="bx bxs-bolt"></i> 18 min
+                        <i className="bx bxs-bolt"></i> {capacity_kWh} kWh
                       </span>
                     </div>
                     <div className="vehicle-price">{price}</div>
-                    <button className="btn-details">Details</button>
+                    <button className="btn-details" onClick={() => navigate(`/details/${vehicle.id}`)}>Details</button>
                   </div>
                 </motion.div>
               );

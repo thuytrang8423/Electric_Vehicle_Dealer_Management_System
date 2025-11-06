@@ -5,6 +5,7 @@ import HomePage from './components/HomePage'
 import AuthPage from './components/AuthPage'
 import ElectricVehicles from './components/ElectricVehicles'
 import Contact from './components/Contact'
+import Details from './components/Details'
 import DashboardApp from './components/dashboard-layout/DashboardApp'
 import { ToastContainer } from 'react-toastify'
 import 'react-toastify/dist/ReactToastify.css'
@@ -33,6 +34,7 @@ function App() {
         <Route path="/" element={<HomePage loggedInUser={loggedInUser} onLogout={handleLogout} />} />
         <Route path="/auth" element={<AuthPage onLoginSuccess={handleLoginSuccess} />} />
         <Route path="/vehicles" element={<ElectricVehicles />} />
+        <Route path="/details/:id" element={<Details />} />
         <Route path="/contact" element={<Contact />} />
         <Route path="/dashboard" element={
           loggedInUser

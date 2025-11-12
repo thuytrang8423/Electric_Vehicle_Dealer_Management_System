@@ -4,6 +4,7 @@ export { vehiclesAPI } from './vehiclesAPI';
 export { ordersAPI } from './ordersAPI';
 export { quotesAPI } from './quotesAPI';
 export { customersAPI } from './customersAPI';
+export { testDriveAPI } from './testDriveAPI';
 export { promotionsAPI } from './promotionsAPI';
 export { dealersAPI } from './dealersAPI';
 export { usersAPI } from './usersAPI';

@@ -182,7 +182,7 @@ const HomePage = ({ loggedInUser, onLogout }) => {
                       {vehicle.brand} {vehicle.yearOfManufacture}, {range}km range
                     </p>
                     <div className="vehicle-price">{price}</div>
-                    <button className="btn-details">Details</button>
+                    <button className="btn-details" onClick={() => navigate(`/details/${vehicle.id}`)}>Details</button>
                   </div>
                 </motion.div>
               );

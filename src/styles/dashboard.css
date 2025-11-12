@@ -3,11 +3,11 @@
 
 /* BASE SYSTEM COLORS - LIGHT MODE */
 :root {
-  --color-primary: #6C63FF;
-  --color-secondary: #00BFA6;
-  --color-accent: #FFC107;
-  --color-button: #FF6B6B;
-  --color-button-hover: #FF5252;
+  --color-primary: #DC2626;
+  --color-secondary: #991B1B;
+  --color-accent: #B91C1C;
+  --color-button: #DC2626;
+  --color-button-hover: #B91C1C;
   --color-bg: #F8F9FB;
   --color-surface: #F5F5F7;
   --color-border: #E5E7EB;
@@ -24,11 +24,11 @@
 
 /* DARK MODE */
 .app.dark-mode {
-  --color-primary: #8B5CF6;
-  --color-secondary: #10B981;
-  --color-accent: #F59E0B;
-  --color-button: #FF6B6B;
-  --color-button-hover: #FF5252;
+  --color-primary: #EF4444;
+  --color-secondary: #DC2626;
+  --color-accent: #B91C1C;
+  --color-button: #EF4444;
+  --color-button-hover: #DC2626;
   --color-bg: #0F172A;
   --color-surface: #1E293B;
   --color-border: #334155;
@@ -187,7 +187,7 @@
 .header__search-input:focus {
   outline: none;
   border-color: var(--color-primary);
-  box-shadow: 0 0 0 3px rgba(108, 99, 255, 0.1);
+  box-shadow: 0 0 0 3px rgba(220, 38, 38, 0.1);
 }
 
 .header__search-icon {

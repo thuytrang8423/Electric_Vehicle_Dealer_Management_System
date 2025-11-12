@@ -157,7 +157,7 @@ const HomePage = ({ loggedInUser, onLogout }) => {
           ) : vehicles.length === 0 ? (
             <div className="no-vehicles-message">No vehicles available</div>
           ) : (
-            vehicles.map((vehicle, index) => {
+            vehicles.slice(0, 4).map((vehicle, index) => {
               // Get the first image from specifications.images array
               const vehicleImage = vehicle.specifications?.images?.[0] || '/images/image.jpg';
               const range = vehicle.specifications?.battery?.range_km || 0;

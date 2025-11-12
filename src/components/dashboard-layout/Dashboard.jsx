@@ -1,5 +1,6 @@
-import React from 'react';
-import { LineChart, Line, AreaChart, Area, BarChart, Bar, PieChart, Pie, Cell, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer } from 'recharts';
+import React, { useState, useEffect, useCallback } from 'react';
+import { PieChart, Pie, Cell, Tooltip, ResponsiveContainer } from 'recharts';
+import { evmAPI, handleAPIError } from '../../utils/api';
 import 'boxicons/css/boxicons.min.css';
 
 const Dashboard = ({ user }) => {
@@ -40,21 +41,95 @@ const Dashboard = ({ user }) => {
     ]
   };
 
+  // EVM Manager state
+  const [dateRange, setDateRange] = useState({
+    from: new Date(new Date().setMonth(new Date().getMonth() - 1)).toISOString().split('T')[0],
+    to: new Date().toISOString().split('T')[0]
+  });
+  const [systemStatus, setSystemStatus] = useState({
+    orderStatusCounts: {},
+    totalSales: 0
+  });
+  const [dealerPerformance, setDealerPerformance] = useState([]);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState(null);
+
+  // Fetch EVM data
+  const fetchEVMData = useCallback(async () => {
+    setLoading(true);
+    setError(null);
+    try {
+      const [statusData, performanceData] = await Promise.all([
+        evmAPI.getSystemStatus(dateRange),
+        evmAPI.getDealerPerformance(dateRange)
+      ]);
+      console.log('System Status Data:', statusData);
+      console.log('Dealer Performance Data:', performanceData);
+      setSystemStatus(statusData);
+      setDealerPerformance(Array.isArray(performanceData) ? performanceData : []);
+    } catch (err) {
+      setError(handleAPIError(err));
+      console.error('Error fetching EVM data:', err);
+      console.error('Error details:', err.response?.data);
+    } finally {
+      setLoading(false);
+    }
+  }, [dateRange]);
+
+  // Check if user is EVM Manager (support multiple role formats)
+  const isEVMManager = user?.role === 'evm-manager' || user?.role === 'EVM_MANAGER' || user?.role === 'evm-staff';
+
+  useEffect(() => {
+    if (isEVMManager) {
+      fetchEVMData();
+    }
+  }, [isEVMManager, fetchEVMData]);
+
+  // Calculate total orders from status counts
+  const getTotalOrders = () => {
+    return Object.values(systemStatus.orderStatusCounts || {}).reduce((sum, count) => sum + (count || 0), 0);
+  };
+
+  // Format currency
+  const formatCurrency = (amount) => {
+    if (amount >= 1000000) {
+      return `$${(amount / 1000000).toFixed(2)}M`;
+    } else if (amount >= 1000) {
+      return `$${(amount / 1000).toFixed(2)}K`;
+    }
+    return `$${amount?.toLocaleString() || '0'}`;
+  };
+
   const evmStaffData = {
     stats: [
-      { label: 'Total Vehicles', value: '2,847', change: '+156', icon: 'bx-car', color: 'primary' },
-      { label: 'Active Dealers', value: '156', change: '+5', icon: 'bx-store', color: 'secondary' },
-      { label: 'System Inventory', value: '68%', change: 'Healthy', icon: 'bx-box', color: 'success' },
-      { label: 'Vehicle Orders', value: '89', change: '+12 pending', icon: 'bx-clipboard', color: 'accent' }
-    ],
-    topDealers: [
-      { name: 'Metro Auto Group', sales: 145, revenue: '$6.5M', vehicles: 78 },
-      { name: 'City Motors', sales: 132, revenue: '$5.9M', vehicles: 65 },
-      { name: 'Green Drive Dealers', sales: 108, revenue: '$4.8M', vehicles: 52 }
-    ],
-    vehicleOrders: [
-      { id: 1, dealer: 'Metro Auto Group', vehicle: 'Tesla Model 3', qty: 15, status: 'Approved' },
-      { id: 2, dealer: 'City Motors', vehicle: 'BMW i3', qty: 8, status: 'Pending' }
+      { 
+        label: 'Total Revenue', 
+        value: formatCurrency(systemStatus.totalSales || 0), 
+        change: 'System', 
+        icon: 'bx-dollar-circle', 
+        color: 'primary' 
+      },
+      { 
+        label: 'Total Orders', 
+        value: getTotalOrders().toLocaleString(), 
+        change: 'All statuses', 
+        icon: 'bx-clipboard', 
+        color: 'secondary' 
+      },
+      { 
+        label: 'Active Dealers', 
+        value: dealerPerformance.length.toString(), 
+        change: 'Active', 
+        icon: 'bx-store', 
+        color: 'success' 
+      },
+      { 
+        label: 'Pending Orders', 
+        value: (systemStatus.orderStatusCounts?.PENDING || systemStatus.orderStatusCounts?.PROCESSING || 0).toString(), 
+        change: 'Needs attention', 
+        icon: 'bx-time-five', 
+        color: 'warning' 
+      }
     ]
   };
 
@@ -79,11 +154,16 @@ const Dashboard = ({ user }) => {
   };
 
   const getDataForRole = () => {
-    switch (user?.role) {
+    const role = user?.role;
+    // Support multiple EVM role formats
+    if (role === 'evm-manager' || role === 'EVM_MANAGER' || role === 'evm-staff') {
+      return evmStaffData;
+    }
+    switch (role) {
       case 'dealer-staff': return dealerStaffData;
       case 'dealer-manager': return dealerManagerData;
-      case 'evm-manager': return evmStaffData;
-      case 'admin': return adminData;
+      case 'admin':
+      case 'ADMIN': return adminData;
       default: return dealerManagerData;
     }
   };
@@ -253,56 +333,229 @@ const Dashboard = ({ user }) => {
         </div>
       )}
 
-      {user?.role === 'evm-manager' && (
-        <div className="charts-grid">
-          <div className="chart-card">
-            <h3 className="chart-card__title">Top Performing Dealers</h3>
-            <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
-              {data.topDealers.map((dealer, index) => (
-                <div key={index} style={{
-                  display: 'flex',
-                  justifyContent: 'space-between',
-                  alignItems: 'center',
-                  padding: '12px',
-                  background: 'var(--color-bg)',
-                  borderRadius: 'var(--radius)'
-                }}>
-                  <div>
-                    <div style={{ fontWeight: '600', color: 'var(--color-text)' }}>{dealer.name}</div>
-                    <div style={{ fontSize: '13px', color: 'var(--color-text-muted)' }}>
-                      {dealer.sales} sales • {dealer.vehicles} vehicles
-                    </div>
-                  </div>
-                  <div style={{ fontWeight: '600', color: 'var(--color-primary)' }}>{dealer.revenue}</div>
+      {isEVMManager && (
+        <>
+          {/* Date Range Picker */}
+          <div className="chart-card" style={{ marginBottom: '24px' }}>
+            <div style={{ 
+              display: 'flex', 
+              justifyContent: 'space-between', 
+              alignItems: 'center',
+              marginBottom: '16px',
+              flexWrap: 'wrap',
+              gap: '12px'
+            }}>
+              <h3 className="chart-card__title" style={{ margin: 0 }}>System Data Summary</h3>
+              <div style={{ display: 'flex', gap: '12px', alignItems: 'center', flexWrap: 'wrap' }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                  <label style={{ fontSize: '14px', color: 'var(--color-text-muted)', whiteSpace: 'nowrap' }}>From:</label>
+                  <input
+                    type="date"
+                    value={dateRange.from}
+                    onChange={(e) => setDateRange({ ...dateRange, from: e.target.value })}
+                    style={{
+                      padding: '8px 12px',
+                      border: '1px solid var(--color-border)',
+                      borderRadius: 'var(--radius)',
+                      background: 'var(--color-surface)',
+                      color: 'var(--color-text)',
+                      fontSize: '14px'
+                    }}
+                  />
                 </div>
-              ))}
+                <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                  <label style={{ fontSize: '14px', color: 'var(--color-text-muted)', whiteSpace: 'nowrap' }}>To:</label>
+                  <input
+                    type="date"
+                    value={dateRange.to}
+                    onChange={(e) => setDateRange({ ...dateRange, to: e.target.value })}
+                    style={{
+                      padding: '8px 12px',
+                      border: '1px solid var(--color-border)',
+                      borderRadius: 'var(--radius)',
+                      background: 'var(--color-surface)',
+                      color: 'var(--color-text)',
+                      fontSize: '14px'
+                    }}
+                  />
+                </div>
+                <button
+                  onClick={fetchEVMData}
+                  disabled={loading}
+                  className="btn btn-primary"
+                  style={{ padding: '8px 16px', fontSize: '14px', whiteSpace: 'nowrap' }}
+                >
+                  <i className="bx bx-refresh"></i> {loading ? 'Loading...' : 'Refresh'}
+                </button>
+              </div>
             </div>
+            {error && (
+              <div style={{
+                padding: '12px',
+                background: 'rgba(255, 107, 107, 0.1)',
+                border: '1px solid #FF6B6B',
+                borderRadius: 'var(--radius)',
+                color: '#FF6B6B',
+                marginBottom: '16px'
+              }}>
+                <i className="bx bx-error-circle"></i> {error}
+              </div>
+            )}
           </div>
 
-          <div className="chart-card">
-            <h3 className="chart-card__title">Vehicle Orders from Dealers</h3>
-            <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
-              {data.vehicleOrders.map((order, index) => (
-                <div key={index} style={{
-                  padding: '12px',
-                  background: 'var(--color-bg)',
-                  borderRadius: 'var(--radius)'
-                }}>
-                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '8px' }}>
-                    <div>
-                      <div style={{ fontWeight: '600', color: 'var(--color-text)' }}>{order.dealer}</div>
-                      <div style={{ fontSize: '13px', color: 'var(--color-text-muted)' }}>{order.vehicle}</div>
+          {/* Order Status Counts */}
+          <div className="chart-card" style={{ marginBottom: '24px' }}>
+            <h3 className="chart-card__title">Order Status Statistics</h3>
+            {loading ? (
+              <div style={{ textAlign: 'center', padding: '40px', color: 'var(--color-text-muted)' }}>
+                <i className="bx bx-loader-alt bx-spin" style={{ fontSize: '32px', marginBottom: '12px' }}></i>
+                <div>Loading data...</div>
+              </div>
+            ) : Object.keys(systemStatus.orderStatusCounts || {}).length === 0 ? (
+              <div style={{ textAlign: 'center', padding: '40px', color: 'var(--color-text-muted)' }}>
+                <i className="bx bx-info-circle" style={{ fontSize: '32px', marginBottom: '12px' }}></i>
+                <div>No data available for this time period</div>
+              </div>
+            ) : (
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: '16px' }}>
+                {Object.entries(systemStatus.orderStatusCounts || {}).map(([status, count]) => {
+                  // Map status to colors
+                  const getStatusColor = (statusName) => {
+                    const upperStatus = statusName.toUpperCase();
+                    if (upperStatus.includes('COMPLETED') || upperStatus.includes('DONE') || upperStatus.includes('DELIVERED')) {
+                      return '#22C55E'; // Green
+                    } else if (upperStatus.includes('PENDING') || upperStatus.includes('WAITING')) {
+                      return '#F59E0B'; // Orange/Amber
+                    } else if (upperStatus.includes('APPROVED') || upperStatus.includes('CONFIRMED')) {
+                      return '#3B82F6'; // Blue
+                    } else if (upperStatus.includes('CANCELLED') || upperStatus.includes('REJECTED')) {
+                      return '#EF4444'; // Red
+                    } else if (upperStatus.includes('PROCESSING') || upperStatus.includes('IN_PROGRESS')) {
+                      return '#8B5CF6'; // Purple
+                    } else {
+                      return 'var(--color-primary)'; // Default red
+                    }
+                  };
+
+                  return (
+                    <div key={status} style={{
+                      padding: '16px',
+                      background: 'var(--color-bg)',
+                      borderRadius: 'var(--radius)',
+                      border: '1px solid var(--color-border)',
+                      textAlign: 'center'
+                    }}>
+                      <div style={{ 
+                        fontSize: '32px', 
+                        fontWeight: '700', 
+                        color: getStatusColor(status),
+                        marginBottom: '8px'
+                      }}>
+                        {count?.toLocaleString() || 0}
+                      </div>
+                      <div style={{ 
+                        fontSize: '14px', 
+                        color: 'var(--color-text-muted)',
+                        textTransform: 'capitalize'
+                      }}>
+                        {status.replace(/_/g, ' ')}
+                      </div>
                     </div>
-                    <div style={{ fontWeight: '600', color: 'var(--color-primary)' }}>{order.qty} units</div>
-                  </div>
-                  <div style={{ fontSize: '12px', color: getStatusColor(order.status), fontWeight: '500' }}>
-                    {order.status}
-                  </div>
-                </div>
-              ))}
-            </div>
+                  );
+                })}
+              </div>
+            )}
           </div>
-        </div>
+
+          {/* Dealer Performance and Order Status Distribution - Side by Side */}
+          <div className="charts-grid">
+            {/* Dealer Performance */}
+            <div className="chart-card">
+              <h3 className="chart-card__title">Dealer Performance</h3>
+              {loading ? (
+                <div style={{ textAlign: 'center', padding: '40px', color: 'var(--color-text-muted)' }}>
+                  <i className="bx bx-loader-alt bx-spin" style={{ fontSize: '32px', marginBottom: '12px' }}></i>
+                  <div>Loading data...</div>
+                </div>
+              ) : dealerPerformance.length === 0 ? (
+                <div style={{ textAlign: 'center', padding: '40px', color: 'var(--color-text-muted)' }}>
+                  <i className="bx bx-info-circle" style={{ fontSize: '32px', marginBottom: '12px' }}></i>
+                  <div>No dealer data available for this time period</div>
+                </div>
+              ) : (
+                <div style={{ overflowX: 'auto' }}>
+                  <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+                    <thead>
+                      <tr style={{ borderBottom: '2px solid var(--color-border)' }}>
+                        <th style={{ padding: '12px', textAlign: 'left', color: 'var(--color-text-muted)', fontWeight: '600' }}>No</th>
+                        <th style={{ padding: '12px', textAlign: 'left', color: 'var(--color-text-muted)', fontWeight: '600' }}>Dealer Name</th>
+                        <th style={{ padding: '12px', textAlign: 'right', color: 'var(--color-text-muted)', fontWeight: '600' }} title="Tổng tiền đã đặt tới EVM">Total Sales</th>
+                        <th style={{ padding: '12px', textAlign: 'right', color: 'var(--color-text-muted)', fontWeight: '600' }} title="Số đơn hàng đã đặt tới EVM">Total Orders</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {dealerPerformance
+                        .sort((a, b) => (b.totalSales || 0) - (a.totalSales || 0))
+                        .map((dealer, index) => (
+                          <tr key={dealer.dealerId || index} style={{ 
+                            borderBottom: '1px solid var(--color-border)',
+                            transition: 'background 0.2s'
+                          }}
+                          onMouseEnter={(e) => e.currentTarget.style.background = 'var(--color-bg)'}
+                          onMouseLeave={(e) => e.currentTarget.style.background = 'transparent'}>
+                          <td style={{ padding: '12px', color: 'var(--color-text)', fontWeight: '600' }}>
+                            {index + 1}
+                          </td>
+                            <td style={{ padding: '12px', color: 'var(--color-text)', fontWeight: '600' }}>
+                              {dealer.dealerName || `Dealer #${dealer.dealerId}`}
+                            </td>
+                            <td style={{ padding: '12px', textAlign: 'right', color: 'var(--color-primary)', fontWeight: '600' }}>
+                              {formatCurrency(dealer.totalSales || 0)}
+                            </td>
+                            <td style={{ padding: '12px', textAlign: 'right', color: 'var(--color-text)' }}>
+                              {(dealer.totalOrders || 0).toLocaleString()}
+                            </td>
+                          </tr>
+                        ))}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+            </div>
+
+            {/* Order Status Distribution Chart */}
+            {Object.keys(systemStatus.orderStatusCounts || {}).length > 0 && (
+              <div className="chart-card">
+                <h3 className="chart-card__title">Order Status Distribution</h3>
+              <ResponsiveContainer width="100%" height={300}>
+                <PieChart>
+                  <Pie
+                    data={Object.entries(systemStatus.orderStatusCounts || {}).map(([name, value]) => ({
+                      name: name.replace(/_/g, ' '),
+                      value: value || 0
+                    }))}
+                    cx="50%"
+                    cy="50%"
+                    labelLine={false}
+                    label={({name, percent}) => `${name}: ${(percent * 100).toFixed(1)}%`}
+                    outerRadius={100}
+                    fill="#8884d8"
+                    dataKey="value"
+                  >
+                    {Object.entries(systemStatus.orderStatusCounts || {}).map((entry, index) => {
+                      const colors = ['#6C63FF', '#00BFA6', '#FFC107', '#FF6B6B', '#9C27B0', '#2196F3', '#4CAF50'];
+                      return (
+                        <Cell key={`cell-${index}`} fill={colors[index % colors.length]} />
+                      );
+                    })}
+                  </Pie>
+                  <Tooltip />
+                </PieChart>
+              </ResponsiveContainer>
+              </div>
+            )}
+          </div>
+        </>
       )}
 
       {user?.role === 'admin' && (
@@ -367,74 +620,6 @@ const Dashboard = ({ user }) => {
         </div>
       )}
 
-      {/* Charts Section */}
-      <div className="charts-grid">
-        <div className="chart-card">
-          <h3 className="chart-card__title">Performance Trend</h3>
-          <ResponsiveContainer width="100%" height={300}>
-            <AreaChart data={[
-              { month: 'Jan', revenue: 4000, orders: 45 },
-              { month: 'Feb', revenue: 3000, orders: 38 },
-              { month: 'Mar', revenue: 5000, orders: 52 },
-              { month: 'Apr', revenue: 4500, orders: 48 },
-              { month: 'May', revenue: 6000, orders: 61 },
-              { month: 'Jun', revenue: 5500, orders: 58 }
-            ]}>
-              <defs>
-                <linearGradient id="colorRevenue" x1="0" y1="0" x2="0" y2="1">
-                  <stop offset="5%" stopColor="#6C63FF" stopOpacity={0.3}/>
-                  <stop offset="95%" stopColor="#6C63FF" stopOpacity={0}/>
-                </linearGradient>
-              </defs>
-              <CartesianGrid strokeDasharray="3 3" stroke="var(--color-border)" />
-              <XAxis dataKey="month" stroke="var(--color-text-muted)" />
-              <YAxis stroke="var(--color-text-muted)" />
-              <Tooltip 
-                contentStyle={{ 
-                  background: 'var(--color-surface)', 
-                  border: '1px solid var(--color-border)',
-                  borderRadius: 'var(--radius)'
-                }}
-              />
-              <Legend />
-              <Area type="monotone" dataKey="revenue" stroke="#6C63FF" fillOpacity={1} fill="url(#colorRevenue)" name="Revenue (K)" />
-            </AreaChart>
-          </ResponsiveContainer>
-        </div>
-
-        <div className="chart-card">
-          <h3 className="chart-card__title">Sales Distribution</h3>
-          <ResponsiveContainer width="100%" height={300}>
-            <PieChart>
-              <Pie
-                data={[
-                  { name: 'Tesla', value: 45, color: '#6C63FF' },
-                  { name: 'BMW', value: 30, color: '#00BFA6' },
-                  { name: 'Nissan', value: 15, color: '#FFC107' },
-                  { name: 'Others', value: 10, color: '#FF6B6B' }
-                ]}
-                cx="50%"
-                cy="50%"
-                labelLine={false}
-                label={({name, percent}) => `${name} ${(percent * 100).toFixed(0)}%`}
-                outerRadius={80}
-                fill="#8884d8"
-                dataKey="value"
-              >
-                {[
-                  { name: 'Tesla', value: 45, color: '#6C63FF' },
-                  { name: 'BMW', value: 30, color: '#00BFA6' },
-                  { name: 'Nissan', value: 15, color: '#FFC107' },
-                  { name: 'Others', value: 10, color: '#FF6B6B' }
-                ].map((entry, index) => (
-                  <Cell key={`cell-${index}`} fill={entry.color} />
-                ))}
-              </Pie>
-              <Tooltip />
-            </PieChart>
-          </ResponsiveContainer>
-        </div>
-      </div>
     </div>
   );
 };

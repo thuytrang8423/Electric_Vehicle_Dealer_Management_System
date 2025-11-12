@@ -8,6 +8,7 @@ export { testDriveAPI } from './testDriveAPI';
 export { promotionsAPI } from './promotionsAPI';
 export { dealersAPI } from './dealersAPI';
 export { usersAPI } from './usersAPI';
+export { evmAPI } from './evmAPI';
 export { default as auditLogsAPI } from './auditLogsAPI';
 
 // Export utilities

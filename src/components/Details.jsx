@@ -31,7 +31,7 @@ const Details = () => {
     phoneNumber: '',
     carModel: '',
     dealerId: '',
-    date: today,
+    date: '',
     time: '07:00:00',
     note: ''
   });
@@ -287,7 +287,7 @@ const Details = () => {
       phoneNumber: '',
       carModel: vehicle?.modelName || '',
       dealerId: '',
-      date: today,
+      date: '',
       time: '07:00:00',
       note: ''
     });
@@ -303,7 +303,7 @@ const Details = () => {
       phoneNumber: '',
       carModel: vehicle?.modelName || '',
       dealerId: '',
-      date: today,
+      date: '',
       time: '07:00:00',
       note: ''
     });
@@ -350,10 +350,14 @@ const Details = () => {
 
     try {
       setSubmitting(true);
-      const formattedTime =
-        formData.time && formData.time.length === 5
-          ? `${formData.time}:00`
-          : formData.time || '07:00:00';
+      // Extract hour and minute from time (format: HH:mm:ss or HH:mm)
+      const timeParts = formData.time ? formData.time.split(':') : ['07', '00'];
+      const hour = timeParts[0] || '07';
+      const minute = timeParts[1] || '00';
+      
+      // Combine date and time into ISO datetime string: "YYYY-MM-DDTHH:mm:ss.sssZ"
+      const dateTimeString = `${formData.date}T${hour}:${minute}:00.000Z`;
+      const requestTime = new Date(dateTimeString).toISOString();
 
       const testDriveData = {
         customerName: formData.customerName.trim(),
@@ -362,7 +366,7 @@ const Details = () => {
         carModel: formData.carModel.trim(),
         dealerId: parseInt(formData.dealerId, 10),
         date: formData.date,
-        time: formattedTime,
+        requestTime: requestTime,
         note: formData.note.trim() || ''
       };
 

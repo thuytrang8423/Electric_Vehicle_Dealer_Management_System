@@ -1,6 +1,7 @@
-import React, { useState } from 'react';
-import { showSuccessToast } from '../../utils/toast';
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import { showErrorToast, showSuccessToast } from '../../utils/toast';
 import 'boxicons/css/boxicons.min.css';
+import { testDriveAPI } from '../../utils/api/testDriveAPI';
 
 const TestDriveManagement = ({ user }) => {
   const [selectedDate, setSelectedDate] = useState(new Date());
@@ -16,23 +17,248 @@ const TestDriveManagement = ({ user }) => {
     notes: '',
     status: 'scheduled'
   });
-  const [testDrives, setTestDrives] = useState([
-    { id: 1, customer: 'John Doe', vehicle: 'Tesla Model 3', date: '2025-10-12', time: '10:00 AM', status: 'scheduled', notes: '', phone: '+1-234-567-8901', email: 'john.doe@email.com' },
-    { id: 2, customer: 'Jane Smith', vehicle: 'BMW i3', date: '2025-10-12', time: '2:00 PM', status: 'completed', notes: 'Customer showed high interest', phone: '+1-234-567-8902', email: 'jane.smith@email.com' },
-    { id: 3, customer: 'Mike Chen', vehicle: 'Nissan Leaf', date: '2025-10-10', time: '11:00 AM', status: 'scheduled', notes: '', phone: '+1-234-567-8903', email: 'mike.chen@email.com' },
-    { id: 4, customer: 'Lisa Brown', vehicle: 'Chevrolet Bolt', date: '2025-10-11', time: '3:00 PM', status: 'scheduled', notes: '', phone: '+1-234-567-8904', email: 'lisa.brown@email.com' },
-    { id: 5, customer: 'Tom Wilson', vehicle: 'Tesla Model Y', date: '2025-10-14', time: '10:00 AM', status: 'scheduled', notes: '', phone: '+1-234-567-8905', email: 'tom.wilson@email.com' },
-    { id: 6, customer: 'Sarah Johnson', vehicle: 'Audi e-tron', date: '2025-10-08', time: '9:00 AM', status: 'scheduled', notes: 'First time buyer', phone: '+1-234-567-8906', email: 'sarah.j@email.com' },
-    { id: 7, customer: 'David Lee', vehicle: 'Tesla Model 3', date: '2025-10-08', time: '3:00 PM', status: 'completed', notes: 'Very satisfied with the drive', phone: '+1-234-567-8907', email: 'david.lee@email.com' },
-    { id: 8, customer: 'Emily Davis', vehicle: 'BMW i3', date: '2025-10-09', time: '11:00 AM', status: 'scheduled', notes: 'Follow up call needed', phone: '+1-234-567-8908', email: 'emily.davis@email.com' },
-    { id: 9, customer: 'Robert Martinez', vehicle: 'Ford Mustang Mach-E', date: '2025-10-09', time: '2:00 PM', status: 'scheduled', notes: '', phone: '+1-234-567-8909', email: 'robert.m@email.com' },
-    { id: 10, customer: 'Olivia Garcia', vehicle: 'Hyundai IONIQ 5', date: '2025-10-11', time: '10:00 AM', status: 'cancelled', notes: 'Customer had to reschedule', phone: '+1-234-567-8910', email: 'olivia.g@email.com' },
-    { id: 11, customer: 'James Anderson', vehicle: 'Tesla Model 3', date: '2025-10-13', time: '1:00 PM', status: 'scheduled', notes: '', phone: '+1-234-567-8911', email: 'james.a@email.com' },
-    { id: 12, customer: 'Sophia Taylor', vehicle: 'Nissan Leaf', date: '2025-10-13', time: '4:00 PM', status: 'scheduled', notes: 'Family test drive', phone: '+1-234-567-8912', email: 'sophia.t@email.com' },
-    { id: 13, customer: 'Michael White', vehicle: 'Chevrolet Bolt', date: '2025-10-15', time: '9:00 AM', status: 'scheduled', notes: '', phone: '+1-234-567-8913', email: 'michael.w@email.com' },
-    { id: 14, customer: 'Jessica Moore', vehicle: 'Tesla Model Y', date: '2025-10-15', time: '11:00 AM', status: 'scheduled', notes: 'Trade-in evaluation needed', phone: '+1-234-567-8914', email: 'jessica.m@email.com' },
-    { id: 15, customer: 'Christopher Harris', vehicle: 'Audi e-tron', date: '2025-10-16', time: '2:00 PM', status: 'scheduled', notes: '', phone: '+1-234-567-8915', email: 'christopher.h@email.com' }
-  ]);
+  const [testDrives, setTestDrives] = useState([]);
+  const [pendingRequests, setPendingRequests] = useState([]);
+  const [loadingRequests, setLoadingRequests] = useState(false);
+  const [requestsError, setRequestsError] = useState('');
+  const [showConfirmationModal, setShowConfirmationModal] = useState(false);
+  const [selectedRequest, setSelectedRequest] = useState(null);
+  const [confirmationData, setConfirmationData] = useState({
+    date: '',
+    time: '',
+    note: ''
+  });
+  const [actionLoading, setActionLoading] = useState(false);
+
+  const dealerId =
+    user?.dealerId ??
+    user?.dealerID ??
+    user?.dealer?.dealerId ??
+    user?.dealer?.id ??
+    null;
+
+  const normaliseTimeInput = (value) => {
+    if (!value) return '';
+    const parts = value.split(':');
+    if (parts.length >= 2) {
+      return `${parts[0].padStart(2, '0')}:${parts[1].padStart(2, '0')}`;
+    }
+    return value;
+  };
+
+  const normaliseStatusForCalendar = (status) => {
+    const value = (status || '').toString().toUpperCase();
+    switch (value) {
+      case 'SCHEDULED':
+      case 'CONFIRMED':
+      case 'APPROVED':
+        return 'scheduled';
+      case 'COMPLETED':
+      case 'DONE':
+        return 'completed';
+      case 'CANCELLED':
+      case 'CANCELED':
+      case 'REJECTED':
+      case 'DECLINED':
+        return 'cancelled';
+      default:
+        return value.toLowerCase() || 'pending';
+    }
+  };
+
+  const mapScheduleToTestDrive = (schedule) => {
+    const scheduleId = getRequestIdentifier(schedule);
+    const dateValue =
+      schedule?.confirmedDate ??
+      schedule?.date ??
+      schedule?.preferredDate ??
+      schedule?.requestedDate ??
+      '';
+    const timeValue = normaliseTimeInput(
+      schedule?.confirmedTime ?? schedule?.time ?? schedule?.preferredTime ?? ''
+    );
+    return {
+      id: scheduleId ?? `schedule-${Math.random().toString(36).slice(2)}`,
+      customer: schedule?.customerName ?? schedule?.name ?? 'Khách hàng',
+      vehicle: schedule?.carModel ?? schedule?.vehicle ?? schedule?.vehicleModel ?? 'Chưa cập nhật',
+      date: dateValue,
+      time: timeValue,
+      phone: schedule?.phoneNumber ?? schedule?.phone ?? '',
+      email: schedule?.customerEmail ?? schedule?.email ?? '',
+      notes: schedule?.note ?? schedule?.customerNote ?? '',
+      status: normaliseStatusForCalendar(schedule?.status ?? schedule?.requestStatus)
+    };
+  };
+
+  const getRequestIdentifier = (request) =>
+    request?.id ?? request?.scheduleId ?? request?.requestId ?? request?.bookingId ?? null;
+
+  const isPendingStatus = (status) => {
+    const value = (status || '').toString().toLowerCase();
+    return (
+      !value ||
+      value === 'pending' ||
+      value === 'awaiting' ||
+      value === 'awaiting_confirmation' ||
+      value === 'awaiting_approval' ||
+      value === 'submitted' ||
+      value === 'new'
+    );
+  };
+
+  const loadPendingRequests = useCallback(async () => {
+    if (!dealerId) {
+      setPendingRequests([]);
+      setRequestsError('Không xác định được đại lý hiện tại.');
+      return;
+    }
+
+    setLoadingRequests(true);
+    setRequestsError('');
+    try {
+      const data = await testDriveAPI.getScheduleList(dealerId);
+      const schedules = Array.isArray(data)
+        ? data
+        : Array.isArray(data?.items)
+        ? data.items
+        : [];
+      setPendingRequests(schedules);
+      setTestDrives(
+        schedules
+          .map(mapScheduleToTestDrive)
+          .filter((drive) => drive.date && drive.time)
+      );
+    } catch (error) {
+      console.error('Failed to load test drive requests:', error);
+      setRequestsError('Không thể tải danh sách yêu cầu thử xe.');
+      showErrorToast('Tải danh sách yêu cầu thử xe thất bại.');
+    } finally {
+      setLoadingRequests(false);
+    }
+  }, [dealerId]);
+
+  useEffect(() => {
+    loadPendingRequests();
+  }, [loadPendingRequests]);
+
+  const pendingRequestsForDealer = useMemo(() => {
+    return pendingRequests.filter((request) => {
+      const requestDealerId =
+        request?.dealerId ??
+        request?.dealerID ??
+        request?.dealer?.dealerId ??
+        request?.dealer?.id ??
+        request?.dealer_id ??
+        null;
+      const matchDealer = !dealerId || (requestDealerId !== null && String(requestDealerId) === String(dealerId));
+      const status = request?.status ?? request?.requestStatus ?? request?.bookingStatus;
+      return matchDealer && isPendingStatus(status);
+    });
+  }, [pendingRequests, dealerId]);
+
+  const handleOpenConfirmation = (request) => {
+    setSelectedRequest(request);
+    setConfirmationData({
+      date: request?.confirmedDate ?? request?.date ?? request?.preferredDate ?? '',
+      time: normaliseTimeInput(request?.confirmedTime ?? request?.time ?? request?.preferredTime ?? ''),
+      note: ''
+    });
+    setShowConfirmationModal(true);
+  };
+
+  const handleCloseConfirmation = () => {
+    setShowConfirmationModal(false);
+    setSelectedRequest(null);
+    setConfirmationData({
+      date: '',
+      time: '',
+      note: ''
+    });
+  };
+
+  const handleRequestAction = async (action) => {
+    if (!selectedRequest) return;
+
+    const scheduleId = getRequestIdentifier(selectedRequest);
+    if (!scheduleId) {
+      showErrorToast('Thiếu mã định danh yêu cầu. Không thể xử lý.');
+      return;
+    }
+
+    if (action === 'approve' && (!confirmationData.date || !confirmationData.time)) {
+      showErrorToast('Vui lòng chọn ngày và giờ xác nhận.');
+      return;
+    }
+
+    const formattedTime = normaliseTimeInput(confirmationData.time);
+    const timeValue =
+      formattedTime && formattedTime.length === 5 ? `${formattedTime}:00` : formattedTime;
+
+    const confirmPayload = {
+      ...(confirmationData.date ? { date: confirmationData.date } : {}),
+      ...(timeValue ? { time: timeValue } : {}),
+      ...(confirmationData.note ? { note: confirmationData.note } : {})
+    };
+
+    const rejectPayload = confirmationData.note ? { note: confirmationData.note } : {};
+
+    try {
+      setActionLoading(true);
+      const updatedRequest =
+        action === 'approve'
+          ? await testDriveAPI.confirmRequest(scheduleId, confirmPayload)
+          : await testDriveAPI.rejectRequest(scheduleId, rejectPayload);
+      const fallbackStatus = action === 'approve' ? 'CONFIRMED' : 'REJECTED';
+      setPendingRequests((prev) =>
+        prev.map((request) => {
+          const requestId = getRequestIdentifier(request);
+          if (requestId === scheduleId) {
+            const nextStatus = updatedRequest?.status ?? fallbackStatus;
+            const mergedRequest = {
+              ...request,
+              ...(updatedRequest ?? {}),
+              status: nextStatus,
+              id: scheduleId,
+              scheduleId
+            };
+            return {
+              ...mergedRequest
+            };
+          }
+          return request;
+        })
+      );
+      const nextStatus = updatedRequest?.status ?? fallbackStatus;
+      const mergedRequest = {
+        ...selectedRequest,
+        ...(updatedRequest ?? {}),
+        ...(action === 'approve'
+          ? {
+              confirmedDate: confirmationData.date,
+              confirmedTime: timeValue
+            }
+          : {}),
+        status: nextStatus,
+        id: scheduleId,
+        scheduleId
+      };
+      const mappedDrive = mapScheduleToTestDrive(mergedRequest);
+      setTestDrives((prev) => {
+        const exists = prev.some((drive) => drive.id === mappedDrive.id);
+        if (exists) {
+          return prev.map((drive) => (drive.id === mappedDrive.id ? mappedDrive : drive));
+        }
+        return [...prev, mappedDrive];
+      });
+      showSuccessToast(action === 'approve' ? 'Đã xác nhận lịch thử xe.' : 'Đã từ chối yêu cầu thử xe.');
+      handleCloseConfirmation();
+    } catch (error) {
+      console.error('Failed to update test drive request:', error);
+      showErrorToast('Không thể cập nhật yêu cầu. Vui lòng thử lại.');
+    } finally {
+      setActionLoading(false);
+    }
+  };
 
   // Get current month and year
   const currentMonth = selectedDate.getMonth();
@@ -175,7 +401,7 @@ const TestDriveManagement = ({ user }) => {
     } else {
       // Add new test drive
       const newTestDrive = {
-        id: Math.max(...testDrives.map(td => td.id)) + 1,
+        id: `local-${Date.now()}`,
         ...testDriveData
       };
       setTestDrives([...testDrives, newTestDrive]);
@@ -424,46 +650,105 @@ const TestDriveManagement = ({ user }) => {
             )}
           </div>
 
-          {/* Quick Stats */}
+          {/* Pending Requests */}
           <div className="card">
-            <h3 style={{ margin: '0 0 16px 0', fontSize: '16px', fontWeight: '600' }}>Quick Stats</h3>
-            <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
-              {[
-                { label: 'Total Scheduled', value: testDrives.filter(d => d.status === 'scheduled').length, icon: 'bx-calendar', color: 'var(--color-info)' },
-                { label: 'This Month', value: testDrives.filter(d => {
-                  const driveDate = new Date(d.date);
-                  return driveDate.getMonth() === currentMonth && driveDate.getFullYear() === currentYear;
-                }).length, icon: 'bx-calendar-alt', color: 'var(--color-primary)' },
-                { label: 'Completed', value: testDrives.filter(d => d.status === 'completed').length, icon: 'bx-check-circle', color: 'var(--color-success)' }
-              ].map((stat, index) => (
-                <div key={index} style={{
-                  display: 'flex',
-                  justifyContent: 'space-between',
-                  alignItems: 'center',
-                  padding: '12px',
-                  background: 'var(--color-bg)',
-                  borderRadius: 'var(--radius)'
-                }}>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
-                    <div style={{
-                      width: '40px',
-                      height: '40px',
-                      borderRadius: '50%',
-                      background: stat.color,
-                      display: 'flex',
-                      alignItems: 'center',
-                      justifyContent: 'center',
-                      color: 'white',
-                      fontSize: '20px'
-                    }}>
-                      <i className={`bx ${stat.icon}`}></i>
-                    </div>
-                    <div style={{ fontSize: '14px', color: 'var(--color-text-muted)' }}>{stat.label}</div>
-                  </div>
-                  <div style={{ fontSize: '20px', fontWeight: '700', color: 'var(--color-text)' }}>{stat.value}</div>
-                </div>
-              ))}
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px', gap: '12px' }}>
+              <h3 style={{ margin: 0, fontSize: '16px', fontWeight: '600' }}>Yêu cầu chờ xác nhận</h3>
+              <button
+                className="btn btn-outline"
+                style={{ fontSize: '12px', padding: '8px 12px', display: 'flex', alignItems: 'center', gap: '6px' }}
+                onClick={loadPendingRequests}
+                disabled={loadingRequests}
+              >
+                <i className={`bx ${loadingRequests ? 'bx-loader-alt bx-spin' : 'bx-refresh'}`}></i>
+                {loadingRequests ? 'Đang tải' : 'Làm mới'}
+              </button>
             </div>
+
+            {requestsError ? (
+              <div style={{ color: 'var(--color-error)', fontSize: '13px' }}>{requestsError}</div>
+            ) : pendingRequestsForDealer.length === 0 ? (
+              <div style={{ textAlign: 'center', padding: '32px 16px', color: 'var(--color-text-muted)' }}>
+                {loadingRequests ? (
+                  <>
+                    <i className="bx bx-loader-alt bx-spin" style={{ fontSize: '36px', display: 'block', marginBottom: '12px' }}></i>
+                    Đang tải yêu cầu...
+                  </>
+                ) : (
+                  <>
+                    <i className="bx bx-inbox" style={{ fontSize: '36px', display: 'block', marginBottom: '12px', opacity: 0.6 }}></i>
+                    Không có yêu cầu chờ xác nhận
+                  </>
+                )}
+              </div>
+            ) : (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
+                {pendingRequestsForDealer.map((request) => {
+                  const requestId = getRequestIdentifier(request);
+                  const preferredDate = request?.confirmedDate ?? request?.date ?? request?.preferredDate ?? request?.requestedDate ?? '';
+                  const preferredTime = normaliseTimeInput(request?.confirmedTime ?? request?.time ?? request?.preferredTime ?? '');
+                  return (
+                    <div
+                      key={requestId || JSON.stringify(request)}
+                      style={{
+                        padding: '16px',
+                        background: 'var(--color-bg)',
+                        borderRadius: 'var(--radius)',
+                        border: '1px solid var(--color-border)'
+                      }}
+                    >
+                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: '12px' }}>
+                        <div>
+                          <div style={{ fontSize: '15px', fontWeight: '600', color: 'var(--color-text)', marginBottom: '4px' }}>
+                            {request?.customerName ?? request?.name ?? 'Khách hàng'}
+                          </div>
+                          <div style={{ fontSize: '13px', color: 'var(--color-text-muted)', marginBottom: '4px', display: 'flex', alignItems: 'center', gap: '6px' }}>
+                            <i className="bx bx-car"></i>
+                            {request?.carModel ?? request?.vehicle ?? request?.vehicleModel ?? 'Chưa cập nhật'}
+                          </div>
+                          <div style={{ fontSize: '13px', color: 'var(--color-text-muted)', display: 'flex', alignItems: 'center', gap: '6px' }}>
+                            <i className="bx bx-envelope"></i>
+                            {request?.customerEmail ?? request?.email ?? 'N/A'}
+                          </div>
+                          <div style={{ fontSize: '13px', color: 'var(--color-text-muted)', display: 'flex', alignItems: 'center', gap: '6px', marginTop: '2px' }}>
+                            <i className="bx bx-phone"></i>
+                            {request?.phoneNumber ?? request?.phone ?? 'N/A'}
+                          </div>
+                        </div>
+                        <button
+                          className="btn btn-primary"
+                          style={{ fontSize: '12px', whiteSpace: 'nowrap' }}
+                          onClick={() => handleOpenConfirmation(request)}
+                        >
+                          <i className="bx bx-check-circle"></i>
+                          Xử lý
+                        </button>
+                      </div>
+                      <div style={{ marginTop: '12px', display: 'flex', alignItems: 'center', gap: '8px', color: 'var(--color-primary)', fontSize: '13px', fontWeight: '600' }}>
+                        <i className="bx bx-time"></i>
+                        {preferredDate || 'Chưa chọn ngày'}
+                        {preferredTime && `• ${preferredTime}`}
+                      </div>
+                      {(request?.note || request?.customerNote) && (
+                        <div
+                          style={{
+                            marginTop: '8px',
+                            fontSize: '12px',
+                            color: 'var(--color-text-muted)',
+                            background: 'var(--color-surface)',
+                            borderRadius: 'var(--radius)',
+                            padding: '8px',
+                            borderLeft: '3px solid var(--color-primary)'
+                          }}
+                        >
+                          {request?.note ?? request?.customerNote}
+                        </div>
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
+            )}
           </div>
         </div>
       </div>
@@ -704,6 +989,173 @@ const TestDriveManagement = ({ user }) => {
                 </button>
               </div>
             </form>
+          </div>
+        </div>
+      )}
+
+      {/* Confirmation Modal */}
+      {showConfirmationModal && selectedRequest && (
+        <div
+          style={{
+            position: 'fixed',
+            top: 0,
+            left: 0,
+            right: 0,
+            bottom: 0,
+            background: 'rgba(0, 0, 0, 0.5)',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            zIndex: 1100
+          }}
+        >
+          <div
+            style={{
+              background: 'var(--color-surface)',
+              borderRadius: 'var(--radius)',
+              padding: '24px',
+              width: '90%',
+              maxWidth: '520px',
+              maxHeight: '90vh',
+              overflowY: 'auto'
+            }}
+          >
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '20px' }}>
+              <h3 style={{ margin: 0 }}>Xác nhận yêu cầu thử xe</h3>
+              <button
+                onClick={handleCloseConfirmation}
+                style={{ background: 'none', border: 'none', fontSize: '24px', cursor: 'pointer', color: 'var(--color-text-muted)' }}
+              >
+                <i className="bx bx-x"></i>
+              </button>
+            </div>
+
+            <div style={{ display: 'grid', gap: '16px' }}>
+              <div style={{ background: 'var(--color-bg)', padding: '16px', borderRadius: 'var(--radius)', border: '1px solid var(--color-border)' }}>
+                <div style={{ fontSize: '15px', fontWeight: '600', color: 'var(--color-text)', marginBottom: '8px' }}>
+                  {selectedRequest?.customerName ?? selectedRequest?.name ?? 'Khách hàng'}
+                </div>
+                <div style={{ fontSize: '13px', color: 'var(--color-text-muted)', marginBottom: '6px', display: 'flex', alignItems: 'center', gap: '6px' }}>
+                  <i className="bx bx-car"></i>
+                  {selectedRequest?.carModel ?? selectedRequest?.vehicle ?? selectedRequest?.vehicleModel ?? 'Chưa cập nhật'}
+                </div>
+                <div style={{ fontSize: '13px', color: 'var(--color-text-muted)', display: 'flex', alignItems: 'center', gap: '6px' }}>
+                  <i className="bx bx-envelope"></i>
+                  {selectedRequest?.customerEmail ?? selectedRequest?.email ?? 'N/A'}
+                </div>
+                <div style={{ fontSize: '13px', color: 'var(--color-text-muted)', display: 'flex', alignItems: 'center', gap: '6px', marginTop: '4px' }}>
+                  <i className="bx bx-phone"></i>
+                  {selectedRequest?.phoneNumber ?? selectedRequest?.phone ?? 'N/A'}
+                </div>
+                {(selectedRequest?.note || selectedRequest?.customerNote) && (
+                  <div style={{ fontSize: '12px', color: 'var(--color-text-muted)', marginTop: '12px', lineHeight: 1.5 }}>
+                    <strong style={{ color: 'var(--color-text)' }}>Ghi chú khách hàng:</strong> {selectedRequest?.note ?? selectedRequest?.customerNote}
+                  </div>
+                )}
+              </div>
+
+              <div>
+                <label style={{ display: 'block', marginBottom: '8px', fontSize: '13px', fontWeight: '600', color: 'var(--color-text)' }}>
+                  Ngày xác nhận *
+                </label>
+                <input
+                  type="date"
+                  value={confirmationData.date}
+                  onChange={(e) => setConfirmationData((prev) => ({ ...prev, date: e.target.value }))}
+                  style={{
+                    width: '100%',
+                    padding: '12px',
+                    border: '1px solid var(--color-border)',
+                    borderRadius: 'var(--radius)',
+                    background: 'var(--color-bg)',
+                    color: 'var(--color-text)',
+                    fontSize: '14px'
+                  }}
+                />
+              </div>
+
+              <div>
+                <label style={{ display: 'block', marginBottom: '8px', fontSize: '13px', fontWeight: '600', color: 'var(--color-text)' }}>
+                  Giờ xác nhận *
+                </label>
+                <input
+                  type="time"
+                  value={confirmationData.time}
+                  onChange={(e) => setConfirmationData((prev) => ({ ...prev, time: e.target.value }))}
+                  style={{
+                    width: '100%',
+                    padding: '12px',
+                    border: '1px solid var(--color-border)',
+                    borderRadius: 'var(--radius)',
+                    background: 'var(--color-bg)',
+                    color: 'var(--color-text)',
+                    fontSize: '14px'
+                  }}
+                />
+              </div>
+
+              <div>
+                <label style={{ display: 'block', marginBottom: '8px', fontSize: '13px', fontWeight: '600', color: 'var(--color-text)' }}>
+                  Ghi chú nội bộ
+                </label>
+                <textarea
+                  value={confirmationData.note}
+                  onChange={(e) => setConfirmationData((prev) => ({ ...prev, note: e.target.value }))}
+                  style={{
+                    width: '100%',
+                    padding: '12px',
+                    border: '1px solid var(--color-border)',
+                    borderRadius: 'var(--radius)',
+                    background: 'var(--color-bg)',
+                    color: 'var(--color-text)',
+                    fontSize: '14px',
+                    minHeight: '90px',
+                    resize: 'vertical'
+                  }}
+                  placeholder="Ghi chú cho đội ngũ hoặc khách hàng..."
+                />
+              </div>
+            </div>
+
+            <div style={{ display: 'flex', gap: '12px', marginTop: '24px', justifyContent: 'flex-end' }}>
+              <button
+                type="button"
+                className="btn btn-outline"
+                onClick={() => handleRequestAction('reject')}
+                disabled={actionLoading}
+                style={{ color: 'var(--color-error)' }}
+              >
+                {actionLoading ? (
+                  <>
+                    <i className="bx bx-loader-alt bx-spin"></i>
+                    Đang xử lý
+                  </>
+                ) : (
+                  <>
+                    <i className="bx bx-x-circle"></i>
+                    Từ chối
+                  </>
+                )}
+              </button>
+              <button
+                type="button"
+                className="btn btn-primary"
+                onClick={() => handleRequestAction('approve')}
+                disabled={actionLoading}
+              >
+                {actionLoading ? (
+                  <>
+                    <i className="bx bx-loader-alt bx-spin"></i>
+                    Đang xử lý
+                  </>
+                ) : (
+                  <>
+                    <i className="bx bx-check-circle"></i>
+                    Đồng ý
+                  </>
+                )}
+              </button>
+            </div>
           </div>
         </div>
       )}

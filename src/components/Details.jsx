@@ -1,11 +1,13 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
-import { motion } from 'framer-motion';
+import { motion, AnimatePresence } from 'framer-motion';
 import 'boxicons/css/boxicons.min.css';
 import './Details.css';
 import Footer from './Footer';
 import Navbar from './Navbar';
 import { vehiclesAPI } from '../utils/api/vehiclesAPI';
+import { dealersAPI } from '../utils/api/dealersAPI';
+import { customersAPI } from '../utils/api/customersAPI';
 
 const Details = () => {
   const { id } = useParams();
@@ -16,10 +18,46 @@ const Details = () => {
   const [selectedImageIndex, setSelectedImageIndex] = useState(0);
   const [showSharePopup, setShowSharePopup] = useState(false);
   const [copied, setCopied] = useState(false);
+  const [showTestDriveModal, setShowTestDriveModal] = useState(false);
+  const [dealers, setDealers] = useState([]);
+  const [loadingDealers, setLoadingDealers] = useState(false);
+  const [submitting, setSubmitting] = useState(false);
+  const [submitSuccess, setSubmitSuccess] = useState(false);
+  const today = new Date().toISOString().split('T')[0];
+  const dateInputRef = useRef(null);
+  const [formData, setFormData] = useState({
+    customerName: '',
+    customerEmail: '',
+    phoneNumber: '',
+    carModel: '',
+    dealerId: '',
+    date: today,
+    time: '07:00:00',
+    note: ''
+  });
+  const [formErrors, setFormErrors] = useState({});
 
   useEffect(() => {
     window.scrollTo(0, 0);
   }, []);
+
+  // Fetch dealers when modal opens
+  useEffect(() => {
+    if (showTestDriveModal) {
+      const fetchDealers = async () => {
+        try {
+          setLoadingDealers(true);
+          const data = await dealersAPI.getAll();
+          setDealers(data.filter(d => d.status === 'ACTIVE' || d.status === 'active'));
+        } catch (err) {
+          console.error('Error fetching dealers:', err);
+        } finally {
+          setLoadingDealers(false);
+        }
+      };
+      fetchDealers();
+    }
+  }, [showTestDriveModal]);
 
   useEffect(() => {
     const fetchVehicle = async () => {
@@ -240,6 +278,107 @@ const Details = () => {
     }
   };
 
+  // Handle test drive modal
+  const handleOpenTestDriveModal = () => {
+    setShowTestDriveModal(true);
+    setFormData({
+      customerName: '',
+      customerEmail: '',
+      phoneNumber: '',
+      carModel: vehicle?.modelName || '',
+      dealerId: '',
+      date: today,
+      time: '07:00:00',
+      note: ''
+    });
+    setFormErrors({});
+    setSubmitSuccess(false);
+  };
+
+  const handleCloseTestDriveModal = () => {
+    setShowTestDriveModal(false);
+    setFormData({
+      customerName: '',
+      customerEmail: '',
+      phoneNumber: '',
+      carModel: vehicle?.modelName || '',
+      dealerId: '',
+      date: today,
+      time: '07:00:00',
+      note: ''
+    });
+    setFormErrors({});
+    setSubmitSuccess(false);
+  };
+
+  const handleInputChange = (e) => {
+    const { name, value } = e.target;
+    setFormData(prev => ({
+      ...prev,
+      [name]: value
+    }));
+    // Clear error when user starts typing
+    if (formErrors[name]) {
+      setFormErrors(prev => ({
+        ...prev,
+        [name]: ''
+      }));
+    }
+  };
+
+  const validateForm = () => {
+    const errors = {};
+    if (!formData.customerName.trim()) errors.customerName = 'Name is required';
+    if (!formData.customerEmail.trim()) {
+      errors.customerEmail = 'Email is required';
+    } else if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(formData.customerEmail)) {
+      errors.customerEmail = 'Invalid email format';
+    }
+    if (!formData.phoneNumber.trim()) errors.phoneNumber = 'Phone number is required';
+    if (!formData.carModel.trim()) errors.carModel = 'Car model is required';
+    if (!formData.dealerId) errors.dealerId = 'Please select a dealer';
+    if (!formData.date) errors.date = 'Date is required';
+    if (!formData.time) errors.time = 'Time is required';
+
+    setFormErrors(errors);
+    return Object.keys(errors).length === 0;
+  };
+
+  const handleSubmitTestDrive = async (e) => {
+    e.preventDefault();
+    if (!validateForm()) return;
+
+    try {
+      setSubmitting(true);
+      const formattedTime =
+        formData.time && formData.time.length === 5
+          ? `${formData.time}:00`
+          : formData.time || '07:00:00';
+
+      const testDriveData = {
+        customerName: formData.customerName.trim(),
+        customerEmail: formData.customerEmail.trim(),
+        phoneNumber: formData.phoneNumber.trim(),
+        carModel: formData.carModel.trim(),
+        dealerId: parseInt(formData.dealerId, 10),
+        date: formData.date,
+        time: formattedTime,
+        note: formData.note.trim() || ''
+      };
+
+      await customersAPI.bookTestDrive(testDriveData);
+      setSubmitSuccess(true);
+      setTimeout(() => {
+        handleCloseTestDriveModal();
+      }, 2000);
+    } catch (err) {
+      console.error('Error booking test drive:', err);
+      setFormErrors({ submit: 'Failed to book test drive. Please try again.' });
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
   return (
     <div className="details-page">
       <Navbar />
@@ -391,7 +530,7 @@ const Details = () => {
                 whileHover={{ scale: 1.05, boxShadow: '0 0 30px rgba(229, 9, 20, 0.6)' }}
                 whileTap={{ scale: 0.95 }}
                 className="btn-glow btn-test-drive"
-                onClick={() => navigate('/auth')}
+                onClick={handleOpenTestDriveModal}
               >
                 <i className="bx bx-calendar"></i>
                 Book Test Drive
@@ -590,6 +729,307 @@ const Details = () => {
           </motion.div>
         </div>
       )}
+
+      {/* Test Drive Booking Modal */}
+      <AnimatePresence>
+        {showTestDriveModal && (
+          <div className="test-drive-modal-overlay" onClick={handleCloseTestDriveModal}>
+            <motion.div
+              initial={{ opacity: 0, scale: 0.8, y: 50 }}
+              animate={{ opacity: 1, scale: 1, y: 0 }}
+              exit={{ opacity: 0, scale: 0.8, y: 50 }}
+              transition={{ duration: 0.3 }}
+              className="test-drive-modal"
+              onClick={(e) => e.stopPropagation()}
+            >
+              <div className="test-drive-modal-header">
+                <h2 className="test-drive-modal-title">
+                  <i className="bx bx-calendar"></i>
+                  Book Test Drive
+                </h2>
+                <button 
+                  className="test-drive-modal-close"
+                  onClick={handleCloseTestDriveModal}
+                >
+                  <i className="bx bx-x"></i>
+                </button>
+              </div>
+
+              {submitSuccess ? (
+                <div className="test-drive-success">
+                  <motion.div
+                    initial={{ scale: 0 }}
+                    animate={{ scale: 1 }}
+                    transition={{ type: 'spring', stiffness: 200, damping: 15 }}
+                    className="success-icon"
+                  >
+                    <i className="bx bx-check-circle"></i>
+                  </motion.div>
+                  <h3>Booking Successful!</h3>
+                  <p>Your test drive request has been submitted. We'll contact you soon.</p>
+                </div>
+              ) : (
+                <form className="test-drive-form" onSubmit={handleSubmitTestDrive}>
+                  <div className="form-grid">
+                    <div className="form-group">
+                      <label htmlFor="customerName">
+                        Full Name <span className="required">*</span>
+                      </label>
+                      <input
+                        type="text"
+                        id="customerName"
+                        name="customerName"
+                        value={formData.customerName}
+                        onChange={handleInputChange}
+                        placeholder="Enter your full name"
+                        className={formErrors.customerName ? 'error' : ''}
+                      />
+                      {formErrors.customerName && (
+                        <span className="error-message">{formErrors.customerName}</span>
+                      )}
+                    </div>
+
+                    <div className="form-group">
+                      <label htmlFor="customerEmail">
+                        Email <span className="required">*</span>
+                      </label>
+                      <input
+                        type="email"
+                        id="customerEmail"
+                        name="customerEmail"
+                        value={formData.customerEmail}
+                        onChange={handleInputChange}
+                        placeholder="your.email@example.com"
+                        className={formErrors.customerEmail ? 'error' : ''}
+                      />
+                      {formErrors.customerEmail && (
+                        <span className="error-message">{formErrors.customerEmail}</span>
+                      )}
+                    </div>
+
+                    <div className="form-group">
+                      <label htmlFor="phoneNumber">
+                        Phone Number <span className="required">*</span>
+                      </label>
+                      <input
+                        type="tel"
+                        id="phoneNumber"
+                        name="phoneNumber"
+                        value={formData.phoneNumber}
+                        onChange={handleInputChange}
+                        placeholder="Enter your phone number"
+                        className={formErrors.phoneNumber ? 'error' : ''}
+                      />
+                      {formErrors.phoneNumber && (
+                        <span className="error-message">{formErrors.phoneNumber}</span>
+                      )}
+                    </div>
+
+                    <div className="form-group">
+                      <label htmlFor="carModel">
+                        Car Model <span className="required">*</span>
+                      </label>
+                      <input
+                        type="text"
+                        id="carModel"
+                        name="carModel"
+                        value={formData.carModel}
+                        onChange={handleInputChange}
+                        placeholder="Car model"
+                        className={formErrors.carModel ? 'error' : ''}
+                      />
+                      {formErrors.carModel && (
+                        <span className="error-message">{formErrors.carModel}</span>
+                      )}
+                    </div>
+
+                    <div className="form-group">
+                      <label htmlFor="dealerId">
+                        Dealer <span className="required">*</span>
+                      </label>
+                      <select
+                        id="dealerId"
+                        name="dealerId"
+                        value={formData.dealerId}
+                        onChange={handleInputChange}
+                        className={formErrors.dealerId ? 'error' : ''}
+                        disabled={loadingDealers}
+                      >
+                        <option value="">Select a dealer</option>
+                        {dealers.map((dealer) => (
+                          <option key={dealer.dealerId || dealer.id} value={dealer.dealerId || dealer.id}>
+                            {dealer.dealerName} - {dealer.address || dealer.region || ''}
+                          </option>
+                        ))}
+                      </select>
+                      {loadingDealers && <span className="loading-text">Loading dealers...</span>}
+                      {formErrors.dealerId && (
+                        <span className="error-message">{formErrors.dealerId}</span>
+                      )}
+                    </div>
+
+                    <div className="form-group">
+                      <label htmlFor="date">
+                        Date <span className="required">*</span>
+                      </label>
+                      <div className="date-picker-wrapper">
+                        <input
+                          type="date"
+                          id="date"
+                          name="date"
+                          value={formData.date}
+                          onChange={handleInputChange}
+                          min={today}
+                          className={formErrors.date ? 'error' : ''}
+                          ref={dateInputRef}
+                        />
+                        <button
+                          type="button"
+                          className="date-picker-icon"
+                          onClick={() => {
+                            if (dateInputRef.current) {
+                              if (typeof dateInputRef.current.showPicker === 'function') {
+                                dateInputRef.current.showPicker();
+                              } else {
+                                dateInputRef.current.focus();
+                              }
+                            }
+                          }}
+                          onKeyDown={(event) => {
+                            if (event.key === 'Enter' || event.key === ' ') {
+                              event.preventDefault();
+                              if (dateInputRef.current) {
+                                if (typeof dateInputRef.current.showPicker === 'function') {
+                                  dateInputRef.current.showPicker();
+                                } else {
+                                  dateInputRef.current.focus();
+                                }
+                              }
+                            }
+                          }}
+                          aria-label="Open date picker"
+                        >
+                          <i className="bx bx-calendar"></i>
+                        </button>
+                      </div>
+                      {formErrors.date && (
+                        <span className="error-message">{formErrors.date}</span>
+                      )}
+                    </div>
+
+                    <div className="form-group">
+                      <label htmlFor="time">
+                        Time <span className="required">*</span>
+                      </label>
+                      <div className="time-picker-wrapper">
+                        <select
+                          id="time-hour"
+                          name="time-hour"
+                          value={formData.time ? formData.time.split(':')[0] || '07' : '07'}
+                          onChange={(e) => {
+                            const hour = e.target.value.padStart(2, '0');
+                            const minute = formData.time ? (formData.time.split(':')[1] || '00') : '00';
+                            setFormData(prev => ({
+                              ...prev,
+                              time: `${hour}:${minute}:00`
+                            }));
+                            if (formErrors.time) {
+                              setFormErrors(prev => ({
+                                ...prev,
+                                time: ''
+                              }));
+                            }
+                          }}
+                          className={formErrors.time ? 'error' : ''}
+                        >
+                          {Array.from({ length: 11 }, (_, i) => i + 7).map(hour => (
+                            <option key={hour} value={hour.toString().padStart(2, '0')}>
+                              {hour.toString().padStart(2, '0')}
+                            </option>
+                          ))}
+                        </select>
+                        <span className="time-separator">:</span>
+                        <select
+                          id="time-minute"
+                          name="time-minute"
+                          value={formData.time ? formData.time.split(':')[1] || '00' : '00'}
+                          onChange={(e) => {
+                            const minute = e.target.value;
+                            const hour = formData.time ? (formData.time.split(':')[0] || '07') : '07';
+                            setFormData(prev => ({
+                              ...prev,
+                              time: `${hour}:${minute}:00`
+                            }));
+                            if (formErrors.time) {
+                              setFormErrors(prev => ({
+                                ...prev,
+                                time: ''
+                              }));
+                            }
+                          }}
+                          className={formErrors.time ? 'error' : ''}
+                        >
+                          <option value="00">00</option>
+                          <option value="15">15</option>
+                          <option value="30">30</option>
+                          <option value="45">45</option>
+                        </select>
+                      </div>
+                      {formErrors.time && (
+                        <span className="error-message">{formErrors.time}</span>
+                      )}
+                    </div>
+                  </div>
+
+                  <div className="form-group full-width">
+                    <label htmlFor="note">Additional Notes (Optional)</label>
+                    <textarea
+                      id="note"
+                      name="note"
+                      value={formData.note}
+                      onChange={handleInputChange}
+                      placeholder="Any special requests or notes..."
+                      rows="4"
+                    />
+                  </div>
+
+                  {formErrors.submit && (
+                    <div className="form-error-submit">{formErrors.submit}</div>
+                  )}
+
+                  <div className="form-actions">
+                    <button
+                      type="button"
+                      className="btn-cancel"
+                      onClick={handleCloseTestDriveModal}
+                      disabled={submitting}
+                    >
+                      Cancel
+                    </button>
+                    <button
+                      type="submit"
+                      className="btn-submit"
+                      disabled={submitting}
+                    >
+                      {submitting ? (
+                        <>
+                          <i className="bx bx-loader-alt bx-spin"></i>
+                          Submitting...
+                        </>
+                      ) : (
+                        <>
+                          <i className="bx bx-calendar-check"></i>
+                          Book Test Drive
+                        </>
+                      )}
+                    </button>
+                  </div>
+                </form>
+              )}
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
 
       <Footer />
     </div>

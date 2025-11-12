@@ -35,5 +35,11 @@ export const customersAPI = {
   delete: async (id) => {
     const response = await apiClient.delete(`/api/customers/${id}`);
     return response.data;
+  },
+
+  // Book test drive
+  bookTestDrive: async (testDriveData) => {
+    const response = await apiClient.post('/api/test-drive/schedule', testDriveData);
+    return response.data;
   }
 };

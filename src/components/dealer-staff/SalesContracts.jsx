@@ -1,197 +1,1105 @@
-import React, { useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
+import { jsPDF } from 'jspdf';
+import { contractsAPI, ordersAPI, customersAPI, vehiclesAPI } from '../../utils/api';
 import { showSuccessToast, showErrorToast } from '../../utils/toast';
+import { handleAPIError } from '../../utils/apiConfig';
+import { uploadFile } from '../../utils/cloudinary';
+
+const parseContractDocumentMeta = (value) => {
+  if (!value) return null;
+  if (typeof value !== 'string') return null;
+  try {
+    const parsed = JSON.parse(value);
+    if (parsed && parsed.type === 'CONTRACT_META_V1') {
+      return parsed;
+    }
+  } catch (error) {
+    // not JSON meta, ignore
+  }
+  return null;
+};
 import 'boxicons/css/boxicons.min.css';
 
-const SalesContracts = ({ user }) => {
-  const [contracts, setContracts] = useState([
-    {
-      id: 'CON-001',
-      customer: 'John Smith',
-      vehicle: 'Tesla Model 3',
-      amount: 45000,
-      downPayment: 9000,
-      installmentPlan: '36 months',
-      monthlyPayment: 1000,
-      status: 'active',
-      signedDate: '2024-01-15',
-      expiryDate: '2027-01-15',
-      contractType: 'installment'
-    },
-    {
-      id: 'CON-002',
-      customer: 'Jane Doe',
-      vehicle: 'BMW i3',
-      amount: 42000,
-      downPayment: 42000,
-      installmentPlan: 'N/A',
-      monthlyPayment: 0,
-      status: 'completed',
-      signedDate: '2024-01-10',
-      expiryDate: '2024-01-10',
-      contractType: 'cash'
-    }
-  ]);
+const normalizeContract = (contract) => {
+  if (!contract) return null;
+  const customer = contract.customer || contract.customerInfo || {};
+  const order = contract.order || contract.orderInfo || {};
+  const status = (contract.status || contract.contractStatus || 'ACTIVE').toUpperCase();
 
+  const documentMeta = parseContractDocumentMeta(contract.documentImage);
+  return {
+    raw: contract,
+    id: contract.contractId || contract.id || contract.contractCode || `CON-${contract.orderId || 'N/A'}`,
+    customerName:
+      contract.customerName ||
+      customer.fullName ||
+      customer.name ||
+      `Customer #${contract.customerId || customer.id || 'N/A'}`,
+    customerId: contract.customerId || customer.id || null,
+    orderId: contract.orderId || order.orderId || order.id || null,
+    orderNumber: order.orderNumber || `ORD-${order.orderId || order.id || 'N/A'}`,
+    dealerId: contract.dealerId || order.dealerId || null,
+    status,
+    documentImage: documentMeta?.cachedPdfUrl || documentMeta?.pdfUrl || contract.documentImage || '',
+    documentMeta,
+    signatureUrl: documentMeta?.signatureUrl || contract.signatureUrl || null,
+    notes: documentMeta?.notes || contract.notes || '',
+    signedDate: contract.signedDate || contract.createdDate || contract.createdAt || '',
+    createdAt: contract.createdAt || contract.createdDate || '',
+    updatedAt: contract.updatedAt || '',
+    totalAmount: order.totalAmount || order.amount || 0,
+  };
+};
+
+const defaultFormState = {
+  customerId: '',
+  orderId: '',
+  dealerId: '',
+  documentImage: '',
+  notes: '',
+};
+
+const SalesContracts = ({ user }) => {
+  const [contracts, setContracts] = useState([]);
+  const [loading, setLoading] = useState(true);
   const [showModal, setShowModal] = useState(false);
-  const [editingContract, setEditingContract] = useState(null);
   const [filterStatus, setFilterStatus] = useState('all');
   const [searchTerm, setSearchTerm] = useState('');
+  const [submitting, setSubmitting] = useState(false);
+  const [referenceLoading, setReferenceLoading] = useState(false);
+  const [formData, setFormData] = useState(defaultFormState);
+  const [availableOrders, setAvailableOrders] = useState([]);
+  const [availableCustomers, setAvailableCustomers] = useState([]);
+  const [orderPreview, setOrderPreview] = useState(null);
+  const [showOrderModal, setShowOrderModal] = useState(false);
+  const [orderModalLoading, setOrderModalLoading] = useState(false);
+  const [viewingContract, setViewingContract] = useState(null);
+  const [uploadingSignature, setUploadingSignature] = useState(false);
+  const [signatureUrl, setSignatureUrl] = useState('');
+  const [signatureError, setSignatureError] = useState('');
+  const [documentPreviewUrl, setDocumentPreviewUrl] = useState('');
+  const [documentPreviewLoading, setDocumentPreviewLoading] = useState(false);
+  const [showDocumentModal, setShowDocumentModal] = useState(false);
 
-  const [formData, setFormData] = useState({
-    customer: '',
-    vehicle: '',
-    amount: '',
-    downPayment: '',
-    installmentPlan: '',
-    contractType: 'cash',
-    signedDate: '',
-    expiryDate: ''
+  const dealerId =
+    user?.dealerId ||
+    user?.user?.dealerId ||
+    user?.user?.dealer?.id ||
+    null;
+
+  const staffDisplayName =
+    user?.fullName ||
+    user?.name ||
+    [user?.firstName, user?.lastName].filter(Boolean).join(' ') ||
+    user?.email ||
+    'Authorized Representative';
+  const dealerDisplayName =
+    user?.dealerName ||
+    user?.dealer?.name ||
+    (dealerId ? `Dealer #${dealerId}` : '');
+
+  const canvasRef = useRef(null);
+  const drawingStateRef = useRef({
+    isDrawing: false,
+    lastX: 0,
+    lastY: 0,
   });
 
-  const getStatusColor = (status) => {
-    switch (status) {
-      case 'active': return 'var(--color-success)';
-      case 'completed': return 'var(--color-info)';
-      case 'expired': return 'var(--color-error)';
-      case 'cancelled': return 'var(--color-text-muted)';
-      default: return 'var(--color-text-muted)';
+  const normalizedRole = user?.role?.toUpperCase().replace(/-/g, '_');
+
+  const isDealerRole =
+    normalizedRole === 'DEALER_MANAGER' || normalizedRole === 'DEALER_STAFF';
+
+  const loadContracts = async (options = {}) => {
+    try {
+      setLoading(true);
+      const { search } = options;
+      let data;
+
+      if (search && search.trim()) {
+        data = await contractsAPI.searchByCustomerName(search.trim());
+      } else if (isDealerRole && dealerId) {
+        data = await contractsAPI.getByDealer(dealerId);
+      } else {
+        data = await contractsAPI.getAll();
+      }
+
+      const normalized =
+        Array.isArray(data) ? data.map(normalizeContract).filter(Boolean) : [];
+      setContracts(normalized);
+    } catch (error) {
+      console.error('Error loading contracts:', error);
+      showErrorToast(handleAPIError(error));
+      setContracts([]);
+    } finally {
+      setLoading(false);
     }
   };
 
-  const filteredContracts = contracts.filter(contract => {
-    const matchesSearch = contract.customer.toLowerCase().includes(searchTerm.toLowerCase()) ||
-                         contract.vehicle.toLowerCase().includes(searchTerm.toLowerCase()) ||
-                         contract.id.toLowerCase().includes(searchTerm.toLowerCase());
-    const matchesFilter = filterStatus === 'all' || contract.status === filterStatus;
-    return matchesSearch && matchesFilter;
-  });
+  useEffect(() => {
+    loadContracts();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [normalizedRole, dealerId]);
 
-  const handleAddContract = () => {
-    setEditingContract(null);
+  const resetForm = () => {
     setFormData({
-      customer: '',
-      vehicle: '',
-      amount: '',
-      downPayment: '',
-      installmentPlan: '',
-      contractType: 'cash',
-      signedDate: new Date().toISOString().split('T')[0],
-      expiryDate: ''
+      ...defaultFormState,
+      dealerId: dealerId ? String(dealerId) : '',
     });
-    setShowModal(true);
+  setSignatureUrl('');
+  setSignatureError('');
+  setDocumentPreviewUrl('');
+  setDocumentPreviewLoading(false);
+  setShowDocumentModal(false);
   };
 
-  const handleEditContract = (contract) => {
-    setEditingContract(contract);
-    setFormData({
-      customer: contract.customer,
-      vehicle: contract.vehicle,
-      amount: contract.amount.toString(),
-      downPayment: contract.downPayment.toString(),
-      installmentPlan: contract.installmentPlan,
-      contractType: contract.contractType,
-      signedDate: contract.signedDate,
-      expiryDate: contract.expiryDate
-    });
-    setShowModal(true);
+  const handleOpenModal = async () => {
+  resetForm();
+  setShowModal(true);
+  setReferenceLoading(true);
+  setTimeout(() => {
+    initializeCanvas();
+  }, 50);
+
+    try {
+      const [orders, customers] = await Promise.all([
+        dealerId ? ordersAPI.getByDealer(dealerId) : ordersAPI.getAll(),
+        dealerId ? customersAPI.getByDealer(dealerId) : customersAPI.getAll(),
+      ]);
+
+      setAvailableOrders(Array.isArray(orders) ? orders : []);
+      setAvailableCustomers(Array.isArray(customers) ? customers : []);
+    } catch (error) {
+      console.error('Error loading contract references:', error);
+      showErrorToast(handleAPIError(error));
+      setAvailableOrders([]);
+      setAvailableCustomers([]);
+    } finally {
+      setReferenceLoading(false);
+    }
   };
 
-  const handleSubmit = (e) => {
-    e.preventDefault();
-    
-    if (!formData.customer || !formData.vehicle || !formData.amount) {
-      showErrorToast('Please fill in all required fields');
+  const handleSubmit = async (event) => {
+    event.preventDefault();
+    if (!formData.orderId || !formData.customerId) {
+      showErrorToast('Please select order and customer');
       return;
     }
 
-    const contractData = {
-      customer: formData.customer,
-      vehicle: formData.vehicle,
-      amount: parseInt(formData.amount) || 0,
-      downPayment: parseInt(formData.downPayment) || 0,
-      installmentPlan: formData.installmentPlan,
-      contractType: formData.contractType,
-      signedDate: formData.signedDate,
-      expiryDate: formData.expiryDate,
-      monthlyPayment: formData.contractType === 'installment' ? 
-        Math.round((parseInt(formData.amount) - parseInt(formData.downPayment)) / parseInt(formData.installmentPlan)) : 0
-    };
-
-    if (editingContract) {
-      setContracts(contracts.map(c => 
-        c.id === editingContract.id 
-          ? { ...c, ...contractData, status: 'active' }
-          : c
-      ));
-      showSuccessToast('Contract updated successfully');
-    } else {
-      const newContract = {
-        id: `CON-${String(Math.max(...contracts.map(c => parseInt(c.id.split('-')[1]))) + 1).padStart(3, '0')}`,
-        ...contractData,
-        status: 'active'
-      };
-      setContracts([...contracts, newContract]);
-      showSuccessToast('Contract created successfully');
+    if (!dealerId && !formData.dealerId) {
+      showErrorToast('Dealer information is required');
+      return;
     }
 
-    setShowModal(false);
+  if (!signatureUrl) {
+    showErrorToast('Please capture and upload the contract signature before saving.');
+      return;
+    }
+
+    try {
+      setSubmitting(true);
+      const orderId = Number(formData.orderId);
+      const customerId = Number(formData.customerId);
+
+      const [orderResponse, customerResponse] = await Promise.all([
+        ordersAPI.getById(orderId),
+        customersAPI.getById(customerId),
+      ]);
+
+      if (!orderResponse) {
+        throw new Error('Unable to load order details for contract PDF.');
+      }
+      if (!customerResponse) {
+        throw new Error('Unable to load customer details for contract PDF.');
+      }
+
+      const hydratedOrder = await enrichOrderWithVehicles(orderResponse);
+
+      const pdfDataUri = await generateContractPdf({
+        order: hydratedOrder,
+        customer: customerResponse,
+        dealer: Number(dealerId || formData.dealerId),
+        dealerName: dealerDisplayName,
+        staff: {
+          name: staffDisplayName,
+          email: user?.email,
+          phone: user?.phoneNumber || user?.phone,
+        },
+        notes: formData.notes || '',
+        signatureUrl,
+        contractDate: new Date().toISOString(),
+      });
+
+      const pdfFile = dataUriToFile(pdfDataUri, `sales-contract-${orderId}.pdf`);
+      if (!pdfFile) {
+        throw new Error('Failed to prepare contract PDF file.');
+      }
+      const pdfUrl = await uploadFile(pdfFile, 'raw');
+
+      const documentMeta = {
+        type: 'CONTRACT_META_V1',
+        signatureUrl,
+        notes: formData.notes || '',
+        dealerId: Number(dealerId || formData.dealerId),
+        customerId,
+        orderId,
+        staffName: staffDisplayName,
+        generatedAt: new Date().toISOString(),
+        cachedPdfUrl: pdfUrl,
+        pdfUrl,
+        customerSnapshot: extractCustomerSnapshot(customerResponse),
+        orderSnapshot: extractOrderSnapshot(hydratedOrder),
+      };
+
+      const payload = {
+        documentImage: JSON.stringify(documentMeta),
+        customerId,
+        orderId,
+        dealerId: Number(dealerId || formData.dealerId),
+      };
+
+      await contractsAPI.create(payload);
+      showSuccessToast('Contract created successfully');
+      setShowModal(false);
+      resetForm();
+      loadContracts();
+    } catch (error) {
+      console.error('Error creating contract:', error);
+      showErrorToast(handleAPIError(error));
+    } finally {
+      setSubmitting(false);
+    }
   };
 
-  const totalActiveContracts = contracts.filter(c => c.status === 'active').length;
-  const totalContractValue = contracts.reduce((sum, c) => sum + c.amount, 0);
-  const totalOutstanding = contracts.filter(c => c.status === 'active').reduce((sum, c) => sum + (c.amount - c.downPayment), 0);
+  const handleSearch = () => {
+    loadContracts({ search: searchTerm });
+  };
+
+  const handleResetSearch = () => {
+    setSearchTerm('');
+    loadContracts();
+  };
+
+  const handleViewOrder = async (contract) => {
+    if (!contract) return;
+    const contractId = contract.raw?.contractId || contract.raw?.id || contract.id;
+    if (!contractId) {
+      showErrorToast('Contract information is missing');
+      return;
+    }
+
+    try {
+      setOrderModalLoading(true);
+      setShowOrderModal(true);
+      setViewingContract(contract);
+      let order = contract.documentMeta?.orderSnapshot || null;
+
+      if (!order && contract.orderId) {
+        try {
+          order = await ordersAPI.getById(contract.orderId);
+        } catch (fetchError) {
+          console.warn('Unable to fetch order by ID for modal, fallback to contract endpoint:', fetchError);
+        }
+      }
+
+      if (!order) {
+        order = await contractsAPI.getOrderByContract(contractId);
+      }
+
+      const hydrated = await enrichOrderWithVehicles(order);
+      setOrderPreview(hydrated);
+    } catch (error) {
+      console.error('Error loading order for contract:', error);
+      showErrorToast(handleAPIError(error));
+      setOrderPreview(null);
+    } finally {
+      setOrderModalLoading(false);
+    }
+  };
+
+  const initializeCanvas = () => {
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+    const context = canvas.getContext('2d');
+    const ratio = window.devicePixelRatio || 1;
+    const width = 480;
+    const height = 220;
+    canvas.width = width * ratio;
+    canvas.height = height * ratio;
+    canvas.style.width = `${width}px`;
+    canvas.style.height = `${height}px`;
+    context.scale(ratio, ratio);
+    context.lineJoin = 'round';
+    context.lineCap = 'round';
+    context.lineWidth = 2.5;
+    context.strokeStyle = '#111827';
+    context.fillStyle = '#ffffff';
+    context.fillRect(0, 0, width, height);
+  };
+
+  const getCanvasCoordinates = (event) => {
+    const canvas = canvasRef.current;
+    const rect = canvas.getBoundingClientRect();
+    if (event.touches && event.touches[0]) {
+      return {
+        x: event.touches[0].clientX - rect.left,
+        y: event.touches[0].clientY - rect.top,
+      };
+    }
+    return {
+      x: event.clientX - rect.left,
+      y: event.clientY - rect.top,
+    };
+  };
+
+  const handleDrawStart = (event) => {
+    const { x, y } = getCanvasCoordinates(event);
+    drawingStateRef.current.isDrawing = true;
+    drawingStateRef.current.lastX = x;
+    drawingStateRef.current.lastY = y;
+    event.preventDefault();
+    setSignatureError('');
+  };
+
+  const handleDrawMove = (event) => {
+    if (!drawingStateRef.current.isDrawing) return;
+    event.preventDefault();
+    const canvas = canvasRef.current;
+    const context = canvas.getContext('2d');
+    const { x, y } = getCanvasCoordinates(event);
+
+    context.beginPath();
+    context.moveTo(drawingStateRef.current.lastX, drawingStateRef.current.lastY);
+    context.lineTo(x, y);
+    context.stroke();
+
+    drawingStateRef.current.lastX = x;
+    drawingStateRef.current.lastY = y;
+  };
+
+  const handleDrawEnd = (event) => {
+    if (!drawingStateRef.current.isDrawing) return;
+    handleDrawMove(event);
+    drawingStateRef.current.isDrawing = false;
+    event.preventDefault();
+  };
+
+  const handleClearSignature = () => {
+    initializeCanvas();
+    setSignatureUrl('');
+  };
+
+  const handleUploadSignature = async () => {
+    try {
+      const canvas = canvasRef.current;
+      if (!canvas) {
+        setSignatureError('Canvas is not ready. Please try again.');
+        return;
+      }
+
+      const blank = document.createElement('canvas');
+      blank.width = canvas.width;
+      blank.height = canvas.height;
+      if (canvas.toDataURL() === blank.toDataURL()) {
+        setSignatureError('Please provide a signature before uploading.');
+        return;
+      }
+
+      setUploadingSignature(true);
+      setSignatureError('');
+      const dataUrl = canvas.toDataURL('image/png');
+      const blob = await (await fetch(dataUrl)).blob();
+      const file = new File([blob], `contract-signature-${Date.now()}.png`, {
+        type: 'image/png',
+      });
+      const uploadedUrl = await uploadFile(file, 'image');
+      setSignatureUrl(uploadedUrl);
+      showSuccessToast('Signature uploaded successfully');
+    } catch (error) {
+      console.error('Signature upload failed:', error);
+      setSignatureError(error.message || 'Failed to upload the signature');
+      showErrorToast(handleAPIError(error));
+    } finally {
+      setUploadingSignature(false);
+    }
+  };
+
+  function formatCurrency(value) {
+    const numeric = Number(value || 0);
+    if (Number.isNaN(numeric)) {
+      return '0 ₫';
+    }
+    const formatted = new Intl.NumberFormat('vi-VN', {
+      style: 'currency',
+      currency: 'VND',
+      currencyDisplay: 'code',
+      maximumFractionDigits: 0,
+    }).format(numeric);
+    return formatted.replace(/\u00A0/g, ' ');
+  }
+
+  async function getBase64FromUrl(url) {
+    const response = await fetch(url);
+    const blob = await response.blob();
+    return new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onloadend = () => resolve(reader.result);
+      reader.onerror = reject;
+      reader.readAsDataURL(blob);
+    });
+  }
+
+const enrichOrderWithVehicles = async (order) => {
+  if (!order) {
+    return order;
+  }
+
+  const details =
+    order.orderDetails ||
+    order.orderDetailDTOList ||
+    order.items ||
+    [];
+
+  if (!Array.isArray(details) || details.length === 0) {
+    return { ...order, orderDetails: Array.isArray(order.orderDetails) ? order.orderDetails : [] };
+  }
+
+  const vehicleIds = [
+    ...new Set(
+      details
+        .map((detail) => detail.vehicleId || detail.vehicle?.id || detail.vehicle?.vehicleId)
+        .filter(Boolean)
+    ),
+  ];
+
+  if (vehicleIds.length === 0) {
+    return { ...order, orderDetails: details };
+  }
+
+  const vehicleMap = new Map();
+  await Promise.all(
+    vehicleIds.map(async (vehicleId) => {
+      try {
+        const vehicle = await vehiclesAPI.getById(vehicleId);
+        vehicleMap.set(vehicleId, vehicle);
+      } catch (error) {
+        console.warn('Failed to load vehicle info for ID', vehicleId, error);
+      }
+    })
+  );
+
+  const enrichedDetails = details.map((detail) => {
+    const vehicleId = detail.vehicleId || detail.vehicle?.id || detail.vehicle?.vehicleId;
+    const vehicle = vehicleMap.get(vehicleId);
+    const existingVehicle = detail.vehicle || detail.vehicleInfo || null;
+    return {
+      ...detail,
+      vehicle: vehicle || existingVehicle || null,
+      vehicleInfo: vehicle || existingVehicle || null,
+      vehicleName:
+        detail.vehicleName ||
+        vehicle?.name ||
+        vehicle?.modelName ||
+        existingVehicle?.name ||
+        existingVehicle?.modelName ||
+        null,
+    };
+  });
+
+  return {
+    ...order,
+    orderDetails: enrichedDetails,
+  };
+};
+
+const extractCustomerSnapshot = (customer) => {
+  if (!customer) return null;
+  const address =
+    customer.address ||
+    [
+      customer.addressLine1,
+      customer.addressLine2,
+      customer.city,
+      customer.province,
+      customer.country,
+    ]
+      .filter(Boolean)
+      .join(', ');
+
+  return {
+    id: customer.id || customer.customerId || null,
+    fullName: customer.fullName || customer.name || customer.customerName || '',
+    email: customer.email || '',
+    phone: customer.phone || customer.phoneNumber || '',
+    address,
+  };
+};
+
+const extractOrderSnapshot = (order) => {
+  if (!order) return null;
+
+  const resolvedOrderId = order.orderId || order.id || null;
+  const baseFields = {
+    id: resolvedOrderId,
+    orderId: resolvedOrderId,
+    quoteId: order.quoteId || null,
+    dealerId: order.dealerId || null,
+    customerId: order.customerId || null,
+    orderDate: order.orderDate || null,
+    deliveryDate: order.deliveryDate || order.expectedDeliveryDate || null,
+    paymentMethod: order.paymentMethod || order.payment_method || null,
+    paymentStatus: order.paymentStatus || null,
+    totalAmount: order.totalAmount,
+    paidAmount: order.paidAmount,
+    remainingAmount: order.remainingAmount,
+  };
+
+  const items = Array.isArray(order.orderDetails)
+    ? order.orderDetails.map((detail) => ({
+        vehicleId: detail.vehicleId || null,
+        vehicleName:
+          detail.vehicleName ||
+          detail.vehicle?.name ||
+          detail.vehicle?.modelName ||
+          null,
+        quantity: detail.quantity || detail.qty || 1,
+        unitPrice: detail.unitPrice || detail.price || 0,
+        totalAmount: detail.totalAmount || detail.lineTotal || 0,
+      }))
+    : [];
+
+  return {
+    ...baseFields,
+    orderDetails: items,
+  };
+};
+
+const dataUriToFile = (dataUri, filename) => {
+  if (!dataUri) return null;
+  const arr = dataUri.split(',');
+  if (arr.length < 2) return null;
+  const mimeMatch = arr[0].match(/:(.*?);/);
+  const mime = mimeMatch ? mimeMatch[1] : 'application/pdf';
+  const binaryString = atob(arr[1]);
+  const len = binaryString.length;
+  const u8arr = new Uint8Array(len);
+  for (let i = 0; i < len; i += 1) {
+    u8arr[i] = binaryString.charCodeAt(i);
+  }
+  return new File([u8arr], filename, { type: mime });
+};
+
+  async function generateContractPdf({
+    order,
+    customer,
+    dealer,
+    dealerName,
+    staff,
+    notes,
+  signatureUrl,
+  contractDate,
+  }) {
+    if (!order || !customer) {
+      throw new Error('Missing order or customer information for contract PDF.');
+    }
+
+    const doc = new jsPDF({ unit: 'mm', format: 'a4' });
+    doc.setProperties({
+      title: `Sales Contract #${order.orderId || order.id || ''}`,
+      subject: 'Electric Vehicle Sales Contract',
+    });
+    doc.setFont('helvetica', 'normal');
+
+    const pageWidth = doc.internal.pageSize.getWidth();
+    let cursorY = 25;
+    const marginX = 20;
+
+    const moveCursor = (spacing = 8) => {
+      cursorY += spacing;
+      if (cursorY > 280) {
+        doc.addPage();
+        cursorY = 20;
+        doc.setFontSize(12);
+      }
+    };
+
+    const addSectionTitle = (title) => {
+      doc.setFont('helvetica', 'bold');
+      doc.setFontSize(13);
+      doc.text(title, marginX, cursorY);
+      moveCursor(6);
+      doc.setFont('helvetica', 'normal');
+      doc.setFontSize(11);
+    };
+
+    const addText = (text, indent = 0, spacing = 7) => {
+      const x = marginX + indent;
+      const lines = Array.isArray(text) ? text : [text];
+      lines.forEach((line) => {
+        const wrapped = doc.splitTextToSize(line, pageWidth - x - 20);
+        wrapped.forEach((wrappedLine) => {
+          doc.text(wrappedLine, x, cursorY);
+          moveCursor(spacing);
+        });
+      });
+    };
+
+    doc.setFontSize(18);
+    doc.text('Electric Vehicle Sales Contract', pageWidth / 2, cursorY, {
+      align: 'center',
+    });
+    doc.setFontSize(12);
+    moveCursor(12);
+
+    addSectionTitle('General Information');
+  const contractDateText = contractDate
+    ? new Date(contractDate).toLocaleDateString('vi-VN')
+    : new Date().toLocaleDateString('vi-VN');
+    addText(`Contract Date: ${contractDateText}`);
+    if (dealerName) addText(`Dealer: ${dealerName}`);
+    addText(`Dealer ID: ${dealer || 'N/A'}`);
+    addText(`Order ID: ${order.orderId || order.id || 'N/A'}`);
+    moveCursor(2);
+
+    addSectionTitle('Customer Information');
+    addText(`Name: ${customer.fullName || customer.name || customer.customerName || 'N/A'}`);
+    if (customer.email) addText(`Email: ${customer.email}`);
+    if (customer.phone || customer.phoneNumber) {
+      addText(`Phone: ${customer.phone || customer.phoneNumber}`);
+    }
+    const customerAddress =
+      customer.address ||
+      [customer.addressLine1, customer.addressLine2, customer.city, customer.province]
+        .filter(Boolean)
+        .join(', ');
+    if (customerAddress) {
+      addText(`Address: ${customerAddress}`);
+    }
+    moveCursor(2);
+
+    addSectionTitle('Order Summary');
+    const orderDate = order.orderDate ? new Date(order.orderDate).toLocaleDateString('vi-VN') : null;
+    if (orderDate) addText(`Order Date: ${orderDate}`);
+    if (order.deliveryDate) {
+      addText(`Expected Delivery: ${new Date(order.deliveryDate).toLocaleDateString('vi-VN')}`);
+    }
+    if (order.paymentMethod || order.payment_method) {
+      addText(`Payment Method: ${order.paymentMethod || order.payment_method}`);
+    }
+    moveCursor(2);
+
+    addSectionTitle('Vehicle Details');
+    const orderItems =
+      order.orderDetails ||
+      order.orderDetailDTOList ||
+      order.items ||
+      [];
+
+    if (Array.isArray(orderItems) && orderItems.length > 0) {
+      const columnHeaders = ['Vehicle', 'Qty', 'Unit Price', 'Line Total'];
+      const columnWidths = [80, 20, 35, 35];
+
+      doc.setFont('helvetica', 'bold');
+      columnHeaders.reduce((currentX, header, index) => {
+        doc.text(header, marginX + currentX, cursorY);
+        return currentX + columnWidths[index];
+      }, 0);
+      moveCursor(6);
+      doc.setFont('helvetica', 'normal');
+
+      orderItems.forEach((detail) => {
+      const vehicleInfo = detail.vehicle || detail.vehicleInfo || {};
+      const vehicleName =
+        detail.vehicleName ||
+        vehicleInfo.name ||
+        vehicleInfo.modelName ||
+        `Vehicle #${detail.vehicleId || ''}`;
+      const quantity = detail.quantity || detail.qty || 1;
+      const unitPriceRaw =
+        detail.unitPrice !== undefined && detail.unitPrice !== null
+          ? detail.unitPrice
+          : detail.price !== undefined && detail.price !== null
+          ? detail.price
+          : detail.listedPrice || 0;
+      const unitPrice = Number(unitPriceRaw || 0);
+      const lineTotalValue =
+        detail.totalAmount !== undefined && detail.totalAmount !== null
+          ? Number(detail.totalAmount)
+          : unitPrice * quantity;
+      const vehicleLines = doc.splitTextToSize(vehicleName, columnWidths[0] - 2);
+        const requiredHeight = Math.max(vehicleLines.length * 6, 8);
+
+        vehicleLines.forEach((line, i) => {
+          doc.text(line, marginX, cursorY + i * 6);
+        });
+        doc.text(String(quantity), marginX + columnWidths[0], cursorY + 4);
+        doc.text(
+        formatCurrency(unitPrice),
+          marginX + columnWidths[0] + columnWidths[1],
+          cursorY + 4
+        );
+        doc.text(
+        formatCurrency(lineTotalValue),
+          marginX + columnWidths[0] + columnWidths[1] + columnWidths[2],
+          cursorY + 4
+        );
+        moveCursor(requiredHeight + 2);
+      });
+    } else {
+      addText('No detailed vehicle information available.', 4, 8);
+    }
+
+    const totalAmount =
+      order.totalAmount ||
+      order.amount ||
+      order.finalTotal ||
+      order.summaryTotal ||
+      0;
+    const paidAmount = order.paidAmount || 0;
+    const remainingAmount =
+      order.remainingAmount !== undefined
+        ? order.remainingAmount
+        : Math.max(totalAmount - paidAmount, 0);
+
+    moveCursor(2);
+    addSectionTitle('Financial Summary');
+    addText(`Total Amount: ${formatCurrency(totalAmount)}`, 4);
+    addText(`Paid Amount: ${formatCurrency(paidAmount)}`, 4);
+    addText(`Outstanding Balance: ${formatCurrency(remainingAmount)}`, 4);
+    if (order.depositAmount) {
+      addText(`Deposit: ${formatCurrency(order.depositAmount)}`, 4);
+    }
+    if (order.paymentStatus) {
+      addText(`Payment Status: ${order.paymentStatus}`, 4);
+    }
+    if (notes) {
+      moveCursor(2);
+      addSectionTitle('Additional Notes');
+      addText(notes, 4);
+    }
+
+    moveCursor(2);
+    addSectionTitle('Terms & Conditions');
+    const terms = [
+      'The customer agrees to the purchase details as outlined in this contract.',
+      'Payment obligations must be fulfilled according to the agreed schedule. Late payments may incur additional charges.',
+      'Vehicle delivery will be coordinated by the dealer upon confirmation of payment and completion of necessary paperwork.',
+      'Warranty and after-sales services are provided according to manufacturer and dealer policies.',
+      'Any amendments to this contract must be confirmed in writing and signed by both parties.',
+    ];
+    terms.forEach((term, idx) => addText(`${idx + 1}. ${term}`, 4));
+
+    moveCursor(6);
+    addSectionTitle('Signatures');
+    const signatureBlockHeight = 30;
+    const sectionWidth = (pageWidth - marginX * 2) / 2;
+
+    doc.setFont('helvetica', 'bold');
+    doc.text('Dealer Representative', marginX, cursorY);
+    doc.text('Customer', marginX + sectionWidth, cursorY);
+    moveCursor(8);
+    doc.setFont('helvetica', 'normal');
+
+    const staffName = staff?.name || 'Authorized Representative';
+    const staffContact = [staff?.email, staff?.phone].filter(Boolean).join(' • ');
+    doc.text(staffName, marginX, cursorY + signatureBlockHeight - 12);
+    if (staffContact) {
+      doc.setFont('helvetica', 'italic');
+      doc.text(staffContact, marginX, cursorY + signatureBlockHeight - 6);
+      doc.setFont('helvetica', 'normal');
+    }
+
+    const customerName = customer.fullName || customer.name || customer.customerName || 'Customer';
+    doc.text(customerName, marginX + sectionWidth, cursorY + signatureBlockHeight - 6);
+
+    if (signatureUrl) {
+      const signatureDataUrl = await getBase64FromUrl(signatureUrl);
+      doc.addImage(
+        signatureDataUrl,
+        'PNG',
+        marginX + sectionWidth,
+        cursorY,
+        Math.min(sectionWidth - 10, 60),
+        signatureBlockHeight - 12
+      );
+    } else {
+      doc.setFont('helvetica', 'italic');
+      doc.text('(Signature on file)', marginX + sectionWidth, cursorY + 10);
+      doc.setFont('helvetica', 'normal');
+    }
+    moveCursor(signatureBlockHeight + 4);
+
+    doc.setFont('helvetica', 'italic');
+    doc.setFontSize(10);
+    addText(
+      'This contract is generated electronically. Please keep a copy for your records.',
+      0,
+      6
+    );
+    doc.setFont('helvetica', 'normal');
+    doc.setFontSize(11);
+
+    return doc.output('datauristring');
+  }
+
+  const prepareContractDocument = async (contract) => {
+    if (!contract) {
+      throw new Error('Contract data is missing.');
+    }
+
+    const existingMeta = contract.documentMeta || parseContractDocumentMeta(contract.documentImage);
+    if (existingMeta?.cachedPdfUrl) {
+      return existingMeta.cachedPdfUrl;
+    }
+    if (existingMeta?.pdfUrl) {
+      return existingMeta.pdfUrl;
+    }
+    if (contract.documentImage && !existingMeta) {
+      return contract.documentImage;
+    }
+
+    const contractId = contract.raw?.contractId || contract.raw?.id || contract.id;
+    if (!contractId) {
+      throw new Error('Contract identifier is missing.');
+    }
+    if (!contract.customerId) {
+      throw new Error('Customer information is missing for this contract.');
+    }
+
+    let order = existingMeta?.orderSnapshot || null;
+    if (contract.orderId) {
+      try {
+        if (!order) {
+          order = await ordersAPI.getById(contract.orderId);
+        }
+      } catch (error) {
+        console.warn('Unable to fetch order by ID, fallback to contract endpoint:', error);
+      }
+    }
+    if (!order) {
+      order = await contractsAPI.getOrderByContract(contractId);
+    }
+
+    order = await enrichOrderWithVehicles(order);
+
+    const customer =
+      existingMeta?.customerSnapshot ||
+      (await customersAPI.getById(contract.customerId));
+
+    const signatureSource = existingMeta?.signatureUrl || contract.signatureUrl || null;
+    return generateContractPdf({
+      order,
+      customer,
+      dealer: contract.dealerId || dealerId,
+      dealerName: dealerDisplayName,
+      staff: {
+        name: existingMeta?.staffName || staffDisplayName,
+        email: user?.email,
+        phone: user?.phoneNumber || user?.phone,
+      },
+      notes: existingMeta?.notes || contract.notes || '',
+      signatureUrl: signatureSource,
+      contractDate: contract.signedDate || contract.createdAt || existingMeta?.generatedAt,
+    });
+  };
+
+  const handlePreviewContractDocument = async (contract) => {
+    try {
+      setDocumentPreviewLoading(true);
+      const documentUrl = await prepareContractDocument(contract);
+      if (!documentUrl) {
+        throw new Error('Contract document is not available.');
+      }
+      setDocumentPreviewUrl(documentUrl);
+      setShowDocumentModal(true);
+    } catch (error) {
+      console.error('Error preparing contract document for preview:', error);
+      showErrorToast(error.message || 'Unable to load contract document.');
+    } finally {
+      setDocumentPreviewLoading(false);
+    }
+  };
+
+  const handleDownloadContract = async (contract) => {
+    try {
+      const documentUrl = await prepareContractDocument(contract);
+      if (!documentUrl) {
+        throw new Error('Contract document is not available for download.');
+      }
+      const link = document.createElement('a');
+      link.href = documentUrl;
+      const orderReference = contract.orderId || contract.raw?.orderId || 'contract';
+      link.download = `sales-contract-${orderReference}.pdf`;
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+    } catch (error) {
+      console.error('Error downloading contract document:', error);
+      showErrorToast(error.message || 'Unable to download contract document.');
+    }
+  };
+
+  const handleCloseDocumentPreview = () => {
+    setShowDocumentModal(false);
+    setDocumentPreviewUrl('');
+    setDocumentPreviewLoading(false);
+  };
+
+  const isPdfDocument = (url) => {
+    if (!url) return false;
+    if (url.startsWith('data:application/pdf')) return true;
+    const lowerUrl = url.toLowerCase();
+    return lowerUrl.endsWith('.pdf') || lowerUrl.includes('application/pdf');
+  };
+
+  const filteredContracts = useMemo(() => {
+    return contracts.filter((contract) => {
+      const statusMatch =
+        filterStatus === 'all' ||
+        contract.status.toLowerCase() === filterStatus.toLowerCase();
+      return statusMatch;
+    });
+  }, [contracts, filterStatus]);
+
+  const totalContractValue = contracts.reduce(
+    (sum, contract) => sum + (contract.totalAmount || 0),
+    0
+  );
+
+  const totalContracts = contracts.length;
+  const activeContracts = contracts.filter(
+    (contract) => contract.status === 'ACTIVE'
+  ).length;
 
   return (
     <div className="main">
       <div className="card">
-        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '24px' }}>
+        <div
+          style={{
+            display: 'flex',
+            justifyContent: 'space-between',
+            alignItems: 'center',
+            marginBottom: '24px',
+            flexWrap: 'wrap',
+            gap: '12px',
+          }}
+        >
           <h2>Sales Contracts</h2>
-          <button className="btn btn-primary" onClick={handleAddContract}>
-            <i className="bx bx-plus"></i>
-            Create Contract
-          </button>
+          <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
+            <button className="btn btn-outline" onClick={handleResetSearch}>
+              <i className="bx bx-refresh"></i>
+              Reset
+            </button>
+            <button className="btn btn-primary" onClick={handleOpenModal}>
+              <i className="bx bx-plus"></i>
+              Create Contract
+            </button>
+          </div>
         </div>
 
-        {/* Contract Stats */}
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: '16px', marginBottom: '24px' }}>
+        <div
+          style={{
+            display: 'grid',
+            gridTemplateColumns: 'repeat(3, 1fr)',
+            gap: '16px',
+            marginBottom: '24px',
+          }}
+        >
           {[
-            { label: 'Total Contracts', value: contracts.length, icon: 'bx-file', color: 'var(--color-primary)' },
-            { label: 'Active Contracts', value: totalActiveContracts, icon: 'bx-check-circle', color: 'var(--color-success)' },
-            { label: 'Total Value', value: `$${totalContractValue.toLocaleString()}`, icon: 'bx-dollar-circle', color: 'var(--color-info)' },
-            { label: 'Outstanding', value: `$${totalOutstanding.toLocaleString()}`, icon: 'bx-credit-card', color: 'var(--color-warning)' }
+            {
+              label: 'Total Contracts',
+              value: totalContracts,
+              icon: 'bx-file',
+              color: 'var(--color-primary)',
+            },
+            {
+              label: 'Active Contracts',
+              value: activeContracts,
+              icon: 'bx-check-circle',
+              color: 'var(--color-success)',
+            },
+            {
+              label: 'Total Value',
+              value: `$${totalContractValue.toLocaleString()}`,
+              icon: 'bx-dollar-circle',
+              color: 'var(--color-info)',
+            },
           ].map((stat, index) => (
-            <div key={index} style={{ padding: '16px', background: 'var(--color-bg)', borderRadius: 'var(--radius)' }}>
-              <div style={{ display: 'flex', alignItems: 'center', gap: '12px', marginBottom: '8px' }}>
-                <div style={{
-                  width: '32px',
-                  height: '32px',
-                  borderRadius: '50%',
-                  background: stat.color,
+            <div
+              key={index}
+              style={{
+                padding: '16px',
+                background: 'var(--color-bg)',
+                borderRadius: 'var(--radius)',
+              }}
+            >
+              <div
+                style={{
                   display: 'flex',
                   alignItems: 'center',
-                  justifyContent: 'center',
-                  color: 'white',
-                  fontSize: '16px'
-                }}>
+                  gap: '12px',
+                  marginBottom: '8px',
+                }}
+              >
+                <div
+                  style={{
+                    width: '32px',
+                    height: '32px',
+                    borderRadius: '50%',
+                    background: stat.color,
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    color: 'white',
+                    fontSize: '16px',
+                  }}
+                >
                   <i className={`bx ${stat.icon}`}></i>
                 </div>
-                <div style={{ fontSize: '14px', color: 'var(--color-text-muted)' }}>{stat.label}</div>
+                <div style={{ fontSize: '14px', color: 'var(--color-text-muted)' }}>
+                  {stat.label}
+                </div>
               </div>
-              <div style={{ fontSize: '24px', fontWeight: '700', color: 'var(--color-text)' }}>{stat.value}</div>
+              <div
+                style={{ fontSize: '24px', fontWeight: '700', color: 'var(--color-text)' }}
+              >
+                {stat.value}
+              </div>
             </div>
           ))}
         </div>
 
-        {/* Filters */}
-        <div style={{ display: 'flex', gap: '16px', marginBottom: '24px', flexWrap: 'wrap' }}>
-          <div style={{ flex: 1, minWidth: '300px' }}>
+        <div
+          style={{
+            display: 'flex',
+            gap: '16px',
+            marginBottom: '24px',
+            flexWrap: 'wrap',
+          }}
+        >
+          <div style={{ flex: 1, minWidth: '260px' }}>
             <div style={{ position: 'relative' }}>
-              <i className="bx bx-search" style={{ position: 'absolute', left: '12px', top: '50%', transform: 'translateY(-50%)', color: 'var(--color-text-muted)' }}></i>
+              <i
+                className="bx bx-search"
+                style={{
+                  position: 'absolute',
+                  left: '12px',
+                  top: '50%',
+                  transform: 'translateY(-50%)',
+                  color: 'var(--color-text-muted)',
+                }}
+              ></i>
               <input
                 type="text"
-                placeholder="Search contracts..."
+                placeholder="Search by customer name..."
                 value={searchTerm}
                 onChange={(e) => setSearchTerm(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter') {
+                    e.preventDefault();
+                    handleSearch();
+                  }
+                }}
                 style={{
                   width: '100%',
                   padding: '10px 12px 10px 40px',
@@ -199,13 +1107,16 @@ const SalesContracts = ({ user }) => {
                   borderRadius: 'var(--radius)',
                   background: 'var(--color-bg)',
                   color: 'var(--color-text)',
-                  fontSize: '14px'
+                  fontSize: '14px',
                 }}
               />
             </div>
           </div>
+          <button className="btn btn-outline" onClick={handleSearch}>
+            Search
+          </button>
           <div style={{ display: 'flex', gap: '8px' }}>
-            {['all', 'active', 'completed', 'expired', 'cancelled'].map(status => (
+            {['all', 'active', 'completed', 'expired', 'cancelled'].map((status) => (
               <button
                 key={status}
                 onClick={() => setFilterStatus(status)}
@@ -218,299 +1129,614 @@ const SalesContracts = ({ user }) => {
           </div>
         </div>
 
-        {/* Contracts Table */}
-        <div style={{ overflowX: 'auto' }}>
-          <table style={{ width: '100%', borderCollapse: 'collapse' }}>
-            <thead>
-              <tr style={{ borderBottom: '2px solid var(--color-border)' }}>
-                <th style={{ padding: '12px', textAlign: 'left', fontSize: '14px', fontWeight: '600', color: 'var(--color-text-muted)' }}>Contract ID</th>
-                <th style={{ padding: '12px', textAlign: 'left', fontSize: '14px', fontWeight: '600', color: 'var(--color-text-muted)' }}>Customer</th>
-                <th style={{ padding: '12px', textAlign: 'left', fontSize: '14px', fontWeight: '600', color: 'var(--color-text-muted)' }}>Vehicle</th>
-                <th style={{ padding: '12px', textAlign: 'right', fontSize: '14px', fontWeight: '600', color: 'var(--color-text-muted)' }}>Amount</th>
-                <th style={{ padding: '12px', textAlign: 'center', fontSize: '14px', fontWeight: '600', color: 'var(--color-text-muted)' }}>Type</th>
-                <th style={{ padding: '12px', textAlign: 'center', fontSize: '14px', fontWeight: '600', color: 'var(--color-text-muted)' }}>Status</th>
-                <th style={{ padding: '12px', textAlign: 'left', fontSize: '14px', fontWeight: '600', color: 'var(--color-text-muted)' }}>Signed Date</th>
-                <th style={{ padding: '12px', textAlign: 'center', fontSize: '14px', fontWeight: '600', color: 'var(--color-text-muted)' }}>Actions</th>
-              </tr>
-            </thead>
-            <tbody>
-              {filteredContracts.map((contract) => (
-                <tr key={contract.id} style={{ borderBottom: '1px solid var(--color-border)' }}>
-                  <td style={{ padding: '12px', fontSize: '14px', color: 'var(--color-text)', fontWeight: '600' }}>{contract.id}</td>
-                  <td style={{ padding: '12px', fontSize: '14px', color: 'var(--color-text)' }}>{contract.customer}</td>
-                  <td style={{ padding: '12px', fontSize: '14px', color: 'var(--color-text)' }}>{contract.vehicle}</td>
-                  <td style={{ padding: '12px', fontSize: '14px', color: 'var(--color-text)', textAlign: 'right' }}>${contract.amount.toLocaleString()}</td>
-                  <td style={{ padding: '12px', fontSize: '14px', color: 'var(--color-text)', textAlign: 'center', textTransform: 'capitalize' }}>
-                    {contract.contractType}
-                  </td>
-                  <td style={{ padding: '12px', textAlign: 'center' }}>
-                    <div style={{
-                      padding: '4px 12px',
-                      borderRadius: 'var(--radius)',
-                      background: 'var(--color-bg)',
-                      color: getStatusColor(contract.status),
-                      fontSize: '12px',
-                      fontWeight: '600',
-                      textTransform: 'capitalize',
-                      display: 'inline-block'
-                    }}>
-                      {contract.status}
-                    </div>
-                  </td>
-                  <td style={{ padding: '12px', fontSize: '14px', color: 'var(--color-text-muted)' }}>{contract.signedDate}</td>
-                  <td style={{ padding: '12px', textAlign: 'center' }}>
-                    <div style={{ display: 'flex', gap: '8px', justifyContent: 'center' }}>
-                      <button 
-                        className="btn btn-outline" 
-                        style={{ padding: '6px', fontSize: '14px' }}
-                        onClick={() => handleEditContract(contract)}
-                      >
-                        <i className="bx bx-edit"></i>
-                      </button>
-                      <button className="btn btn-outline" style={{ padding: '6px', fontSize: '14px' }}>
-                        <i className="bx bx-download"></i>
-                      </button>
-                    </div>
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-
-        {filteredContracts.length === 0 && (
-          <div style={{ textAlign: 'center', padding: '40px', color: 'var(--color-text-muted)' }}>
-            <i className="bx bx-file" style={{ fontSize: '48px', marginBottom: '16px', opacity: '0.5' }}></i>
-            <div>No contracts found</div>
+        {loading ? (
+          <div
+            style={{
+              textAlign: 'center',
+              padding: '48px',
+              color: 'var(--color-text-muted)',
+            }}
+          >
+            <i
+              className="bx bx-loader-alt bx-spin"
+              style={{ fontSize: '48px', marginBottom: '16px' }}
+            ></i>
+            <div>Loading contracts...</div>
           </div>
+        ) : (
+          <>
+            <div style={{ overflowX: 'auto' }}>
+              <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+                <thead>
+                  <tr style={{ borderBottom: '2px solid var(--color-border)' }}>
+                    <th style={tableHeaderStyle}>Contract ID</th>
+                    <th style={tableHeaderStyle}>Customer</th>
+                    <th style={tableHeaderStyle}>Order</th>
+                    <th style={{ ...tableHeaderStyle, textAlign: 'right' }}>Amount</th>
+                    <th style={{ ...tableHeaderStyle, textAlign: 'center' }}>Status</th>
+                    <th style={tableHeaderStyle}>Signed Date</th>
+                    <th style={{ ...tableHeaderStyle, textAlign: 'center' }}>Actions</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {filteredContracts.map((contract) => (
+                    <tr key={contract.id} style={{ borderBottom: '1px solid var(--color-border)' }}>
+                      <td style={tableCellStyle}>
+                        <strong>{contract.id}</strong>
+                      </td>
+                      <td style={tableCellStyle}>{contract.customerName}</td>
+                      <td style={tableCellStyle}>
+                        {contract.orderNumber || `Order #${contract.orderId || 'N/A'}`}
+                      </td>
+                      <td
+                        style={{
+                          ...tableCellStyle,
+                          textAlign: 'right',
+                          fontWeight: 600,
+                          color: 'var(--color-primary)',
+                        }}
+                      >
+                        ${Number(contract.totalAmount || 0).toLocaleString()}
+                      </td>
+                      <td style={{ ...tableCellStyle, textAlign: 'center' }}>
+                        <span
+                          style={{
+                            padding: '4px 12px',
+                            borderRadius: 'var(--radius)',
+                            background: 'var(--color-bg)',
+                            color:
+                              contract.status === 'ACTIVE'
+                                ? 'var(--color-success)'
+                                : contract.status === 'COMPLETED'
+                                ? 'var(--color-info)'
+                                : contract.status === 'CANCELLED'
+                                ? 'var(--color-error)'
+                                : 'var(--color-text-muted)',
+                            fontSize: '12px',
+                            fontWeight: '600',
+                          }}
+                        >
+                          {contract.status}
+                        </span>
+                      </td>
+                      <td style={tableCellStyle}>
+                        {contract.signedDate
+                          ? new Date(contract.signedDate).toLocaleDateString()
+                          : 'N/A'}
+                      </td>
+                      <td style={{ ...tableCellStyle, textAlign: 'center' }}>
+                        <div style={{ display: 'flex', gap: '8px', justifyContent: 'center', flexWrap: 'wrap' }}>
+                          <button
+                            className="btn btn-outline"
+                            style={{ padding: '6px 10px', fontSize: '12px' }}
+                            onClick={() => handlePreviewContractDocument(contract)}
+                          >
+                            <i className="bx bx-show"></i>
+                            Preview
+                          </button>
+                          <button
+                            className="btn btn-outline"
+                            style={{ padding: '6px 10px', fontSize: '12px' }}
+                            onClick={() => handleDownloadContract(contract)}
+                          >
+                            <i className="bx bx-download"></i>
+                            Download
+                          </button>
+                          <button
+                            className="btn btn-outline"
+                            style={{ padding: '6px 10px', fontSize: '12px' }}
+                            onClick={() => handleViewOrder(contract)}
+                          >
+                            <i className="bx bx-spreadsheet"></i>
+                            Order
+                          </button>
+                        </div>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+
+            {filteredContracts.length === 0 && !loading && (
+              <div
+                style={{
+                  textAlign: 'center',
+                  padding: '40px',
+                  color: 'var(--color-text-muted)',
+                }}
+              >
+                <i
+                  className="bx bx-file"
+                  style={{ fontSize: '48px', marginBottom: '16px', opacity: '0.5' }}
+                ></i>
+                <div>No contracts found.</div>
+              </div>
+            )}
+          </>
         )}
       </div>
 
-      {/* Add/Edit Modal */}
       {showModal && (
-        <div style={{
-          position: 'fixed',
-          top: 0,
-          left: 0,
-          right: 0,
-          bottom: 0,
-          background: 'rgba(0, 0, 0, 0.5)',
-          display: 'flex',
-          alignItems: 'center',
-          justifyContent: 'center',
-          zIndex: 1000
-        }}>
-          <div style={{
-            background: 'var(--color-surface)',
-            borderRadius: 'var(--radius)',
-            padding: '24px',
-            width: '90%',
-            maxWidth: '600px',
-            maxHeight: '90vh',
-            overflowY: 'auto'
-          }}>
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '24px' }}>
-              <h3>{editingContract ? 'Edit Contract' : 'Create New Contract'}</h3>
-              <button 
-                onClick={() => setShowModal(false)}
-                style={{ background: 'none', border: 'none', fontSize: '24px', cursor: 'pointer', color: 'var(--color-text-muted)' }}
+        <div style={modalOverlayStyle}>
+          <div style={modalContainerStyle}>
+            <div style={modalHeaderStyle}>
+              <h3>Create Contract</h3>
+              <button
+                onClick={() => {
+                  setShowModal(false);
+                  resetForm();
+                }}
+                style={closeButtonStyle}
               >
                 <i className="bx bx-x"></i>
               </button>
             </div>
 
-            <form onSubmit={handleSubmit}>
-              <div style={{ display: 'grid', gap: '16px' }}>
-                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '16px' }}>
+            {referenceLoading ? (
+              <div
+                style={{
+                  textAlign: 'center',
+                  padding: '32px',
+                  color: 'var(--color-text-muted)',
+                }}
+              >
+                <i className="bx bx-loader-alt bx-spin" style={{ fontSize: '36px' }}></i>
+                <div style={{ marginTop: '12px' }}>Loading reference data...</div>
+              </div>
+            ) : (
+              <form onSubmit={handleSubmit}>
+                <div style={{ display: 'grid', gap: '16px' }}>
                   <div>
-                    <label style={{ display: 'block', marginBottom: '8px', fontSize: '14px', fontWeight: '600', color: 'var(--color-text)' }}>
-                      Customer Name *
-                    </label>
-                    <input
-                      type="text"
-                      value={formData.customer}
-                      onChange={(e) => setFormData({...formData, customer: e.target.value})}
-                      style={{
-                        width: '100%',
-                        padding: '12px',
-                        border: '1px solid var(--color-border)',
-                        borderRadius: 'var(--radius)',
-                        background: 'var(--color-bg)',
-                        color: 'var(--color-text)',
-                        fontSize: '14px'
-                      }}
-                      required
-                    />
-                  </div>
-                  <div>
-                    <label style={{ display: 'block', marginBottom: '8px', fontSize: '14px', fontWeight: '600', color: 'var(--color-text)' }}>
-                      Vehicle *
-                    </label>
-                    <input
-                      type="text"
-                      value={formData.vehicle}
-                      onChange={(e) => setFormData({...formData, vehicle: e.target.value})}
-                      style={{
-                        width: '100%',
-                        padding: '12px',
-                        border: '1px solid var(--color-border)',
-                        borderRadius: 'var(--radius)',
-                        background: 'var(--color-bg)',
-                        color: 'var(--color-text)',
-                        fontSize: '14px'
-                      }}
-                      required
-                    />
-                  </div>
-                </div>
-
-                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '16px' }}>
-                  <div>
-                    <label style={{ display: 'block', marginBottom: '8px', fontSize: '14px', fontWeight: '600', color: 'var(--color-text)' }}>
-                      Total Amount *
-                    </label>
-                    <input
-                      type="number"
-                      value={formData.amount}
-                      onChange={(e) => setFormData({...formData, amount: e.target.value})}
-                      style={{
-                        width: '100%',
-                        padding: '12px',
-                        border: '1px solid var(--color-border)',
-                        borderRadius: 'var(--radius)',
-                        background: 'var(--color-bg)',
-                        color: 'var(--color-text)',
-                        fontSize: '14px'
-                      }}
-                      required
-                    />
-                  </div>
-                  <div>
-                    <label style={{ display: 'block', marginBottom: '8px', fontSize: '14px', fontWeight: '600', color: 'var(--color-text)' }}>
-                      Down Payment
-                    </label>
-                    <input
-                      type="number"
-                      value={formData.downPayment}
-                      onChange={(e) => setFormData({...formData, downPayment: e.target.value})}
-                      style={{
-                        width: '100%',
-                        padding: '12px',
-                        border: '1px solid var(--color-border)',
-                        borderRadius: 'var(--radius)',
-                        background: 'var(--color-bg)',
-                        color: 'var(--color-text)',
-                        fontSize: '14px'
-                      }}
-                    />
-                  </div>
-                </div>
-
-                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '16px' }}>
-                  <div>
-                    <label style={{ display: 'block', marginBottom: '8px', fontSize: '14px', fontWeight: '600', color: 'var(--color-text)' }}>
-                      Contract Type
-                    </label>
+                    <label style={labelStyle}>Order *</label>
                     <select
-                      value={formData.contractType}
-                      onChange={(e) => setFormData({...formData, contractType: e.target.value})}
-                      style={{
-                        width: '100%',
-                        padding: '12px',
-                        border: '1px solid var(--color-border)',
-                        borderRadius: 'var(--radius)',
-                        background: 'var(--color-bg)',
-                        color: 'var(--color-text)',
-                        fontSize: '14px'
-                      }}
+                      value={formData.orderId}
+                      onChange={(e) =>
+                        setFormData((prev) => ({ ...prev, orderId: e.target.value }))
+                      }
+                      style={inputStyle}
+                      required
                     >
-                      <option value="cash">Cash</option>
-                      <option value="installment">Installment</option>
+                      <option value="">Select order</option>
+                      {availableOrders.map((order) => {
+                        const id = order.orderId || order.id;
+                        const customerName =
+                          order.customer?.fullName ||
+                          order.customerName ||
+                          `Customer #${order.customerId}`;
+                        return (
+                          <option key={id} value={id}>
+                            {`#${id} - ${customerName}`}
+                          </option>
+                        );
+                      })}
                     </select>
                   </div>
-                  {formData.contractType === 'installment' && (
+
+                  <div>
+                    <label style={labelStyle}>Customer *</label>
+                    <select
+                      value={formData.customerId}
+                      onChange={(e) =>
+                        setFormData((prev) => ({ ...prev, customerId: e.target.value }))
+                      }
+                      style={inputStyle}
+                      required
+                    >
+                      <option value="">Select customer</option>
+                      {availableCustomers.map((customer) => (
+                        <option key={customer.id || customer.customerId} value={customer.id || customer.customerId}>
+                          {customer.fullName || customer.name || customer.email}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+
+                  {!dealerId && (
                     <div>
-                      <label style={{ display: 'block', marginBottom: '8px', fontSize: '14px', fontWeight: '600', color: 'var(--color-text)' }}>
-                        Installment Plan (months)
-                      </label>
+                      <label style={labelStyle}>Dealer ID *</label>
                       <input
                         type="number"
-                        value={formData.installmentPlan}
-                        onChange={(e) => setFormData({...formData, installmentPlan: e.target.value})}
-                        style={{
-                          width: '100%',
-                          padding: '12px',
-                          border: '1px solid var(--color-border)',
-                          borderRadius: 'var(--radius)',
-                          background: 'var(--color-bg)',
-                          color: 'var(--color-text)',
-                          fontSize: '14px'
-                        }}
+                        value={formData.dealerId}
+                        onChange={(e) =>
+                          setFormData((prev) => ({ ...prev, dealerId: e.target.value }))
+                        }
+                        style={inputStyle}
+                        required
                       />
                     </div>
                   )}
-                </div>
 
-                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '16px' }}>
                   <div>
-                    <label style={{ display: 'block', marginBottom: '8px', fontSize: '14px', fontWeight: '600', color: 'var(--color-text)' }}>
-                      Signed Date
-                    </label>
-                    <input
-                      type="date"
-                      value={formData.signedDate}
-                      onChange={(e) => setFormData({...formData, signedDate: e.target.value})}
+                    <label style={labelStyle}>Contract Signature *</label>
+                    <div
                       style={{
-                        width: '100%',
-                        padding: '12px',
                         border: '1px solid var(--color-border)',
                         borderRadius: 'var(--radius)',
                         background: 'var(--color-bg)',
-                        color: 'var(--color-text)',
-                        fontSize: '14px'
-                      }}
-                    />
-                  </div>
-                  <div>
-                    <label style={{ display: 'block', marginBottom: '8px', fontSize: '14px', fontWeight: '600', color: 'var(--color-text)' }}>
-                      Expiry Date
-                    </label>
-                    <input
-                      type="date"
-                      value={formData.expiryDate}
-                      onChange={(e) => setFormData({...formData, expiryDate: e.target.value})}
-                      style={{
-                        width: '100%',
                         padding: '12px',
-                        border: '1px solid var(--color-border)',
-                        borderRadius: 'var(--radius)',
-                        background: 'var(--color-bg)',
-                        color: 'var(--color-text)',
-                        fontSize: '14px'
+                        display: 'flex',
+                        flexDirection: 'column',
+                        gap: '12px',
                       }}
+                    >
+                      <canvas
+                        ref={canvasRef}
+                        onMouseDown={handleDrawStart}
+                        onMouseMove={handleDrawMove}
+                        onMouseUp={handleDrawEnd}
+                        onMouseLeave={handleDrawEnd}
+                        onTouchStart={handleDrawStart}
+                        onTouchMove={handleDrawMove}
+                        onTouchEnd={handleDrawEnd}
+                        style={{
+                          border: '1px dashed var(--color-border)',
+                          borderRadius: '8px',
+                          background: '#ffffff',
+                          touchAction: 'none',
+                        }}
+                      />
+                      <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
+                        <button
+                          type="button"
+                          className="btn btn-outline"
+                          onClick={handleClearSignature}
+                          disabled={uploadingSignature}
+                        >
+                          <i className="bx bx-eraser"></i>
+                          Clear
+                        </button>
+                        <button
+                          type="button"
+                          className="btn btn-primary"
+                          onClick={handleUploadSignature}
+                          disabled={uploadingSignature}
+                        >
+                          {uploadingSignature ? (
+                            <>
+                              <i className="bx bx-loader-alt bx-spin" style={{ marginRight: '6px' }}></i>
+                              Uploading...
+                            </>
+                          ) : (
+                            <>
+                              <i className="bx bx-cloud-upload" style={{ marginRight: '6px' }}></i>
+                              Upload Signature
+                            </>
+                          )}
+                        </button>
+                      </div>
+                      {signatureError && (
+                        <div style={{ color: 'var(--color-error)', fontSize: '12px' }}>
+                          {signatureError}
+                        </div>
+                      )}
+                      {signatureUrl && (
+                        <div
+                          style={{
+                            border: '1px solid var(--color-border)',
+                            borderRadius: '8px',
+                            padding: '12px',
+                            background: 'var(--color-surface)',
+                          }}
+                        >
+                          <div style={{ fontSize: '13px', color: 'var(--color-text-muted)' }}>
+                            Uploaded Signature URL
+                          </div>
+                          <a
+                            href={signatureUrl}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            style={{
+                              fontSize: '14px',
+                              wordBreak: 'break-all',
+                            }}
+                          >
+                            {signatureUrl}
+                          </a>
+                        </div>
+                      )}
+                    </div>
+                  </div>
+
+                  <div>
+                    <label style={labelStyle}>Notes</label>
+                    <textarea
+                      value={formData.notes}
+                      onChange={(e) =>
+                        setFormData((prev) => ({ ...prev, notes: e.target.value }))
+                      }
+                      style={{ ...inputStyle, minHeight: '80px', resize: 'vertical' }}
+                      placeholder="Additional notes..."
                     />
                   </div>
                 </div>
-              </div>
 
-              <div style={{ display: 'flex', gap: '12px', marginTop: '24px', justifyContent: 'flex-end' }}>
-                <button 
-                  type="button" 
-                  className="btn btn-outline" 
-                  onClick={() => setShowModal(false)}
-                >
-                  Cancel
-                </button>
-                <button type="submit" className="btn btn-primary">
-                  {editingContract ? 'Update Contract' : 'Create Contract'}
-                </button>
+                <div style={modalFooterStyle}>
+                  <button
+                    type="button"
+                    className="btn btn-outline"
+                    onClick={() => {
+                      setShowModal(false);
+                      resetForm();
+                    }}
+                    disabled={submitting}
+                  >
+                    Cancel
+                  </button>
+                  <button type="submit" className="btn btn-primary" disabled={submitting}>
+                    {submitting ? (
+                      <>
+                        <i className="bx bx-loader-alt bx-spin" style={{ marginRight: '6px' }}></i>
+                        Creating...
+                      </>
+                    ) : (
+                      <>
+                        <i className="bx bx-check" style={{ marginRight: '6px' }}></i>
+                        Create Contract
+                      </>
+                    )}
+                  </button>
+                </div>
+              </form>
+            )}
+          </div>
+        </div>
+      )}
+
+      {showOrderModal && (
+        <div style={modalOverlayStyle}>
+          <div style={{ ...modalContainerStyle, maxWidth: '640px' }}>
+            <div style={modalHeaderStyle}>
+              <h3>Order Details</h3>
+              <button
+                onClick={() => {
+                  setShowOrderModal(false);
+                  setOrderPreview(null);
+                  setViewingContract(null);
+                }}
+                style={closeButtonStyle}
+              >
+                <i className="bx bx-x"></i>
+              </button>
+            </div>
+
+            {orderModalLoading ? (
+              <div
+                style={{
+                  textAlign: 'center',
+                  padding: '32px',
+                  color: 'var(--color-text-muted)',
+                }}
+              >
+                <i className="bx bx-loader-alt bx-spin" style={{ fontSize: '36px' }}></i>
+                <div style={{ marginTop: '12px' }}>Loading order details...</div>
               </div>
-            </form>
+            ) : orderPreview ? (
+              <div style={{ display: 'grid', gap: '16px' }}>
+                <div style={{ display: 'flex', gap: '12px', flexWrap: 'wrap' }}>
+                  <div style={orderInfoCardStyle}>
+                    <span style={orderInfoLabel}>Order ID</span>
+                    <strong>{orderPreview.orderId || viewingContract?.orderId}</strong>
+                  </div>
+                  <div style={orderInfoCardStyle}>
+                    <span style={orderInfoLabel}>Customer</span>
+                    <strong>
+                      {orderPreview.customer?.fullName ||
+                        orderPreview.customerName ||
+                        viewingContract?.customerName ||
+                        'N/A'}
+                    </strong>
+                  </div>
+                  <div style={orderInfoCardStyle}>
+                    <span style={orderInfoLabel}>Total Amount</span>
+                    <strong>
+                      $
+                      {Number(
+                        orderPreview.totalAmount ||
+                          orderPreview.amount ||
+                          viewingContract?.totalAmount ||
+                          0
+                      ).toLocaleString()}
+                    </strong>
+                  </div>
+                </div>
+
+                <div>
+                  <h4 style={{ marginBottom: '8px' }}>Vehicles</h4>
+                  <div style={{ overflowX: 'auto' }}>
+                    <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+                      <thead>
+                        <tr style={{ borderBottom: '1px solid var(--color-border)' }}>
+                          <th style={{ ...tableHeaderStyle, padding: '8px' }}>Vehicle</th>
+                          <th style={{ ...tableHeaderStyle, padding: '8px', textAlign: 'center' }}>
+                            Quantity
+                          </th>
+                          <th style={{ ...tableHeaderStyle, padding: '8px', textAlign: 'right' }}>
+                            Unit Price
+                          </th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {(orderPreview.orderDetails || orderPreview.items || []).map(
+                          (detail, index) => (
+                            <tr key={index} style={{ borderBottom: '1px solid var(--color-border)' }}>
+                              <td style={{ padding: '8px', fontSize: '14px' }}>
+                                {detail.vehicle?.name ||
+                                  detail.vehicleName ||
+                                  `Vehicle #${detail.vehicleId}`}
+                              </td>
+                              <td style={{ padding: '8px', textAlign: 'center', fontSize: '14px' }}>
+                                {detail.quantity || detail.qty || 1}
+                              </td>
+                              <td
+                                style={{
+                                  padding: '8px',
+                                  textAlign: 'right',
+                                  fontSize: '14px',
+                                  color: 'var(--color-primary)',
+                                  fontWeight: 600,
+                                }}
+                              >
+                                $
+                                {Number(detail.unitPrice || detail.price || 0).toLocaleString()}
+                              </td>
+                            </tr>
+                          )
+                        )}
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+              </div>
+            ) : (
+              <div
+                style={{
+                  textAlign: 'center',
+                  padding: '32px',
+                  color: 'var(--color-text-muted)',
+                }}
+              >
+                Unable to load order details.
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+
+      {showDocumentModal && documentPreviewUrl && (
+        <div style={modalOverlayStyle}>
+          <div style={{ ...modalContainerStyle, maxWidth: '720px', width: '90%', height: '80vh' }}>
+            <div style={modalHeaderStyle}>
+              <h3>Contract Document</h3>
+              <button onClick={handleCloseDocumentPreview} style={closeButtonStyle}>
+                <i className="bx bx-x"></i>
+              </button>
+            </div>
+            {isPdfDocument(documentPreviewUrl) ? (
+              <iframe
+                src={`${documentPreviewUrl}#toolbar=0`}
+                title="Contract Document"
+                style={{
+                  width: '100%',
+                  height: 'calc(80vh - 80px)',
+                  border: 'none',
+                  borderRadius: 'var(--radius)',
+                  background: '#f5f5f5',
+                }}
+              />
+            ) : (
+              <img
+                src={documentPreviewUrl}
+                alt="Contract Document"
+                style={{
+                  width: '100%',
+                  maxHeight: '70vh',
+                  objectFit: 'contain',
+                  borderRadius: 'var(--radius)',
+                  border: '1px solid var(--color-border)',
+                }}
+              />
+            )}
           </div>
         </div>
       )}
     </div>
   );
+};
+
+const tableHeaderStyle = {
+  padding: '12px',
+  textAlign: 'left',
+  fontSize: '14px',
+  fontWeight: 600,
+  color: 'var(--color-text-muted)',
+  whiteSpace: 'nowrap',
+};
+
+const tableCellStyle = {
+  padding: '12px',
+  fontSize: '14px',
+  color: 'var(--color-text)',
+  verticalAlign: 'middle',
+};
+
+const modalOverlayStyle = {
+  position: 'fixed',
+  top: 0,
+  left: 0,
+  right: 0,
+  bottom: 0,
+  background: 'rgba(0, 0, 0, 0.5)',
+  display: 'flex',
+  alignItems: 'center',
+  justifyContent: 'center',
+  zIndex: 1000,
+  padding: '16px',
+};
+
+const modalContainerStyle = {
+  background: 'var(--color-surface)',
+  borderRadius: 'var(--radius)',
+  padding: '24px',
+  width: '100%',
+  maxWidth: '520px',
+  maxHeight: '90vh',
+  overflowY: 'auto',
+};
+
+const modalHeaderStyle = {
+  display: 'flex',
+  justifyContent: 'space-between',
+  alignItems: 'center',
+  marginBottom: '24px',
+};
+
+const modalFooterStyle = {
+  display: 'flex',
+  gap: '12px',
+  marginTop: '24px',
+  justifyContent: 'flex-end',
+};
+
+const closeButtonStyle = {
+  background: 'none',
+  border: 'none',
+  fontSize: '24px',
+  cursor: 'pointer',
+  color: 'var(--color-text-muted)',
+};
+
+const labelStyle = {
+  display: 'block',
+  marginBottom: '6px',
+  fontSize: '13px',
+  fontWeight: 600,
+  color: 'var(--color-text-muted)',
+};
+
+const inputStyle = {
+  width: '100%',
+  padding: '12px',
+  border: '1px solid var(--color-border)',
+  borderRadius: 'var(--radius)',
+  background: 'var(--color-bg)',
+  color: 'var(--color-text)',
+  fontSize: '14px',
+};
+
+const orderInfoCardStyle = {
+  flex: '1 1 160px',
+  padding: '12px',
+  border: '1px solid var(--color-border)',
+  borderRadius: 'var(--radius)',
+  background: 'var(--color-bg)',
+};
+
+const orderInfoLabel = {
+  display: 'block',
+  fontSize: '12px',
+  color: 'var(--color-text-muted)',
+  marginBottom: '4px',
 };
 
 export default SalesContracts;

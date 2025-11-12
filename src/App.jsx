@@ -6,6 +6,7 @@ import AuthPage from './components/AuthPage'
 import ElectricVehicles from './components/ElectricVehicles'
 import Contact from './components/Contact'
 import DashboardApp from './components/dashboard-layout/DashboardApp'
+import PaymentResult from './components/common/PaymentResult'
 import { ToastContainer } from 'react-toastify'
 import 'react-toastify/dist/ReactToastify.css'
 
@@ -39,6 +40,7 @@ function App() {
             ? <DashboardApp user={loggedInUser} onLogout={handleLogout} />
             : <Navigate to="/auth" replace />
         } />
+        <Route path="/payment-result" element={<PaymentResult />} />
         <Route path="*" element={<Navigate to="/" replace />} />
       </Routes>
 

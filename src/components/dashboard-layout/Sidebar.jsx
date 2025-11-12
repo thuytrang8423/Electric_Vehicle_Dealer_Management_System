@@ -21,6 +21,7 @@ const Sidebar = ({ user, activeItem, onItemClick }) => {
   };
 
   // Define menu items based on role
+  // Based on ROLE_FEATURES.md from backend
   const getMenuItems = (role) => {
     const allItems = [
       // Overview & Activity
@@ -41,6 +42,7 @@ const Sidebar = ({ user, activeItem, onItemClick }) => {
       { id: 'vehicle-orders', label: 'Vehicle Orders', icon: 'bx-package', group: 'logistics' },
       { id: 'delivery-tracking', label: 'Delivery Tracking', icon: 'bx-location-plus', group: 'logistics' },
       { id: 'vehicle-distribution', label: 'Vehicle Distribution', icon: 'bx-package', group: 'logistics' },
+      { id: 'inventory', label: 'Inventory', icon: 'bx-box', group: 'logistics' },
       
       // Customers & Services
       { id: 'customers', label: 'Customers', icon: 'bx-group', group: 'customers' },
@@ -49,6 +51,7 @@ const Sidebar = ({ user, activeItem, onItemClick }) => {
       
       // Finance & Promotions
       { id: 'payments', label: 'Payments', icon: 'bx-credit-card', group: 'finance' },
+      { id: 'installments', label: 'Installments', icon: 'bx-calendar-check', group: 'finance' },
       { id: 'debt-management', label: 'Debt Management', icon: 'bx-dollar-circle', group: 'finance' },
       { id: 'promotions', label: 'Promotions', icon: 'bx-gift', group: 'finance' },
       
@@ -64,40 +67,84 @@ const Sidebar = ({ user, activeItem, onItemClick }) => {
       { id: 'settings', label: 'Settings', icon: 'bx-cog', group: 'settings' }
     ];
 
-    // Role-based filtering based on requirements
-    switch (role) {
-      case 'dealer-staff':
+    // Normalize role to uppercase for comparison
+    const normalizedRole = role?.toUpperCase();
+
+    // Role-based filtering based on ROLE_FEATURES.md
+    switch (normalizedRole) {
       case 'DEALER_STAFF':
-        // Dealer Staff: Common features + vehicles (catalog), quotes, orders, sales-contracts, customers, test-drives, view payments/promotions, customer-feedback
+        // DEALER_STAFF: Overview, Activity History, Vehicles (Product Catalog), Quotes, Orders, 
+        // Sales Contracts, Customers, Customer Feedback, Test Drives, Payments, Promotions, Settings
         return allItems.filter(item => 
-          ['overview', 'activity', 'vehicles', 'quotes', 'orders', 'sales-contracts', 'customers', 'customer-feedback', 'test-drives', 'payments', 'promotions', 'settings'].includes(item.id)
+          ['overview', 'activity', 'vehicles', 'quotes', 'orders', 'sales-contracts', 
+           'customers', 'customer-feedback', 'test-drives', 'payments', 'installments', 'promotions', 'settings'].includes(item.id)
         );
-      case 'ADMIN':
-      case 'EVM_MANAGER':
-        // Full access including vehicle-types and audit-logs, but no customers group
-        return allItems.filter(item => 
-          ['overview', 'activity', 'vehicles', 'vehicle-management', 'vehicle-types', 'vehicle-orders', 'vehicle-distribution', 'quotes', 'orders', 'sales-contracts', 'payments', 'debt-management', 'promotions', 'dealers', 'users', 'audit-logs', 'reports', 'delivery-tracking', 'settings'].includes(item.id)
-        );
-      case 'dealer-manager':
+      
       case 'DEALER_MANAGER':
-        // Dealer Manager: All dealer staff permissions + reports, debt-management
+        // DEALER_MANAGER: All DEALER_STAFF permissions + Debt Management, Reports
         return allItems.filter(item => 
-          ['overview', 'activity', 'vehicles', 'quotes', 'orders', 'sales-contracts', 'customers', 'customer-feedback', 'test-drives', 'payments', 'debt-management', 'promotions', 'reports', 'settings'].includes(item.id)
+          ['overview', 'activity', 'vehicles', 'quotes', 'orders', 'sales-contracts', 
+           'customers', 'customer-feedback', 'test-drives', 'payments', 'installments', 'debt-management', 'inventory',
+           'promotions', 'reports', 'settings'].includes(item.id)
         );
-      case 'evm-staff':
-        // EVM Staff: Common features + vehicles (CRUD), vehicle-management (CRUD), vehicle-types (CRUD), vehicle-orders, vehicle-distribution, orders, customers, payments, promotions, dealers, users, reports, delivery-tracking
+      
+      case 'EVM_MANAGER':
+        // EVM_MANAGER: Overview, Activity History, Vehicles, Vehicle Management, Vehicle Types, 
+        // Vehicle Orders, Vehicle Distribution, Quotes, Orders, Sales Contracts, Payments, 
+        // Debt Management, Promotions, Dealers, Users, Reports, Delivery Tracking, Settings
+        // NOTE: NO Customers, Customer Feedback, Test Drives
         return allItems.filter(item => 
-          ['overview', 'activity', 'vehicles', 'vehicle-management', 'vehicle-types', 'vehicle-orders', 'vehicle-distribution', 'orders', 'customers', 'payments', 'promotions', 'dealers', 'users', 'reports', 'delivery-tracking', 'settings'].includes(item.id)
+          ['overview', 'activity', 'vehicles', 'vehicle-management', 'vehicle-types', 
+           'vehicle-orders', 'vehicle-distribution', 'quotes', 'orders', 'sales-contracts', 
+           'inventory', 'payments', 'installments', 'debt-management', 'promotions', 'dealers', 'users', 'reports', 
+           'delivery-tracking', 'settings'].includes(item.id)
         );
+      
+      case 'ADMIN':
+        // ADMIN: All EVM_MANAGER permissions + Audit Logs
+        // NOTE: NO Customers, Customer Feedback, Test Drives (as per ROLE_FEATURES.md)
+        return allItems.filter(item => 
+          ['overview', 'activity', 'vehicles', 'vehicle-management', 'vehicle-types', 
+           'vehicle-orders', 'vehicle-distribution', 'quotes', 'orders', 'sales-contracts', 
+           'inventory', 'payments', 'installments', 'debt-management', 'promotions', 'dealers', 'users', 'reports', 
+           'delivery-tracking', 'audit-logs', 'settings'].includes(item.id)
+        );
+      
+      // Fallback for lowercase roles (for backward compatibility)
+      case 'DEALER-STAFF':
+      case 'dealer-staff':
+        return allItems.filter(item => 
+          ['overview', 'activity', 'vehicles', 'quotes', 'orders', 'sales-contracts', 
+           'customers', 'customer-feedback', 'test-drives', 'payments', 'installments', 'promotions', 'settings'].includes(item.id)
+        );
+      
+      case 'DEALER-MANAGER':
+      case 'dealer-manager':
+        return allItems.filter(item => 
+          ['overview', 'activity', 'vehicles', 'quotes', 'orders', 'sales-contracts', 
+           'customers', 'customer-feedback', 'test-drives', 'payments', 'installments', 'debt-management', 'inventory',
+           'promotions', 'reports', 'settings'].includes(item.id)
+        );
+      
+      case 'EVM-MANAGER':
       case 'evm-manager':
-        // EVM Manager: Same as EVM Staff but with additional management permissions
         return allItems.filter(item => 
-          ['overview', 'activity', 'vehicles', 'vehicle-management', 'vehicle-types', 'vehicle-orders', 'vehicle-distribution', 'orders', 'customers', 'payments', 'promotions', 'dealers', 'users', 'reports', 'delivery-tracking', 'settings'].includes(item.id)
+          ['overview', 'activity', 'vehicles', 'vehicle-management', 'vehicle-types', 
+           'vehicle-orders', 'vehicle-distribution', 'quotes', 'orders', 'sales-contracts', 
+           'inventory', 'payments', 'installments', 'debt-management', 'promotions', 'dealers', 'users', 'reports', 
+           'delivery-tracking', 'settings'].includes(item.id)
         );
+      
       case 'admin':
-        // Admin: Full system access including logs, but no customers group
-        return allItems.filter(item => !['customers', 'customer-feedback', 'test-drives'].includes(item.id));
+        return allItems.filter(item => 
+          ['overview', 'activity', 'vehicles', 'vehicle-management', 'vehicle-types', 
+           'vehicle-orders', 'vehicle-distribution', 'quotes', 'orders', 'sales-contracts', 
+           'inventory', 'payments', 'installments', 'debt-management', 'promotions', 'dealers', 'users', 'reports', 
+           'delivery-tracking', 'audit-logs', 'settings'].includes(item.id)
+        );
+      
       default:
+        // Default: show all items (for development/debugging)
         return allItems;
     }
   };

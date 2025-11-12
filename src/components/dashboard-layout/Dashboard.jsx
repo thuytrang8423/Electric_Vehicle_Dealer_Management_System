@@ -79,9 +79,22 @@ const Dashboard = ({ user }) => {
   };
 
   const getDataForRole = () => {
-    switch (user?.role) {
+    if (!user?.role) return dealerManagerData;
+    
+    // Normalize role to handle different formats (DEALER_STAFF, dealer-staff, etc.)
+    const normalizedRole = user.role.toString().toUpperCase().replace(/-/g, '_');
+    
+    switch (normalizedRole) {
+      case 'DEALER_STAFF': return dealerStaffData;
+      case 'DEALER_MANAGER': return dealerManagerData;
+      case 'EVM_MANAGER': return evmStaffData;
+      case 'ADMIN': return adminData;
+      // Fallback for lowercase formats
+      case 'DEALER-STAFF':
       case 'dealer-staff': return dealerStaffData;
+      case 'DEALER-MANAGER':
       case 'dealer-manager': return dealerManagerData;
+      case 'EVM-MANAGER':
       case 'evm-manager': return evmStaffData;
       case 'admin': return adminData;
       default: return dealerManagerData;
@@ -127,7 +140,7 @@ const Dashboard = ({ user }) => {
       </div>
 
       {/* Role-specific content */}
-      {user?.role === 'dealer-staff' && (
+      {(user?.role?.toUpperCase().replace(/-/g, '_') === 'DEALER_STAFF' || user?.role === 'dealer-staff') && (
         <div className="charts-grid">
           <div className="chart-card">
             <h3 className="chart-card__title">Top Selling Products</h3>
@@ -180,7 +193,7 @@ const Dashboard = ({ user }) => {
         </div>
       )}
 
-      {user?.role === 'dealer-manager' && (
+      {(user?.role?.toUpperCase().replace(/-/g, '_') === 'DEALER_MANAGER' || user?.role === 'dealer-manager') && (
         <div className="charts-grid">
           <div className="chart-card">
             <h3 className="chart-card__title">Staff Performance Leaderboard</h3>
@@ -253,7 +266,7 @@ const Dashboard = ({ user }) => {
         </div>
       )}
 
-      {user?.role === 'evm-manager' && (
+      {(user?.role?.toUpperCase().replace(/-/g, '_') === 'EVM_MANAGER' || user?.role === 'evm-manager') && (
         <div className="charts-grid">
           <div className="chart-card">
             <h3 className="chart-card__title">Top Performing Dealers</h3>
@@ -305,7 +318,7 @@ const Dashboard = ({ user }) => {
         </div>
       )}
 
-      {user?.role === 'admin' && (
+      {(user?.role?.toUpperCase().replace(/-/g, '_') === 'ADMIN' || user?.role === 'admin') && (
         <div className="charts-grid">
           <div className="chart-card">
             <h3 className="chart-card__title">User Distribution by Role</h3>

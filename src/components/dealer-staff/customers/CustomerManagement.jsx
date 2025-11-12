@@ -23,6 +23,34 @@ const CustomerManagement = ({ user }) => {
   const [currentPage, setCurrentPage] = useState(1);
   const [itemsPerPage] = useState(6);
 
+  // Shared loader to refresh customers list
+  const fetchCustomers = async () => {
+    try {
+      setLoading(true);
+      
+      // Use dealerId from userProfile if available, otherwise fallback to user.dealerId
+      const dealerId = userProfile?.dealerId || user?.dealerId;
+      
+      if (dealerId) {
+        console.log('Fetching customers for dealerId:', dealerId);
+        const data = await customersAPI.getByDealer(dealerId);
+        console.log('Fetched customers data:', data);
+        setCustomers(Array.isArray(data) ? data : []);
+      } else {
+        console.warn('No dealerId found in user profile or user object');
+        console.log('User profile:', userProfile);
+        console.log('User object:', user);
+        setCustomers([]);
+      }
+    } catch (error) {
+      console.error('Error fetching customers:', error);
+      showErrorToast('Failed to load customers');
+      setCustomers([]);
+    } finally {
+      setLoading(false);
+    }
+  };
+
   // Fetch user profile to get dealerId
   useEffect(() => {
     const fetchUserProfile = async () => {
@@ -63,33 +91,6 @@ const CustomerManagement = ({ user }) => {
 
   // Fetch customers based on dealer ID
   useEffect(() => {
-    const fetchCustomers = async () => {
-      try {
-        setLoading(true);
-        
-        // Use dealerId from userProfile if available, otherwise fallback to user.dealerId
-        const dealerId = userProfile?.dealerId || user?.dealerId;
-        
-        if (dealerId) {
-          console.log('Fetching customers for dealerId:', dealerId);
-          const data = await customersAPI.getByDealer(dealerId);
-          console.log('Fetched customers data:', data);
-          setCustomers(Array.isArray(data) ? data : []);
-        } else {
-          console.warn('No dealerId found in user profile or user object');
-          console.log('User profile:', userProfile);
-          console.log('User object:', user);
-          setCustomers([]);
-        }
-      } catch (error) {
-        console.error('Error fetching customers:', error);
-        showErrorToast('Failed to load customers');
-        setCustomers([]);
-      } finally {
-        setLoading(false);
-      }
-    };
-
     if (userProfile || user?.dealerId) {
       fetchCustomers();
     }
@@ -124,6 +125,7 @@ const CustomerManagement = ({ user }) => {
 
   const handleCreateSuccess = () => {
     fetchCustomers(); // Refresh the list
+    setShowCreateModal(false);
   };
 
   const handleEditCustomer = (customer) => {
@@ -133,6 +135,7 @@ const CustomerManagement = ({ user }) => {
 
   const handleEditSuccess = () => {
     fetchCustomers(); // Refresh the list
+    setShowEditModal(false);
   };
 
   const handleDeleteCustomer = (customerToDelete) => {

@@ -4,7 +4,7 @@ const CLOUDINARY_CONFIG = {
   upload_preset: import.meta.env.VITE_CLOUDINARY_UPLOAD_PRESET || 'SWP-EVM',
 };
 
-export const uploadImage = async (file) => {
+export const uploadFile = async (file, resourceType = 'auto') => {
   try {
     const formData = new FormData();
     formData.append('file', file);
@@ -12,7 +12,7 @@ export const uploadImage = async (file) => {
     formData.append('cloud_name', CLOUDINARY_CONFIG.cloud_name);
 
     const response = await fetch(
-      `https://api.cloudinary.com/v1_1/${CLOUDINARY_CONFIG.cloud_name}/image/upload`,
+      `https://api.cloudinary.com/v1_1/${CLOUDINARY_CONFIG.cloud_name}/${resourceType}/upload`,
       {
         method: 'POST',
         body: formData,
@@ -27,10 +27,12 @@ export const uploadImage = async (file) => {
     const data = await response.json();
     return data.secure_url;
   } catch (error) {
-    console.error('Error uploading image:', error);
+    console.error('Error uploading file:', error);
     throw error;
   }
 };
+
+export const uploadImage = async (file) => uploadFile(file, 'image');
 
 export const deleteImage = async (publicId) => {
   try {
@@ -45,6 +47,7 @@ export const deleteImage = async (publicId) => {
 };
 
 export default {
+  uploadFile,
   uploadImage,
   deleteImage,
 };

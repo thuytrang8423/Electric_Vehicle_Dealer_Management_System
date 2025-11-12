@@ -53,5 +53,64 @@ export const ordersAPI = {
   delete: async (id) => {
     const response = await apiClient.delete(`/api/orders/${id}`);
     return response.data;
+  },
+
+  // ========== WORKFLOW APIs ==========
+
+  // DEALER_STAFF: Create order from approved quote
+  createFromApprovedQuote: async (orderData, staffId) => {
+    const response = await apiClient.post(
+      `/api/dealer-workflow/orders/create-from-approved-quote?staffId=${staffId}`,
+      orderData
+    );
+    return response.data;
+  },
+
+  // DEALER_MANAGER/EVM_MANAGER: Get pending orders for approval
+  getPendingApproval: async () => {
+    const response = await apiClient.get('/api/workflow/orders/pending-approval');
+    return response.data;
+  },
+
+  // DEALER_MANAGER: Approve order
+  approveByDealerManager: async (orderId, approvedBy, notes) => {
+    const response = await apiClient.post(
+      `/api/dealer-workflow/orders/${orderId}/approve?approvedBy=${approvedBy}`,
+      null,
+      { params: { notes } }
+    );
+    return response.data;
+  },
+
+  // DEALER_MANAGER: Reject order
+  rejectByDealerManager: async (orderId, rejectedBy, reason) => {
+    const response = await apiClient.post(
+      `/api/dealer-workflow/orders/${orderId}/reject?rejectedBy=${rejectedBy}&reason=${reason}`
+    );
+    return response.data;
+  },
+
+  // EVM_MANAGER: Approve order (with inventory processing)
+  approveByEVM: async (orderId, approvedBy, notes) => {
+    const response = await apiClient.post(
+      `/api/workflow/orders/${orderId}/approve?approvedBy=${approvedBy}`,
+      null,
+      { params: { notes } }
+    );
+    return response.data;
+  },
+
+  // EVM_MANAGER: Reject order
+  rejectByEVM: async (orderId, rejectedBy, reason) => {
+    const response = await apiClient.post(
+      `/api/workflow/orders/${orderId}/reject?rejectedBy=${rejectedBy}&reason=${reason}`
+    );
+    return response.data;
+  },
+
+  // Check if order can be approved
+  canApprove: async (orderId) => {
+    const response = await apiClient.get(`/api/workflow/orders/${orderId}/can-approve`);
+    return response.data;
   }
 };

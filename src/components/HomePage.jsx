@@ -99,7 +99,7 @@ const HomePage = ({ loggedInUser, onLogout }) => {
                 whileHover={{ scale: 1.05 }}
                 whileTap={{ scale: 0.95 }}
                 className="btn-hero-secondary"
-                onClick={() => navigate('/auth')}
+                onClick={() => navigate('/vehicles')}
               >
                 Book a Test Drive
               </motion.button>

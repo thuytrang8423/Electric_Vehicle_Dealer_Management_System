@@ -543,10 +543,10 @@ const Details = () => {
                 whileHover={{ scale: 1.05, boxShadow: '0 0 30px rgba(229, 9, 20, 0.8)' }}
                 whileTap={{ scale: 0.95 }}
                 className="btn-glow btn-order-now"
-                onClick={() => navigate('/contact')}
+                onClick={() => navigate('/auth')}
               >
                 <i className="bx bx-cart"></i>
-                Order Now
+                Order Now ( For Business )
               </motion.button>
             </div>
 

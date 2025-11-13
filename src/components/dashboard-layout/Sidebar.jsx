@@ -26,7 +26,7 @@ const Sidebar = ({ user, activeItem, onItemClick }) => {
     const allItems = [
       // Overview & Activity
       { id: 'overview', label: 'Overview', icon: 'bx-home-alt-2', group: 'overview' },
-      { id: 'activity', label: 'Activity History', icon: 'bx-history', group: 'overview' },
+      // { id: 'activity', label: 'Activity History', icon: 'bx-history', group: 'overview' },
       
       // Vehicle Management
       { id: 'vehicles', label: 'Vehicles', icon: 'bx-car', group: 'vehicleManagement' },
@@ -40,27 +40,26 @@ const Sidebar = ({ user, activeItem, onItemClick }) => {
       
       // Logistics
       { id: 'vehicle-orders', label: 'Vehicle Orders', icon: 'bx-package', group: 'logistics' },
-      { id: 'delivery-tracking', label: 'Delivery Tracking', icon: 'bx-location-plus', group: 'logistics' },
-      { id: 'vehicle-distribution', label: 'Vehicle Distribution', icon: 'bx-package', group: 'logistics' },
+      // { id: 'delivery-tracking', label: 'Delivery Tracking', icon: 'bx-location-plus', group: 'logistics' },
+      // { id: 'vehicle-distribution', label: 'Vehicle Distribution', icon: 'bx-package', group: 'logistics' },
       { id: 'inventory', label: 'Inventory', icon: 'bx-box', group: 'logistics' },
       
       // Customers & Services
       { id: 'customers', label: 'Customers', icon: 'bx-group', group: 'customers' },
-      { id: 'customer-feedback', label: 'Customer Feedback', icon: 'bx-message', group: 'customers' },
       { id: 'test-drives', label: 'Test Drives', icon: 'bx-car', group: 'customers' },
       
       // Finance & Promotions
       { id: 'payments', label: 'Payments', icon: 'bx-credit-card', group: 'finance' },
       { id: 'installments', label: 'Installments', icon: 'bx-calendar-check', group: 'finance' },
       { id: 'debt-management', label: 'Debt Management', icon: 'bx-dollar-circle', group: 'finance' },
-      { id: 'promotions', label: 'Promotions', icon: 'bx-gift', group: 'finance' },
+      // { id: 'promotions', label: 'Promotions', icon: 'bx-gift', group: 'finance' },
       
       // Organization
       { id: 'dealers', label: 'Dealers', icon: 'bx-store', group: 'organization' },
       { id: 'users', label: 'Users', icon: 'bx-user', group: 'organization' },
       
       // Reports & Audit
-      { id: 'reports', label: 'Reports', icon: 'bx-bar-chart-alt-2', group: 'reports' },
+      // { id: 'reports', label: 'Reports', icon: 'bx-bar-chart-alt-2', group: 'reports' },
       { id: 'audit-logs', label: 'Audit Logs', icon: 'bx-history', group: 'reports' },
       
       // Settings
@@ -73,30 +72,23 @@ const Sidebar = ({ user, activeItem, onItemClick }) => {
     // Role-based filtering based on ROLE_FEATURES.md
     switch (normalizedRole) {
       case 'DEALER_STAFF':
-        // DEALER_STAFF: Overview, Activity History, Vehicles (Product Catalog), Quotes, Orders, 
-        // Sales Contracts, Customers, Customer Feedback, Test Drives, Payments, Promotions, Settings
         return allItems.filter(item => 
           ['overview', 'activity', 'vehicles', 'quotes', 'orders', 'sales-contracts', 
-           'customers', 'customer-feedback', 'test-drives', 'payments', 'installments', 'promotions', 'settings'].includes(item.id)
+           'customers', 'customer-feedback', 'test-drives', 'payments', 'promotions', 'settings'].includes(item.id)
         );
       
       case 'DEALER_MANAGER':
-        // DEALER_MANAGER: All DEALER_STAFF permissions + Debt Management, Reports
         return allItems.filter(item => 
           ['overview', 'activity', 'vehicles', 'quotes', 'orders', 'sales-contracts', 
-           'customers', 'customer-feedback', 'test-drives', 'payments', 'installments', 'debt-management', 'inventory',
+           'customers', 'test-drives', 'payments', 'installments', 'debt-management', 'inventory',
            'promotions', 'reports', 'settings'].includes(item.id)
         );
       
       case 'EVM_MANAGER':
-        // EVM_MANAGER: Overview, Activity History, Vehicles, Vehicle Management, Vehicle Types, 
-        // Vehicle Orders, Vehicle Distribution, Quotes, Orders, Sales Contracts, Payments, 
-        // Debt Management, Promotions, Dealers, Users, Reports, Delivery Tracking, Settings
-        // NOTE: NO Customers, Customer Feedback, Test Drives
         return allItems.filter(item => 
           ['overview', 'activity', 'vehicles', 'vehicle-management', 'vehicle-types', 
            'vehicle-orders', 'vehicle-distribution', 'quotes', 'orders', 'sales-contracts', 
-           'inventory', 'payments', 'installments', 'debt-management', 'promotions', 'dealers', 'users', 'reports', 
+           'inventory', 'payments', 'debt-management', 'promotions', 'dealers', 'users', 'reports', 
            'delivery-tracking', 'settings'].includes(item.id)
         );
       
@@ -115,15 +107,15 @@ const Sidebar = ({ user, activeItem, onItemClick }) => {
       case 'dealer-staff':
         return allItems.filter(item => 
           ['overview', 'activity', 'vehicles', 'quotes', 'orders', 'sales-contracts', 
-           'customers', 'customer-feedback', 'test-drives', 'payments', 'installments', 'promotions', 'settings'].includes(item.id)
+           'customers', 'test-drives', 'payments', 'settings'].includes(item.id)
         );
       
       case 'DEALER-MANAGER':
       case 'dealer-manager':
         return allItems.filter(item => 
           ['overview', 'activity', 'vehicles', 'quotes', 'orders', 'sales-contracts', 
-           'customers', 'customer-feedback', 'test-drives', 'payments', 'installments', 'debt-management', 'inventory',
-           'promotions', 'reports', 'settings'].includes(item.id)
+           'customers', 'test-drives', 'payments', 'installments', 'debt-management', 'inventory',
+            'reports', 'settings'].includes(item.id)
         );
       
       case 'EVM-MANAGER':
@@ -131,7 +123,7 @@ const Sidebar = ({ user, activeItem, onItemClick }) => {
         return allItems.filter(item => 
           ['overview', 'activity', 'vehicles', 'vehicle-management', 'vehicle-types', 
            'vehicle-orders', 'vehicle-distribution', 'quotes', 'orders', 'sales-contracts', 
-           'inventory', 'payments', 'installments', 'debt-management', 'promotions', 'dealers', 'users', 'reports', 
+           'inventory', 'payments', 'debt-management', 'promotions', 'dealers', 'users', 'reports', 
            'delivery-tracking', 'settings'].includes(item.id)
         );
       

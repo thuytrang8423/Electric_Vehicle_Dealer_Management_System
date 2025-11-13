@@ -5,6 +5,7 @@ import { paymentsAPI } from '../../utils/api/paymentsAPI';
 import { ordersAPI } from '../../utils/api/ordersAPI';
 import { customersAPI } from '../../utils/api/customersAPI';
 import { vehiclesAPI } from '../../utils/api/vehiclesAPI';
+import { installmentsAPI } from '../../utils/api/installmentsAPI';
 import { showSuccessToast, showErrorToast } from '../../utils/toast';
 import { handleAPIError } from '../../utils/apiConfig';
 import 'boxicons/css/boxicons.min.css';
@@ -27,6 +28,18 @@ const PaymentManagement = ({ user }) => {
   const [refreshTrigger, setRefreshTrigger] = useState(0);
   const [customerLookup, setCustomerLookup] = useState({});
   const [vehicleLookup, setVehicleLookup] = useState({});
+  
+  // Installment states
+  const [showInstallmentModal, setShowInstallmentModal] = useState(false);
+  const [selectedPaymentForInstallment, setSelectedPaymentForInstallment] = useState(null);
+  const [installmentForm, setInstallmentForm] = useState({
+    months: 12,
+    annualInterestRate: 0,
+    firstDueDate: ''
+  });
+  const [installmentSchedule, setInstallmentSchedule] = useState([]);
+  const [installmentLoading, setInstallmentLoading] = useState(false);
+  const [installmentCreating, setInstallmentCreating] = useState(false);
 
   const userRole = user?.role?.toUpperCase().replace(/-/g, '_');
   const userId = user?.id || user?.userId || user?.user?.id;
@@ -234,13 +247,23 @@ const PaymentManagement = ({ user }) => {
         // Redirect to VNPay payment page
         window.location.href = response.paymentUrl;
       } else if (response.error) {
-        showErrorToast(response.error);
+        showErrorToast(`VNPay error: ${response.error}. Please use Cash/Transfer payment instead.`);
+        // Nếu VNPay lỗi, mở manual payment modal để dùng Cash
+        setShowCreatePaymentModal(false);
+        handleOpenManualPayment(order);
       } else {
-        showErrorToast('Failed to create payment URL');
+        showErrorToast('VNPay service is currently unavailable. Please use Cash/Transfer payment instead.');
+        // Nếu VNPay không khả dụng, mở manual payment modal để dùng Cash
+        setShowCreatePaymentModal(false);
+        handleOpenManualPayment(order);
       }
     } catch (error) {
       console.error('Error creating VNPay payment:', error);
-      showErrorToast(handleAPIError(error));
+      const errorMessage = handleAPIError(error);
+      showErrorToast(`VNPay error: ${errorMessage}. Please use Cash/Transfer payment instead.`);
+      // Nếu VNPay lỗi, mở manual payment modal để dùng Cash
+      setShowCreatePaymentModal(false);
+      handleOpenManualPayment(order);
     }
   };
 
@@ -275,18 +298,32 @@ const PaymentManagement = ({ user }) => {
 
     const { paymentMethod, paymentPercentage, paymentNotes } = manualPaymentForm;
     if (!paymentMethod) {
-      showErrorToast('Please select a payment method');
+      showErrorToast('Vui lòng chọn phương thức thanh toán');
+      return;
+    }
+
+    // Validate payment percentage
+    const validPercentages = [30, 50, 70, 100];
+    const percentageNum = Number(paymentPercentage);
+    if (!validPercentages.includes(percentageNum)) {
+      showErrorToast('Payment percentage phải là 30, 50, 70 hoặc 100');
       return;
     }
 
     try {
       setManualPaymentLoading(true);
       const orderId = selectedOrder.orderId || selectedOrder.id;
-      await paymentsAPI.createDealerWorkflowPayment(orderId, {
-        paymentMethod,
-        paymentPercentage,
-        paymentNotes: paymentNotes || undefined,
-      });
+      
+      // Prepare payment data according to API specification
+      const paymentData = {
+        paymentMethod: String(paymentMethod).toUpperCase(), // Ensure uppercase: CASH, TRANSFER
+        paymentPercentage: percentageNum, // Ensure it's a number: 30, 50, 70, 100
+        paymentNotes: paymentNotes?.trim() || undefined // Optional field
+      };
+
+      console.log('Creating payment with data:', paymentData); // Debug log
+
+      await paymentsAPI.createDealerWorkflowPayment(orderId, paymentData);
 
       showSuccessToast(`Payment recorded via ${paymentMethod}`);
       setShowManualPaymentModal(false);
@@ -323,6 +360,107 @@ const PaymentManagement = ({ user }) => {
     return approvedOrders.find(
       (order) => String(order.orderId || order.id) === String(orderId)
     ) || null;
+  };
+
+  // Installment handlers
+  const handleOpenInstallmentModal = async (payment) => {
+    const paymentId = payment.paymentId || payment.id;
+    if (!paymentId) {
+      showErrorToast('Payment ID không hợp lệ');
+      return;
+    }
+
+    setSelectedPaymentForInstallment(payment);
+    
+    // Set default first due date (30 days from now)
+    const defaultDate = new Date();
+    defaultDate.setDate(defaultDate.getDate() + 30);
+    setInstallmentForm({
+      months: 12,
+      annualInterestRate: 0,
+      firstDueDate: defaultDate.toISOString().split('T')[0]
+    });
+
+    // Try to load existing installment schedule
+    try {
+      setInstallmentLoading(true);
+      const schedule = await installmentsAPI.getByPayment(paymentId);
+      setInstallmentSchedule(Array.isArray(schedule) ? schedule : []);
+    } catch (error) {
+      console.error('Error loading installment schedule:', error);
+      // If no schedule exists, that's okay - user can create one
+      setInstallmentSchedule([]);
+    } finally {
+      setInstallmentLoading(false);
+    }
+
+    setShowInstallmentModal(true);
+  };
+
+  const handleCreateInstallment = async (e) => {
+    e?.preventDefault();
+    if (!selectedPaymentForInstallment) {
+      showErrorToast('Payment không hợp lệ');
+      return;
+    }
+
+    const paymentId = selectedPaymentForInstallment.paymentId || selectedPaymentForInstallment.id;
+    const totalAmount = selectedPaymentForInstallment.amount || 0;
+
+    if (!installmentForm.firstDueDate) {
+      showErrorToast('Vui lòng chọn ngày đến hạn đầu tiên');
+      return;
+    }
+
+    if (!installmentForm.months || installmentForm.months <= 0) {
+      showErrorToast('Vui lòng nhập số tháng hợp lệ');
+      return;
+    }
+
+    try {
+      setInstallmentCreating(true);
+      const payload = {
+        paymentId: Number(paymentId),
+        totalAmount: Number(totalAmount),
+        months: Number(installmentForm.months),
+        annualInterestRate: Number(installmentForm.annualInterestRate) || 0,
+        firstDueDate: installmentForm.firstDueDate
+      };
+
+      await installmentsAPI.create(payload);
+      showSuccessToast('Tạo kế hoạch trả góp thành công');
+
+      // Reload schedule
+      const schedule = await installmentsAPI.getByPayment(paymentId);
+      setInstallmentSchedule(Array.isArray(schedule) ? schedule : []);
+    } catch (error) {
+      console.error('Error creating installment:', error);
+      showErrorToast(handleAPIError(error));
+    } finally {
+      setInstallmentCreating(false);
+    }
+  };
+
+  const handlePayInstallment = async (transactionId) => {
+    if (!transactionId) {
+      showErrorToast('Transaction ID không hợp lệ');
+      return;
+    }
+
+    try {
+      await installmentsAPI.payInstallment(transactionId, 'INSTALLMENT');
+      showSuccessToast('Đánh dấu kỳ trả góp đã thanh toán thành công');
+
+      // Reload schedule
+      const paymentId = selectedPaymentForInstallment?.paymentId || selectedPaymentForInstallment?.id;
+      if (paymentId) {
+        const schedule = await installmentsAPI.getByPayment(paymentId);
+        setInstallmentSchedule(Array.isArray(schedule) ? schedule : []);
+      }
+    } catch (error) {
+      console.error('Error paying installment:', error);
+      showErrorToast(handleAPIError(error));
+    }
   };
 
   const filteredPayments = payments.filter(p => {
@@ -672,22 +810,36 @@ const PaymentManagement = ({ user }) => {
                       {payment.vnpayTransactionNo || payment.transactionId || 'N/A'}
                     </td>
                     <td style={{ padding: '12px', textAlign: 'center' }}>
-                      {(status === 'PENDING' || status === 'pending') && (
-                        <button
-                          className="btn btn-outline"
-                          style={{ fontSize: '12px' }}
-                          onClick={() => {
-                            const order = findOrderForPayment(payment);
-                            if (order) {
-                              handleSelectOrderForPayment(order);
-                            } else {
-                              showErrorToast('Order information not available. Please refresh.');
-                            }
-                          }}
-                        >
-                          Pay Now
-                        </button>
-                      )}
+                      <div style={{ display: 'flex', gap: '8px', justifyContent: 'center', flexWrap: 'wrap' }}>
+                        {(status === 'PENDING' || status === 'pending') && (
+                          <button
+                            className="btn btn-outline"
+                            style={{ fontSize: '12px' }}
+                            onClick={() => {
+                              const order = findOrderForPayment(payment);
+                              if (order) {
+                                handleSelectOrderForPayment(order);
+                              } else {
+                                showErrorToast('Order information not available. Please refresh.');
+                              }
+                            }}
+                          >
+                            <i className="bx bx-credit-card" style={{ marginRight: '4px' }}></i>
+                            Pay Now
+                          </button>
+                        )}
+                        {(status === 'COMPLETED' || status === 'completed') && (
+                          <button
+                            className="btn btn-outline"
+                            style={{ fontSize: '12px' }}
+                            onClick={() => handleOpenInstallmentModal(payment)}
+                            title="Tạo hoặc xem kế hoạch trả góp"
+                          >
+                            <i className="bx bx-calendar" style={{ marginRight: '4px' }}></i>
+                            Trả góp
+                          </button>
+                        )}
+                      </div>
                     </td>
                   </tr>
                 );
@@ -975,6 +1127,265 @@ const PaymentManagement = ({ user }) => {
                 </button>
               </div>
             </form>
+          </div>
+        </div>
+      )}
+
+      {/* Installment Modal */}
+      {showInstallmentModal && selectedPaymentForInstallment && (
+        <div style={{
+          position: 'fixed',
+          top: 0,
+          left: 0,
+          right: 0,
+          bottom: 0,
+          background: 'rgba(0, 0, 0, 0.5)',
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          zIndex: 1000,
+          overflow: 'auto',
+          padding: '20px'
+        }}>
+          <div style={{
+            background: 'var(--color-surface)',
+            borderRadius: 'var(--radius)',
+            padding: '24px',
+            width: '90%',
+            maxWidth: '800px',
+            maxHeight: '90vh',
+            overflow: 'auto'
+          }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '24px' }}>
+              <h3>Quản lý trả góp - Payment #{selectedPaymentForInstallment.paymentId || selectedPaymentForInstallment.id}</h3>
+              <button 
+                onClick={() => {
+                  setShowInstallmentModal(false);
+                  setSelectedPaymentForInstallment(null);
+                  setInstallmentSchedule([]);
+                }}
+                style={{ background: 'none', border: 'none', fontSize: '24px', cursor: 'pointer', color: 'var(--color-text-muted)' }}
+              >
+                <i className="bx bx-x"></i>
+              </button>
+            </div>
+
+            {/* Payment Info */}
+            <div style={{
+              padding: '16px',
+              borderRadius: 'var(--radius)',
+              border: '1px solid var(--color-border)',
+              background: 'var(--color-bg)',
+              marginBottom: '24px'
+            }}>
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(150px, 1fr))', gap: '12px' }}>
+                <div>
+                  <div style={{ fontSize: '12px', color: 'var(--color-text-muted)', marginBottom: '4px' }}>Số tiền</div>
+                  <div style={{ fontSize: '16px', fontWeight: '600', color: 'var(--color-primary)' }}>
+                    ${(selectedPaymentForInstallment.amount || 0).toLocaleString()}
+                  </div>
+                </div>
+                <div>
+                  <div style={{ fontSize: '12px', color: 'var(--color-text-muted)', marginBottom: '4px' }}>Phương thức</div>
+                  <div style={{ fontSize: '14px', color: 'var(--color-text)' }}>
+                    {selectedPaymentForInstallment.paymentMethod || 'VNPay'}
+                  </div>
+                </div>
+                <div>
+                  <div style={{ fontSize: '12px', color: 'var(--color-text-muted)', marginBottom: '4px' }}>Trạng thái</div>
+                  <div style={{ fontSize: '14px', color: 'var(--color-success)' }}>
+                    {selectedPaymentForInstallment.status === 'COMPLETED' ? 'Hoàn thành' : selectedPaymentForInstallment.status}
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            {/* Create Installment Form */}
+            {installmentSchedule.length === 0 && (
+              <form onSubmit={handleCreateInstallment} style={{
+                border: '1px solid var(--color-border)',
+                borderRadius: 'var(--radius)',
+                padding: '20px',
+                marginBottom: '24px',
+                background: 'var(--color-bg)'
+              }}>
+                <h4 style={{ marginBottom: '16px', fontSize: '16px', fontWeight: '600' }}>Tạo kế hoạch trả góp</h4>
+                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: '16px' }}>
+                  <div>
+                    <label style={{ display: 'block', marginBottom: '8px', fontSize: '14px', fontWeight: '600', color: 'var(--color-text)' }}>
+                      Số tháng *
+                    </label>
+                    <input
+                      type="number"
+                      min="1"
+                      max="36"
+                      value={installmentForm.months}
+                      onChange={(e) => setInstallmentForm(prev => ({ ...prev, months: Number(e.target.value) }))}
+                      style={{
+                        width: '100%',
+                        padding: '10px 12px',
+                        border: '1px solid var(--color-border)',
+                        borderRadius: 'var(--radius)',
+                        background: 'var(--color-bg)',
+                        color: 'var(--color-text)',
+                        fontSize: '14px'
+                      }}
+                      required
+                    />
+                  </div>
+                  <div>
+                    <label style={{ display: 'block', marginBottom: '8px', fontSize: '14px', fontWeight: '600', color: 'var(--color-text)' }}>
+                      Lãi suất năm (%)
+                    </label>
+                    <input
+                      type="number"
+                      min="0"
+                      step="0.1"
+                      value={installmentForm.annualInterestRate}
+                      onChange={(e) => setInstallmentForm(prev => ({ ...prev, annualInterestRate: Number(e.target.value) }))}
+                      style={{
+                        width: '100%',
+                        padding: '10px 12px',
+                        border: '1px solid var(--color-border)',
+                        borderRadius: 'var(--radius)',
+                        background: 'var(--color-bg)',
+                        color: 'var(--color-text)',
+                        fontSize: '14px'
+                      }}
+                    />
+                  </div>
+                  <div>
+                    <label style={{ display: 'block', marginBottom: '8px', fontSize: '14px', fontWeight: '600', color: 'var(--color-text)' }}>
+                      Ngày đến hạn đầu tiên *
+                    </label>
+                    <input
+                      type="date"
+                      value={installmentForm.firstDueDate}
+                      onChange={(e) => setInstallmentForm(prev => ({ ...prev, firstDueDate: e.target.value }))}
+                      style={{
+                        width: '100%',
+                        padding: '10px 12px',
+                        border: '1px solid var(--color-border)',
+                        borderRadius: 'var(--radius)',
+                        background: 'var(--color-bg)',
+                        color: 'var(--color-text)',
+                        fontSize: '14px'
+                      }}
+                      required
+                    />
+                  </div>
+                </div>
+                <div style={{ display: 'flex', gap: '12px', justifyContent: 'flex-end', marginTop: '20px' }}>
+                  <button
+                    type="button"
+                    className="btn btn-outline"
+                    onClick={() => {
+                      setShowInstallmentModal(false);
+                      setSelectedPaymentForInstallment(null);
+                      setInstallmentSchedule([]);
+                    }}
+                    disabled={installmentCreating}
+                  >
+                    Hủy
+                  </button>
+                  <button
+                    type="submit"
+                    className="btn btn-primary"
+                    disabled={installmentCreating}
+                  >
+                    {installmentCreating ? (
+                      <>
+                        <i className="bx bx-loader-alt bx-spin" style={{ marginRight: '6px' }}></i>
+                        Đang tạo...
+                      </>
+                    ) : (
+                      <>
+                        <i className="bx bx-plus" style={{ marginRight: '6px' }}></i>
+                        Tạo kế hoạch trả góp
+                      </>
+                    )}
+                  </button>
+                </div>
+              </form>
+            )}
+
+            {/* Installment Schedule */}
+            {installmentLoading ? (
+              <div style={{ textAlign: 'center', padding: '40px' }}>
+                <i className="bx bx-loader-alt bx-spin" style={{ fontSize: '32px', color: 'var(--color-primary)' }}></i>
+                <div style={{ marginTop: '12px', color: 'var(--color-text-muted)' }}>Đang tải lịch trả góp...</div>
+              </div>
+            ) : installmentSchedule.length > 0 ? (
+              <div>
+                <h4 style={{ marginBottom: '16px', fontSize: '16px', fontWeight: '600' }}>Lịch trả góp</h4>
+                <div style={{ overflowX: 'auto' }}>
+                  <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+                    <thead>
+                      <tr style={{ borderBottom: '2px solid var(--color-border)' }}>
+                        <th style={{ padding: '12px', textAlign: 'left', fontSize: '14px', fontWeight: '600', color: 'var(--color-text-muted)' }}>#</th>
+                        <th style={{ padding: '12px', textAlign: 'left', fontSize: '14px', fontWeight: '600', color: 'var(--color-text-muted)' }}>Ngày đến hạn</th>
+                        <th style={{ padding: '12px', textAlign: 'right', fontSize: '14px', fontWeight: '600', color: 'var(--color-text-muted)' }}>Số tiền</th>
+                        <th style={{ padding: '12px', textAlign: 'center', fontSize: '14px', fontWeight: '600', color: 'var(--color-text-muted)' }}>Trạng thái</th>
+                        <th style={{ padding: '12px', textAlign: 'center', fontSize: '14px', fontWeight: '600', color: 'var(--color-text-muted)' }}>Thao tác</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {installmentSchedule.map((item, index) => {
+                        const status = (item.status || '').toUpperCase();
+                        const transactionId = item.transactionId || item.id;
+                        const isPaid = status === 'PAID';
+                        return (
+                          <tr key={transactionId || index} style={{ borderBottom: '1px solid var(--color-border)' }}>
+                            <td style={{ padding: '12px', fontSize: '14px', color: 'var(--color-text)' }}>
+                              {item.installmentNumber || index + 1}
+                            </td>
+                            <td style={{ padding: '12px', fontSize: '14px', color: 'var(--color-text)' }}>
+                              {item.dueDate ? new Date(item.dueDate).toLocaleDateString('vi-VN') : 'N/A'}
+                            </td>
+                            <td style={{ padding: '12px', textAlign: 'right', fontSize: '14px', fontWeight: '600', color: 'var(--color-primary)' }}>
+                              ${(item.amount || 0).toLocaleString()}
+                            </td>
+                            <td style={{ padding: '12px', textAlign: 'center' }}>
+                              <span style={{
+                                padding: '4px 12px',
+                                borderRadius: 'var(--radius)',
+                                background: 'var(--color-bg)',
+                                color: isPaid ? 'var(--color-success)' : 'var(--color-warning)',
+                                fontSize: '12px',
+                                fontWeight: '600'
+                              }}>
+                                {isPaid ? 'Đã trả' : 'Chờ trả'}
+                              </span>
+                            </td>
+                            <td style={{ padding: '12px', textAlign: 'center' }}>
+                              {isPaid ? (
+                                <span style={{ fontSize: '12px', color: 'var(--color-success)' }}>
+                                  <i className="bx bx-check-circle"></i> Đã thanh toán
+                                </span>
+                              ) : (
+                                <button
+                                  className="btn btn-outline"
+                                  style={{ fontSize: '12px' }}
+                                  onClick={() => handlePayInstallment(transactionId)}
+                                >
+                                  <i className="bx bx-check" style={{ marginRight: '4px' }}></i>
+                                  Đánh dấu đã trả
+                                </button>
+                              )}
+                            </td>
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            ) : (
+              <div style={{ textAlign: 'center', padding: '40px', color: 'var(--color-text-muted)' }}>
+                <i className="bx bx-calendar" style={{ fontSize: '48px', marginBottom: '16px', opacity: '0.5' }}></i>
+                <div>Chưa có lịch trả góp. Vui lòng tạo kế hoạch trả góp ở trên.</div>
+              </div>
+            )}
           </div>
         </div>
       )}

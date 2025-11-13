@@ -209,17 +209,19 @@ const DashboardApp = ({ user: propUser, onLogout }) => {
       
       case 'quotes':
         // DEALER_STAFF: Create and manage quotes
-        // DEALER_MANAGER: Approve quotes from staff
+        // DEALER_MANAGER: Create quotes và approve quotes from staff
         // EVM_MANAGER/ADMIN: View and approve quotes from dealer managers
         if (hasRoleAccess(['DEALER_STAFF', 'dealer-staff'])) {
           return <Quotes user={user} />;
         }
         if (hasRoleAccess(['DEALER_MANAGER', 'dealer-manager'])) {
-          return <ApprovalSystem user={user} />;
+          // Manager có thể tạo quote và approve quotes của Staff
+          // Có thể hiển thị cả Quotes và ApprovalSystem, hoặc chỉ Quotes với tab
+          // Hiện tại: Manager dùng Quotes để tạo quote, ApprovalSystem để approve
+          return <Quotes user={user} />;
         }
         if (hasRoleAccess(['EVM_MANAGER', 'ADMIN', 'evm-manager', 'admin'])) {
-          // EVM/Admin can view quotes but may need different component
-          return <Quotes user={user} />;
+          return <ApprovalSystem user={user} />;
         }
         return (
           <div className="main">

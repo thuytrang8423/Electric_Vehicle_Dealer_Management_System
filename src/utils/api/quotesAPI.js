@@ -141,9 +141,15 @@ export const quotesAPI = {
     return response.data;
   },
 
-  // Get approved quotes ready to create order
+  // Get approved quotes ready to create order (EVM workflow)
   getApprovedReadyForOrder: async () => {
     const response = await apiClient.get('/api/workflow/quotes/approved-ready');
+    return response.data;
+  },
+
+  // DEALER_STAFF: Get approved quotes ready to create order (Dealer workflow)
+  getApprovedReadyForDealerStaff: async () => {
+    const response = await apiClient.get('/api/dealer-workflow/quotes/approved-ready');
     return response.data;
   },
 

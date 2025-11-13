@@ -7,12 +7,12 @@ import Footer from './Footer';
 import Navbar from './Navbar';
 import { vehiclesAPI } from '../utils/api/vehiclesAPI';
 
-const ElectricVehicles = () => {
+const ElectricVehicles = ({ loggedInUser, onLogout }) => {
   const navigate = useNavigate();
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedBrand, setSelectedBrand] = useState('All Brands');
   const [selectedPrice, setSelectedPrice] = useState('Price Range');
-  const [selectedRange, setSelectedRange] = useState('Battery Range');
+  const [selectedBatteryCapacity, setSelectedBatteryCapacity] = useState('Battery Capacity');
   const [selectedType, setSelectedType] = useState('Vehicle Type');
   const [sortBy, setSortBy] = useState('Sort by: Newest');
   const [vehicles, setVehicles] = useState([]);
@@ -50,51 +50,60 @@ const ElectricVehicles = () => {
     
     const matchesBrand = selectedBrand === 'All Brands' || vehicle.brand === selectedBrand;
     
-    const matchesType = selectedType === 'Vehicle Type' || vehicle.vehicleType?.name === selectedType;
+    const matchesType = selectedType === 'Vehicle Type' || vehicle.vehicleType?.typeName === selectedType;
     
-    // Price filter logic
+    // Price filter logic (VNĐ)
     let matchesPrice = true;
     if (selectedPrice !== 'Price Range') {
       const price = vehicle.listedPrice || 0;
       switch (selectedPrice) {
-        case 'Under $200k':
-          matchesPrice = price < 200000;
+        case 'Under 10.000.000':
+          matchesPrice = price < 10000000;
           break;
-        case '$200k - $350k':
-          matchesPrice = price >= 200000 && price <= 350000;
+        case '10.000.000 - 100.000.000':
+          matchesPrice = price >= 10000000 && price <= 100000000;
           break;
-        case '$350k - $500k':
-          matchesPrice = price >= 350000 && price <= 500000;
+        case '100.000.000 - 1.000.000.000':
+          matchesPrice = price >= 100000000 && price <= 1000000000;
           break;
-        case 'Over $500k':
-          matchesPrice = price > 500000;
+        case 'Over 1.000.000.000':
+          matchesPrice = price > 1000000000;
           break;
         default:
           matchesPrice = true;
       }
     }
     
-    // Battery range filter logic
-    let matchesRange = true;
-    if (selectedRange !== 'Battery Range') {
-      const range = vehicle.specifications?.battery?.range_km || 0;
-      switch (selectedRange) {
-        case 'Under 500km':
-          matchesRange = range < 500;
+    // Battery capacity filter logic
+    let matchesBatteryCapacity = true;
+    if (selectedBatteryCapacity !== 'Battery Capacity') {
+      const capacity = vehicle.specifications?.battery?.capacity_kWh || 0;
+      switch (selectedBatteryCapacity) {
+        case 'Under 150kWh':
+          matchesBatteryCapacity = capacity < 150;
           break;
-        case '500km - 600km':
-          matchesRange = range >= 500 && range <= 600;
+        case '150-300kWh':
+          matchesBatteryCapacity = capacity >= 150 && capacity < 300;
           break;
-        case 'Over 600km':
-          matchesRange = range > 600;
+        case '300-500kWh':
+          matchesBatteryCapacity = capacity >= 300 && capacity < 500;
+          break;
+        case 'Over 500kWh':
+          matchesBatteryCapacity = capacity >= 500;
           break;
         default:
-          matchesRange = true;
+          matchesBatteryCapacity = true;
       }
     }
     
-    return matchesSearch && matchesBrand && matchesType && matchesPrice && matchesRange;
+    return matchesSearch && matchesBrand && matchesType && matchesPrice && matchesBatteryCapacity;
   });
+
+  // Get unique brands from API
+  const uniqueBrands = [...new Set(vehicles.map(v => v.brand).filter(Boolean))];
+  
+  // Get unique vehicle types from API
+  const uniqueVehicleTypes = [...new Set(vehicles.map(v => v.vehicleType?.typeName).filter(Boolean))];
 
   // Sort vehicles based on selected sort option
   const sortedVehicles = [...filteredVehicles].sort((a, b) => {
@@ -114,7 +123,7 @@ const ElectricVehicles = () => {
   return (
     <div className="electric-vehicles-page">
       {/* Navbar */}
-      <Navbar />
+      <Navbar loggedInUser={loggedInUser} onLogout={onLogout} />
 
       {/* Page Header */}
       <div className="page-header">
@@ -158,7 +167,9 @@ const ElectricVehicles = () => {
               onChange={(e) => setSelectedBrand(e.target.value)}
             >
               <option>All Brands</option>
-              <option>EVM</option>
+              {uniqueBrands.map(brand => (
+                <option key={brand} value={brand}>{brand}</option>
+              ))}
             </select>
             <select 
               className={`filter-select ${selectedPrice !== 'Price Range' ? 'filter-active' : ''}`} 
@@ -166,20 +177,21 @@ const ElectricVehicles = () => {
               onChange={(e) => setSelectedPrice(e.target.value)}
             >
               <option value="Price Range">Price Range</option>
-              <option value="Under $200k">Under $200k</option>
-              <option value="$200k - $350k">$200k - $350k</option>
-              <option value="$350k - $500k">$350k - $500k</option>
-              <option value="Over $500k">Over $500k</option>
+              <option value="Under 10.000.000">Under 10.000.000</option>
+              <option value="10.000.000 - 100.000.000">10.000.000 - 100.000.000</option>
+              <option value="100.000.000 - 1.000.000.000">100.000.000 - 1.000.000.000</option>
+              <option value="Over 1.000.000.000">Over 1.000.000.000</option>
             </select>
             <select 
-              className={`filter-select ${selectedRange !== 'Battery Range' ? 'filter-active' : ''}`} 
-              value={selectedRange} 
-              onChange={(e) => setSelectedRange(e.target.value)}
+              className={`filter-select ${selectedBatteryCapacity !== 'Battery Capacity' ? 'filter-active' : ''}`} 
+              value={selectedBatteryCapacity} 
+              onChange={(e) => setSelectedBatteryCapacity(e.target.value)}
             >
-              <option value="Battery Range">Battery Range</option>
-              <option value="Under 500km">Under 500km</option>
-              <option value="500km - 600km">500km - 600km</option>
-              <option value="Over 600km">Over 600km</option>
+              <option value="Battery Capacity">Battery Capacity</option>
+              <option value="Under 150kWh">Under 150kWh</option>
+              <option value="150-300kWh">150-300kWh</option>
+              <option value="300-500kWh">300-500kWh</option>
+              <option value="Over 500kWh">Over 500kWh</option>
             </select>
             <select 
               className={`filter-select ${selectedType !== 'Vehicle Type' ? 'filter-active' : ''}`} 
@@ -187,10 +199,9 @@ const ElectricVehicles = () => {
               onChange={(e) => setSelectedType(e.target.value)}
             >
               <option value="Vehicle Type">Vehicle Type</option>
-              <option value="Sedan">Sedan</option>
-              <option value="SUV">SUV</option>
-              <option value="Sport">Sport</option>
-              <option value="City">City</option>
+              {uniqueVehicleTypes.map(typeName => (
+                <option key={typeName} value={typeName}>{typeName}</option>
+              ))}
             </select>
           </div>
         </motion.div>

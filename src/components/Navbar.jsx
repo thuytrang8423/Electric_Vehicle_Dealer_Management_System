@@ -3,7 +3,7 @@ import { useNavigate, useLocation } from 'react-router-dom';
 import 'boxicons/css/boxicons.min.css';
 import './HomePage.css';
 
-const Navbar = () => {
+const Navbar = ({ loggedInUser, onLogout }) => {
   const navigate = useNavigate();
   const location = useLocation();
   const [isScrolled, setIsScrolled] = useState(false);
@@ -21,11 +21,20 @@ const Navbar = () => {
     const path = location.pathname;
     if (path === '/') return 'home';
     if (path === '/vehicles') return 'vehicles';
+    if (path === '/recruitment') return 'recruitment';
+    if (path === '/dealer') return 'dealer';
     if (path === '/contact') return 'contact';
     return '';
   };
 
   const currentPage = getCurrentPage();
+
+  const handleLogout = () => {
+    if (onLogout) {
+      onLogout();
+    }
+    navigate('/');
+  };
 
   return (
     <nav className={`navbar ${isScrolled ? 'scrolled' : ''}`}>
@@ -36,17 +45,35 @@ const Navbar = () => {
         <ul className="nav-menu">
           <li className={`nav-item ${currentPage === 'home' ? 'active' : ''}`} onClick={() => { window.scrollTo(0, 0); navigate('/'); }} style={{ cursor: 'pointer' }}>Home</li>
           <li className={`nav-item ${currentPage === 'vehicles' ? 'active' : ''}`} onClick={() => { window.scrollTo(0, 0); navigate('/vehicles'); }} style={{ cursor: 'pointer' }}>Electric Vehicles</li>
-          <li className="nav-item">Technology</li>
-          <li className="nav-item">Dealer</li>
+          <li className={`nav-item ${currentPage === 'recruitment' ? 'active' : ''}`} onClick={() => { window.scrollTo(0, 0); navigate('/recruitment'); }} style={{ cursor: 'pointer' }}>Recruitment</li>
+          <li className={`nav-item ${currentPage === 'dealer' ? 'active' : ''}`} onClick={() => { window.scrollTo(0, 0); navigate('/dealer'); }} style={{ cursor: 'pointer' }}>Dealer</li>
           <li className={`nav-item ${currentPage === 'contact' ? 'active' : ''}`} onClick={() => { window.scrollTo(0, 0); navigate('/contact'); }} style={{ cursor: 'pointer' }}>Contact</li>
         </ul>
         <div className="nav-buttons">
-          <button 
-            className="btn-login"
-            onClick={() => navigate('/auth')}
-          >
-            Login
-          </button> 
+          {loggedInUser ? (
+            <>
+              <button 
+                className="btn-login"
+                onClick={() => navigate('/dashboard')}
+                style={{ marginRight: '8px' }}
+              >
+                Dashboard
+              </button>
+              <button 
+                className="btn-login"
+                onClick={handleLogout}
+              >
+                Logout
+              </button>
+            </>
+          ) : (
+            <button 
+              className="btn-login"
+              onClick={() => navigate('/auth')}
+            >
+              Login
+            </button>
+          )}
         </div>
       </div>
     </nav>

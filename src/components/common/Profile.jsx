@@ -1,477 +1,342 @@
-import React, { useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import 'boxicons/css/boxicons.min.css';
 
-const Profile = ({ user, onUpdateProfile }) => {
-  const [activeTab, setActiveTab] = useState('personal');
-  const [formData, setFormData] = useState({
-    name: user?.name || 'Nguyễn Văn Admin',
-    email: user?.email || 'admin@evmmotors.com',
-    phone: user?.phone || '+84 901 234 567',
-    description: user?.description || 'Quản trị viên hệ thống EVM Motors với 5 năm kinh nghiệm trong lĩnh vực công nghệ xe điện và quản lý dữ liệu.',
-    password: '',
-    newPassword: '',
-    confirmPassword: '',
-    avatar: null
+/**
+ * Profile form that aligns with the account payload:
+ * {
+ *   "username": "string",
+ *   "password": "string",
+ *   "email": "string",
+ *   "fullName": "string",
+ *   "phoneNumber": "string",
+ *   "role": "ADMIN",
+ *   "status": "ACTIVE",
+ *   "dealerId": 1073741824
+ * }
+ *
+ * Editable fields: fullName, phoneNumber, email, password (optional)
+ * Read-only fields: username, role, status, dealerId
+ */
+const Profile = ({ user = {}, onUpdateProfile }) => {
+  const readonlyFields = useMemo(
+    () => [
+      { key: 'username', label: 'Username', icon: 'bx-user', value: user.username || '—' },
+      { key: 'role', label: 'Role', icon: 'bx-shield-quarter', value: user.role || '—' },
+      { key: 'status', label: 'Status', icon: 'bx-pulse', value: user.status || '—' },
+      {
+        key: 'dealerId',
+        label: 'Dealer ID',
+        icon: 'bx-id-card',
+        value: user.dealerId !== undefined && user.dealerId !== null ? user.dealerId : '—'
+      }
+    ],
+    [user.username, user.role, user.status, user.dealerId]
+  );
+
+  const buildEditable = (source = {}) => ({
+    fullName: source.fullName || '',
+    phoneNumber: source.phoneNumber || '',
+    email: source.email || '',
+    password: ''
   });
+
+  const [formData, setFormData] = useState(buildEditable(user));
   const [errors, setErrors] = useState({});
+  const [statusMessage, setStatusMessage] = useState(null);
 
-  const validateEmail = (email) => {
-    const re = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
-    return re.test(email);
-  };
-
-  const handleChange = (e) => {
-    const { name, value } = e.target;
-    setFormData(prev => ({ ...prev, [name]: value }));
-    // Clear error when user types
-    if (errors[name]) {
-      setErrors(prev => ({ ...prev, [name]: '' }));
-    }
-  };
-
-  const handleSubmit = (e) => {
-    e.preventDefault();
-    const newErrors = {};
-
-    if (!formData.name.trim()) {
-      newErrors.name = 'Name is required';
-    }
-    if (!validateEmail(formData.email)) {
-      newErrors.email = 'Invalid email format';
-    }
-    if (!formData.phone.trim()) {
-      newErrors.phone = 'Phone is required';
-    }
-    if (formData.password) {
-      if (formData.newPassword.length < 8) {
-        newErrors.newPassword = 'Password must be at least 8 characters';
-      }
-      if (formData.newPassword !== formData.confirmPassword) {
-        newErrors.confirmPassword = 'Passwords do not match';
-      }
-    }
-
-    if (Object.keys(newErrors).length > 0) {
-      setErrors(newErrors);
-      return;
-    }
-
-    // Here you would call API to update profile
-    if (onUpdateProfile) {
-      onUpdateProfile(formData);
-    }
-    setEditing(false);
-    alert('Profile updated successfully!');
-  };
-
-  const handleSave = () => {
-    const newErrors = {};
-
-    if (!formData.name.trim()) {
-      newErrors.name = 'Name is required';
-    }
-    if (!validateEmail(formData.email)) {
-      newErrors.email = 'Invalid email format';
-    }
-    if (!formData.phone.trim()) {
-      newErrors.phone = 'Phone is required';
-    }
-    if (activeTab === 'password' && formData.password) {
-      if (formData.newPassword.length < 8) {
-        newErrors.newPassword = 'Password must be at least 8 characters';
-      }
-      if (formData.newPassword !== formData.confirmPassword) {
-        newErrors.confirmPassword = 'Passwords do not match';
-      }
-    }
-
-    if (Object.keys(newErrors).length > 0) {
-      setErrors(newErrors);
-      return;
-    }
-
-    if (onUpdateProfile) {
-      onUpdateProfile(formData);
-    }
-    alert('Profile updated successfully!');
-  };
-
-  const handleCancel = () => {
+  useEffect(() => {
+    setFormData(buildEditable(user));
     setErrors({});
-    // Reset form data
-    setFormData({
-      name: user?.name || 'Nguyễn Văn Admin',
-      email: user?.email || 'admin@evmmotors.com',
-      phone: user?.phone || '+84 901 234 567',
-      description: user?.description || 'Quản trị viên hệ thống EVM Motors với 5 năm kinh nghiệm trong lĩnh vực công nghệ xe điện và quản lý dữ liệu.',
-      password: '',
-      newPassword: '',
-      confirmPassword: '',
-      avatar: null
+    setStatusMessage(null);
+  }, [user]);
+
+  const validators = {
+    fullName: (value) => value.trim().length > 0 || 'Full name is required',
+    phoneNumber: (value) => value.trim().length > 0 || 'Phone number is required',
+    email: (value) => {
+      const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+      if (!value.trim()) return 'Email is required';
+      return emailRegex.test(value.trim()) || 'Invalid email format';
+    }
+  };
+
+  const validateForm = (data) => {
+    const newErrors = {};
+    Object.entries(validators).forEach(([key, validate]) => {
+      const result = validate(data[key] || '');
+      if (result !== true) {
+        newErrors[key] = result;
+      }
     });
+    return newErrors;
+  };
+
+  const handleChange = (event) => {
+    const { name, value } = event.target;
+    setFormData((prev) => ({ ...prev, [name]: value }));
+    if (errors[name]) {
+      setErrors((prev) => ({ ...prev, [name]: '' }));
+    }
+    if (statusMessage) {
+      setStatusMessage(null);
+    }
+  };
+
+  const handleSubmit = (event) => {
+    event.preventDefault();
+    const validationErrors = validateForm(formData);
+    if (Object.keys(validationErrors).length > 0) {
+      setErrors(validationErrors);
+      setStatusMessage(null);
+      return;
+    }
+
+    const payload = {
+      username: user.username || '',
+      email: formData.email.trim(),
+      fullName: formData.fullName.trim(),
+      phoneNumber: formData.phoneNumber.trim(),
+      role: user.role || '',
+      status: user.status || '',
+      dealerId: user.dealerId ?? null
+    };
+
+    if (formData.password.trim()) {
+      payload.password = formData.password.trim();
+    }
+
+    if (onUpdateProfile) {
+      onUpdateProfile(payload);
+    }
+
+    setStatusMessage({
+      type: 'success',
+      message: 'Thông tin tài khoản đã được cập nhật.'
+    });
+    setFormData((prev) => ({ ...prev, password: '' }));
   };
 
   return (
     <div className="main">
-      <div style={{ display: 'grid', gap: '24px' }}>
-        {/* Personal Information Section */}
+      <div style={{ display: 'grid', gap: '24px', maxWidth: '960px', margin: '0 auto' }}>
         <div className="card">
-          <h3 style={{ marginBottom: '24px', color: 'var(--color-text)' }}>Thông tin cá nhân</h3>
-          
-          <div style={{ display: 'grid', gridTemplateColumns: '1fr 2fr', gap: '32px' }}>
-            {/* Left Section - Avatar */}
-            <div>
-              <div style={{ textAlign: 'center' }}>
-                <div style={{ position: 'relative', display: 'inline-block' }}>
-                  <div 
-                    style={{ 
-                      width: '120px', 
-                      height: '120px', 
-                      borderRadius: '50%',
-                      background: 'var(--color-primary)',
-                      display: 'flex',
-                      alignItems: 'center',
-                      justifyContent: 'center',
-                      margin: '0 auto 16px',
-                      border: '2px solid var(--color-primary)',
-                      position: 'relative',
-                      overflow: 'hidden'
-                    }}
-                  >
-                    <i className="bx bx-user" style={{ fontSize: '48px', color: 'white' }}></i>
-                  </div>
-                  <button 
-                    style={{
-                      position: 'absolute',
-                      bottom: '8px',
-                      right: '8px',
-                      width: '32px',
-                      height: '32px',
-                      borderRadius: '50%',
-                      background: 'var(--color-primary)',
-                      border: 'none',
-                      color: 'white',
-                      cursor: 'pointer',
-                      display: 'flex',
-                      alignItems: 'center',
-                      justifyContent: 'center',
-                      fontSize: '16px'
-                    }}
-                  >
-                    <i className="bx bx-camera"></i>
-                  </button>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '24px' }}>
+            <div style={{ display: 'flex', gap: '24px', flexWrap: 'wrap' }}>
+              <div
+                style={{
+                  width: '112px',
+                  height: '112px',
+                  borderRadius: '50%',
+                  background: 'var(--color-primary)',
+                  color: '#fff',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  fontSize: '36px',
+                  fontWeight: 600,
+                  flexShrink: 0
+                }}
+                title={formData.fullName || user.username || 'Account'}
+              >
+                {(formData.fullName || user.fullName || user.username || '?')
+                  .trim()
+                  .charAt(0)
+                  .toUpperCase()}
+              </div>
+              <div style={{ flex: 1, minWidth: '220px' }}>
+                <h2 style={{ margin: '0 0 4px', color: 'var(--color-text)' }}>
+                  {formData.fullName || user.username || 'User'}
+                </h2>
+                <div style={{ color: 'var(--color-text-muted)', fontSize: '14px' }}>
+                  {user.role || '—'}
                 </div>
-                <div style={{ marginBottom: '16px' }}>
-                  <div style={{ fontSize: '18px', fontWeight: '600', color: 'var(--color-text)', marginBottom: '4px' }}>
-                    Admin User
-                  </div>
-                  <div style={{ fontSize: '14px', color: 'var(--color-text-muted)' }}>
-                    System Administrator
-                  </div>
+                <div style={{ color: 'var(--color-text-muted)', fontSize: '14px' }}>
+                  Status: {user.status || '—'}
                 </div>
-                <button 
-                  style={{ 
-                    padding: '8px 12px',
-                    background: 'var(--color-primary)',
-                    color: 'white',
-                    border: '1px solid var(--color-primary)',
-                    borderRadius: 'var(--radius)',
-                    cursor: 'pointer',
-                    display: 'flex',
-                    alignItems: 'center',
-                    justifyContent: 'center',
-                    gap: '6px',
-                    fontSize: '12px',
-                    fontWeight: '500',
-                    width: 'fit-content',
-                    margin: '0 auto'
-                  }}
-                >
-                  <i className="bx bx-upload" style={{ fontSize: '14px' }}></i>
-                  Thay đổi ảnh
-                </button>
               </div>
             </div>
 
-            {/* Right Section - Personal Information */}
-            <div>
-              <div style={{ display: 'grid', gap: '20px' }}>
+            <form onSubmit={handleSubmit} style={{ display: 'grid', gap: '20px' }}>
+              <div
+                style={{
+                  display: 'grid',
+                  gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))',
+                  gap: '16px'
+                }}
+              >
+                {readonlyFields.map((field) => (
+                  <div key={field.key}>
+                    <label
+                      htmlFor={`readonly-${field.key}`}
+                      style={{ fontSize: '13px', fontWeight: 600, color: 'var(--color-text)' }}
+                    >
+                      {field.label}
+                    </label>
+                    <input
+                      id={`readonly-${field.key}`}
+                      value={String(field.value)}
+                      readOnly
+                      style={{
+                        width: '100%',
+                        padding: '12px',
+                        marginTop: '6px',
+                        border: '1px solid var(--color-border)',
+                        borderRadius: 'var(--radius)',
+                        background: 'var(--color-bg)',
+                        color: 'var(--color-text-muted)'
+                      }}
+                    />
+                  </div>
+                ))}
+              </div>
+
+              <div
+                style={{
+                  display: 'grid',
+                  gridTemplateColumns: 'repeat(auto-fit, minmax(240px, 1fr))',
+                  gap: '16px'
+                }}
+              >
                 <div>
-                  <label style={{ display: 'block', marginBottom: '8px', fontSize: '14px', fontWeight: '500', color: 'var(--color-text)' }}>
-                    Họ và tên
+                  <label htmlFor="fullName" style={{ fontSize: '13px', fontWeight: 600, color: 'var(--color-text)' }}>
+                    Full name
                   </label>
                   <input
+                    id="fullName"
+                    name="fullName"
                     type="text"
-                    name="name"
-                    value={formData.name}
+                    value={formData.fullName}
                     onChange={handleChange}
                     style={{
                       width: '100%',
                       padding: '12px',
-                      border: `1px solid ${errors.name ? 'var(--color-error)' : 'var(--color-border)'}`,
+                      marginTop: '6px',
+                      border: `1px solid ${errors.fullName ? 'var(--color-error)' : 'var(--color-border)'}`,
                       borderRadius: 'var(--radius)',
                       background: 'var(--color-surface)',
-                      color: 'var(--color-text)',
-                      fontSize: '14px'
+                      color: 'var(--color-text)'
                     }}
+                    placeholder="Nguyễn Văn A"
                   />
-                  {errors.name && <div style={{ color: 'var(--color-error)', fontSize: '12px', marginTop: '4px' }}>{errors.name}</div>}
+                  {errors.fullName && (
+                    <div style={{ color: 'var(--color-error)', fontSize: '12px', marginTop: '4px' }}>{errors.fullName}</div>
+                  )}
                 </div>
 
                 <div>
-                  <label style={{ display: 'block', marginBottom: '8px', fontSize: '14px', fontWeight: '500', color: 'var(--color-text)' }}>
+                  <label htmlFor="email" style={{ fontSize: '13px', fontWeight: 600, color: 'var(--color-text)' }}>
                     Email
                   </label>
                   <input
-                    type="email"
+                    id="email"
                     name="email"
+                    type="email"
                     value={formData.email}
                     onChange={handleChange}
                     style={{
                       width: '100%',
                       padding: '12px',
+                      marginTop: '6px',
                       border: `1px solid ${errors.email ? 'var(--color-error)' : 'var(--color-border)'}`,
                       borderRadius: 'var(--radius)',
                       background: 'var(--color-surface)',
-                      color: 'var(--color-text)',
-                      fontSize: '14px'
+                      color: 'var(--color-text)'
                     }}
+                    placeholder="admin@evmmotors.com"
                   />
-                  {errors.email && <div style={{ color: 'var(--color-error)', fontSize: '12px', marginTop: '4px' }}>{errors.email}</div>}
+                  {errors.email && (
+                    <div style={{ color: 'var(--color-error)', fontSize: '12px', marginTop: '4px' }}>{errors.email}</div>
+                  )}
                 </div>
 
                 <div>
-                  <label style={{ display: 'block', marginBottom: '8px', fontSize: '14px', fontWeight: '500', color: 'var(--color-text)' }}>
-                    Số điện thoại
+                  <label htmlFor="phoneNumber" style={{ fontSize: '13px', fontWeight: 600, color: 'var(--color-text)' }}>
+                    Phone number
                   </label>
                   <input
+                    id="phoneNumber"
+                    name="phoneNumber"
                     type="tel"
-                    name="phone"
-                    value={formData.phone}
+                    value={formData.phoneNumber}
                     onChange={handleChange}
                     style={{
                       width: '100%',
                       padding: '12px',
-                      border: `1px solid ${errors.phone ? 'var(--color-error)' : 'var(--color-border)'}`,
+                      marginTop: '6px',
+                      border: `1px solid ${errors.phoneNumber ? 'var(--color-error)' : 'var(--color-border)'}`,
                       borderRadius: 'var(--radius)',
                       background: 'var(--color-surface)',
-                      color: 'var(--color-text)',
-                      fontSize: '14px'
+                      color: 'var(--color-text)'
                     }}
+                    placeholder="+84 901 234 567"
                   />
-                  {errors.phone && <div style={{ color: 'var(--color-error)', fontSize: '12px', marginTop: '4px' }}>{errors.phone}</div>}
+                  {errors.phoneNumber && (
+                    <div style={{ color: 'var(--color-error)', fontSize: '12px', marginTop: '4px' }}>{errors.phoneNumber}</div>
+                  )}
                 </div>
 
                 <div>
-                  <label style={{ display: 'block', marginBottom: '8px', fontSize: '14px', fontWeight: '500', color: 'var(--color-text)' }}>
-                    Mô tả bản thân
+                  <label htmlFor="password" style={{ fontSize: '13px', fontWeight: 600, color: 'var(--color-text)' }}>
+                    New password (optional)
                   </label>
-                  <textarea
-                    name="description"
-                    value={formData.description}
+                  <input
+                    id="password"
+                    name="password"
+                    type="password"
+                    value={formData.password}
                     onChange={handleChange}
-                    rows={4}
                     style={{
                       width: '100%',
                       padding: '12px',
+                      marginTop: '6px',
                       border: '1px solid var(--color-border)',
                       borderRadius: 'var(--radius)',
                       background: 'var(--color-surface)',
-                      color: 'var(--color-text)',
-                      fontSize: '14px',
-                      resize: 'vertical'
+                      color: 'var(--color-text)'
                     }}
+                    placeholder="Leave blank to keep current password"
                   />
                 </div>
               </div>
 
-              <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: '24px' }}>
-                <button className="btn btn-primary" onClick={handleSave}>
-                  Cập nhật thông tin
+              <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '12px' }}>
+                <button
+                  type="button"
+                  className="btn btn-outline"
+                  onClick={() => {
+                    setFormData(buildEditable(user));
+                    setErrors({});
+                    setStatusMessage(null);
+                  }}
+                >
+                  Reset
+                </button>
+                <button type="submit" className="btn btn-primary">
+                  Update profile
                 </button>
               </div>
-            </div>
-          </div>
-        </div>
 
-        {/* Password Section */}
-        <div className="card">
-          <h3 style={{ marginBottom: '24px', color: 'var(--color-text)' }}>Đổi mật khẩu</h3>
-          
-          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '32px' }}>
-            {/* Left Section - Password Fields */}
-            <div>
-              <div style={{ display: 'grid', gap: '20px' }}>
-                <div>
-                  <label style={{ display: 'block', marginBottom: '8px', fontSize: '14px', fontWeight: '500', color: 'var(--color-text)' }}>
-                    Mật khẩu hiện tại
-                  </label>
-                  <div style={{ position: 'relative' }}>
-                    <input
-                      type="password"
-                      name="password"
-                      value={formData.password}
-                      onChange={handleChange}
-                      style={{
-                        width: '100%',
-                        padding: '12px 40px 12px 12px',
-                        border: '1px solid var(--color-border)',
-                        borderRadius: 'var(--radius)',
-                        background: 'var(--color-surface)',
-                        color: 'var(--color-text)',
-                        fontSize: '14px'
-                      }}
-                    />
-                    <button
-                      type="button"
-                      style={{
-                        position: 'absolute',
-                        right: '12px',
-                        top: '50%',
-                        transform: 'translateY(-50%)',
-                        background: 'transparent',
-                        border: 'none',
-                        color: 'var(--color-text-muted)',
-                        cursor: 'pointer'
-                      }}
-                    >
-                      <i className="bx bx-show"></i>
-                    </button>
-                  </div>
+              {statusMessage && (
+                <div
+                  style={{
+                    padding: '12px',
+                    borderRadius: 'var(--radius)',
+                    border:
+                      statusMessage.type === 'success'
+                        ? '1px solid rgba(34,197,94,0.4)'
+                        : '1px solid rgba(248,113,113,0.4)',
+                    background:
+                      statusMessage.type === 'success'
+                        ? 'rgba(34,197,94,0.08)'
+                        : 'rgba(248,113,113,0.08)',
+                    color: statusMessage.type === 'success' ? '#16a34a' : '#f97316',
+                    fontSize: '14px'
+                  }}
+                >
+                  {statusMessage.message}
                 </div>
-
-                <div>
-                  <label style={{ display: 'block', marginBottom: '8px', fontSize: '14px', fontWeight: '500', color: 'var(--color-text)' }}>
-                    Mật khẩu mới
-                  </label>
-                  <div style={{ position: 'relative' }}>
-                    <input
-                      type="password"
-                      name="newPassword"
-                      value={formData.newPassword}
-                      onChange={handleChange}
-                      style={{
-                        width: '100%',
-                        padding: '12px 40px 12px 12px',
-                        border: `1px solid ${errors.newPassword ? 'var(--color-error)' : 'var(--color-border)'}`,
-                        borderRadius: 'var(--radius)',
-                        background: 'var(--color-surface)',
-                        color: 'var(--color-text)',
-                        fontSize: '14px'
-                      }}
-                    />
-                    <button
-                      type="button"
-                      style={{
-                        position: 'absolute',
-                        right: '12px',
-                        top: '50%',
-                        transform: 'translateY(-50%)',
-                        background: 'transparent',
-                        border: 'none',
-                        color: 'var(--color-text-muted)',
-                        cursor: 'pointer'
-                      }}
-                    >
-                      <i className="bx bx-show"></i>
-                    </button>
-                  </div>
-                  {/* Password Strength Indicator */}
-                  <div style={{ marginTop: '8px' }}>
-                    <div style={{ 
-                      width: '100%', 
-                      height: '4px', 
-                      background: 'var(--color-bg)', 
-                      borderRadius: '2px',
-                      overflow: 'hidden'
-                    }}>
-                      <div style={{ 
-                        width: '30%', 
-                        height: '100%', 
-                        background: 'var(--color-error)',
-                        transition: 'width 0.3s ease'
-                      }}></div>
-                    </div>
-                    <div style={{ fontSize: '12px', color: 'var(--color-error)', marginTop: '4px' }}>Yếu</div>
-                  </div>
-                  {errors.newPassword && <div style={{ color: 'var(--color-error)', fontSize: '12px', marginTop: '4px' }}>{errors.newPassword}</div>}
-                </div>
-
-                <div>
-                  <label style={{ display: 'block', marginBottom: '8px', fontSize: '14px', fontWeight: '500', color: 'var(--color-text)' }}>
-                    Xác nhận mật khẩu mới
-                  </label>
-                  <div style={{ position: 'relative' }}>
-                    <input
-                      type="password"
-                      name="confirmPassword"
-                      value={formData.confirmPassword}
-                      onChange={handleChange}
-                      style={{
-                        width: '100%',
-                        padding: '12px 40px 12px 12px',
-                        border: `1px solid ${errors.confirmPassword ? 'var(--color-error)' : 'var(--color-border)'}`,
-                        borderRadius: 'var(--radius)',
-                        background: 'var(--color-surface)',
-                        color: 'var(--color-text)',
-                        fontSize: '14px'
-                      }}
-                    />
-                    <button
-                      type="button"
-                      style={{
-                        position: 'absolute',
-                        right: '12px',
-                        top: '50%',
-                        transform: 'translateY(-50%)',
-                        background: 'transparent',
-                        border: 'none',
-                        color: 'var(--color-text-muted)',
-                        cursor: 'pointer'
-                      }}
-                    >
-                      <i className="bx bx-show"></i>
-                    </button>
-                  </div>
-                  {errors.confirmPassword && <div style={{ color: 'var(--color-error)', fontSize: '12px', marginTop: '4px' }}>{errors.confirmPassword}</div>}
-                </div>
-              </div>
-            </div>
-
-            {/* Right Section - Password Requirements */}
-            <div>
-              <h4 style={{ fontSize: '16px', fontWeight: '600', color: 'var(--color-text)', marginBottom: '16px' }}>
-                Yêu cầu mật khẩu
-              </h4>
-              <div style={{ display: 'grid', gap: '12px' }}>
-                {[
-                  'Tối thiểu 8 ký tự',
-                  'Có chữ hoa',
-                  'Có chữ thường', 
-                  'Có số',
-                  'Có ký tự đặc biệt'
-                ].map((requirement, index) => (
-                  <div key={index} style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                    <i className="bx bx-x" style={{ color: 'var(--color-error)', fontSize: '16px' }}></i>
-                    <span style={{ fontSize: '14px', color: 'var(--color-text-muted)' }}>{requirement}</span>
-                  </div>
-                ))}
-              </div>
-            </div>
-          </div>
-
-          <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: '24px' }}>
-            <button 
-              className="btn" 
-              onClick={handleSave}
-              style={{ 
-                background: 'linear-gradient(135deg, #FFA500, #FF8C00)',
-                color: 'white',
-                border: 'none'
-              }}
-            >
-              Đổi mật khẩu
-            </button>
+              )}
+            </form>
           </div>
         </div>
       </div>

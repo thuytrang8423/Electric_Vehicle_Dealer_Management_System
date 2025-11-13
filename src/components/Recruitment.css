@@ -1,0 +1,406 @@
+/* Import Google Fonts */
+@import url('https://fonts.googleapis.com/css2?family=Poppins:wght@300;400;500;600;700;800;900&family=Orbitron:wght@400;500;700;900&display=swap');
+
+/* Recruitment Page Styles */
+.recruitment-page {
+  font-family: 'Poppins', sans-serif;
+  background: linear-gradient(135deg, #0A0A0A 0%, #1A1A1A 50%, #2A2A2A 100%);
+  color: #F5F5F5;
+  min-height: 100vh;
+  padding-top: 80px;
+  position: relative;
+  overflow-x: hidden;
+}
+
+.recruitment-page::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background: radial-gradient(circle at 20% 80%, rgba(255, 30, 30, 0.15) 0%, transparent 50%),
+              radial-gradient(circle at 80% 20%, rgba(255, 30, 30, 0.1) 0%, transparent 50%);
+  pointer-events: none;
+  z-index: 0;
+}
+
+/* Hero Section */
+.recruitment-hero {
+  position: relative;
+  z-index: 1;
+  min-height: 80vh;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 4rem 2rem;
+  overflow: hidden;
+}
+
+.recruitment-hero-content {
+  position: relative;
+  z-index: 2;
+  max-width: 1400px;
+  width: 100%;
+  display: grid;
+  grid-template-columns: 1fr 1.2fr;
+  gap: 4rem;
+  align-items: start;
+}
+
+.recruitment-hero-left {
+  display: flex;
+  flex-direction: column;
+  gap: 2rem;
+}
+
+.recruitment-title {
+  font-family: 'Orbitron', sans-serif;
+  font-size: clamp(2.5rem, 5vw, 4rem);
+  font-weight: 900;
+  color: #FFFFFF;
+  line-height: 1.2;
+}
+
+.recruitment-title .accent {
+  background: linear-gradient(135deg, #FFFFFF, #FF1E1E);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  background-clip: text;
+}
+
+.recruitment-subtitle {
+  font-size: 1.2rem;
+  color: #B0B0B0;
+  line-height: 1.6;
+  max-width: 500px;
+}
+
+.opening-item {
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+  padding: 1.5rem;
+  background: rgba(20, 20, 20, 0.8);
+  border-radius: 15px;
+  border: 1px solid rgba(255, 30, 30, 0.3);
+  backdrop-filter: blur(10px);
+  transition: all 0.3s ease;
+}
+
+.opening-item:hover {
+  border-color: rgba(255, 30, 30, 0.5);
+  box-shadow: 0 0 20px rgba(255, 30, 30, 0.2);
+  transform: translateX(5px);
+}
+
+.opening-index {
+  font-family: 'Orbitron', sans-serif;
+  font-size: 1.5rem;
+  font-weight: 700;
+  color: #FF1E1E;
+  min-width: 40px;
+}
+
+.opening-name {
+  flex: 1;
+  font-size: 1.1rem;
+  font-weight: 600;
+  color: #FFFFFF;
+}
+
+.opening-qty {
+  font-size: 0.9rem;
+  color: #B0B0B0;
+  padding: 0.3rem 0.8rem;
+  background: rgba(255, 30, 30, 0.1);
+  border-radius: 20px;
+  border: 1px solid rgba(255, 30, 30, 0.3);
+}
+
+/* Recruitment Form */
+.recruitment-form {
+  background: rgba(20, 20, 20, 0.8);
+  border-radius: 20px;
+  padding: 2.5rem;
+  border: 1px solid rgba(255, 30, 30, 0.3);
+  backdrop-filter: blur(10px);
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.5);
+  display: flex;
+  flex-direction: column;
+  gap: 1.5rem;
+}
+
+.form-row {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 1rem;
+}
+
+.form-field {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 0.8rem;
+  padding: 0.8rem 1rem;
+  background: rgba(10, 10, 10, 0.9);
+  border: 1px solid rgba(255, 30, 30, 0.2);
+  border-radius: 10px;
+  transition: all 0.3s ease;
+}
+
+.form-field:focus-within {
+  border-color: #FF1E1E;
+  box-shadow: 0 0 20px rgba(255, 30, 30, 0.3);
+}
+
+.form-field i {
+  font-size: 1.2rem;
+  color: #FF1E1E;
+  flex-shrink: 0;
+}
+
+.form-field input,
+.form-field select {
+  flex: 1;
+  background: transparent;
+  border: none;
+  color: #FFFFFF;
+  font-size: 0.95rem;
+  outline: none;
+  font-family: 'Poppins', sans-serif;
+}
+
+.form-field input::placeholder {
+  color: #B0B0B0;
+}
+
+.form-field select {
+  cursor: pointer;
+  appearance: none;
+  -webkit-appearance: none;
+  -moz-appearance: none;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='16' height='16' viewBox='0 0 16 16'%3E%3Cpath fill='%23FF1E1E' d='M8 11L3 6h10z'/%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: right 0.8rem center;
+  padding-right: 2.5rem;
+}
+
+.form-field select option {
+  background: rgba(20, 20, 20, 0.95);
+  color: #FFFFFF;
+  padding: 0.8rem;
+  border: none;
+}
+
+.form-field select:focus {
+  color: #FFFFFF;
+}
+
+.form-field.select:focus-within {
+  border-color: #FF1E1E;
+  box-shadow: 0 0 20px rgba(255, 30, 30, 0.3);
+}
+
+.form-field.file {
+  position: relative;
+  cursor: pointer;
+}
+
+.form-field.file input[type="file"] {
+  position: absolute;
+  opacity: 0;
+  width: 100%;
+  height: 100%;
+  cursor: pointer;
+  z-index: 2;
+}
+
+.file-name {
+  flex: 1;
+  color: #FFFFFF;
+  font-size: 0.9rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  pointer-events: none;
+  z-index: 1;
+}
+
+.form-field.file:not(:has(input[type="file"]:valid)) .file-name {
+  color: #B0B0B0;
+}
+
+.btn-clear-file {
+  background: rgba(255, 30, 30, 0.2);
+  border: 1px solid rgba(255, 30, 30, 0.4);
+  border-radius: 50%;
+  color: #FF1E1E;
+  font-size: 1.2rem;
+  font-weight: bold;
+  cursor: pointer;
+  padding: 0;
+  width: 28px;
+  height: 28px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: all 0.3s ease;
+  flex-shrink: 0;
+  z-index: 3;
+  line-height: 1;
+}
+
+.btn-clear-file:hover {
+  background: rgba(255, 30, 30, 0.4);
+  border-color: #FF1E1E;
+  color: #FFFFFF;
+  transform: scale(1.1);
+  box-shadow: 0 0 10px rgba(255, 30, 30, 0.5);
+}
+
+.form-actions {
+  margin-top: 1rem;
+}
+
+.btn-register {
+  width: 100%;
+  padding: 1rem 2rem;
+  background: linear-gradient(135deg, #FF1E1E, #E50914);
+  border: none;
+  color: white;
+  font-size: 1.1rem;
+  font-weight: 600;
+  border-radius: 10px;
+  cursor: pointer;
+  transition: all 0.3s ease;
+  font-family: 'Poppins', sans-serif;
+  box-shadow: 0 4px 15px rgba(255, 30, 30, 0.4);
+}
+
+.btn-register:hover {
+  box-shadow: 0 6px 25px rgba(255, 30, 30, 0.6);
+  transform: translateY(-2px);
+}
+
+.btn-register:active {
+  transform: translateY(0);
+}
+
+/* Details Section */
+.recruitment-details {
+  position: relative;
+  z-index: 1;
+  max-width: 1400px;
+  margin: -4rem auto 0;
+  padding: 2rem 2rem 4rem;
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 3rem;
+}
+
+.details-left,
+.details-right {
+  background: rgba(20, 20, 20, 0.6);
+  border-radius: 20px;
+  padding: 2.5rem;
+  border: 1px solid rgba(255, 30, 30, 0.2);
+  backdrop-filter: blur(10px);
+}
+
+.section-heading {
+  font-family: 'Orbitron', sans-serif;
+  font-size: 1.5rem;
+  font-weight: 700;
+  color: #FF1E1E;
+  margin-bottom: 1.5rem;
+  margin-top: 2rem;
+}
+
+.section-heading:first-child {
+  margin-top: 0;
+}
+
+.bullet-list {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+}
+
+.bullet-list li {
+  position: relative;
+  padding-left: 1.5rem;
+  color: #F5F5F5;
+  line-height: 1.6;
+  font-size: 0.95rem;
+}
+
+.bullet-list li::before {
+  content: '▸';
+  position: absolute;
+  left: 0;
+  color: #FF1E1E;
+  font-weight: bold;
+}
+
+/* Responsive Design */
+@media (max-width: 968px) {
+  .recruitment-hero-content {
+    grid-template-columns: 1fr;
+    gap: 3rem;
+  }
+
+  .recruitment-details {
+    grid-template-columns: 1fr;
+    gap: 2rem;
+  }
+}
+
+@media (max-width: 768px) {
+  .recruitment-hero {
+    padding: 3rem 1.5rem;
+  }
+
+  .recruitment-form {
+    padding: 2rem 1.5rem;
+  }
+
+  .form-row {
+    grid-template-columns: 1fr;
+  }
+
+  .recruitment-details {
+    padding: 2rem 1.5rem;
+  }
+}
+
+@media (max-width: 480px) {
+  .recruitment-hero {
+    padding: 2rem 1rem;
+    min-height: auto;
+  }
+
+  .recruitment-form {
+    padding: 1.5rem 1rem;
+  }
+
+  .recruitment-title {
+    font-size: 2rem;
+  }
+
+  .recruitment-subtitle {
+    font-size: 1rem;
+  }
+
+  .details-left,
+  .details-right {
+    padding: 1.5rem 1rem;
+  }
+
+  .section-heading {
+    font-size: 1.2rem;
+  }
+}

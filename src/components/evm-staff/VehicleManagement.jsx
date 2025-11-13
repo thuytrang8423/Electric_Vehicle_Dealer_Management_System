@@ -106,17 +106,9 @@ const VehicleManagement = () => {
     const colorsData = safeParse(vehicle.availableColorsJson, []);
     const colorsText = Array.isArray(colorsData) ? colorsData.join(', ') : '';
 
-    // Debug logging
-    console.log('Vehicle being edited:', vehicle);
-    console.log('Vehicle vehicleType:', vehicle.vehicleType);
-    console.log('Available vehicleTypes when editing:', vehicleTypes);
-
     const vehicleTypeValue = vehicle.vehicleType?.typeName || vehicle.vehicleType || '';
-    console.log('Setting vehicleType to:', vehicleTypeValue);
-    
     // If vehicleType is empty and we have vehicleTypes loaded, set a default
     const finalVehicleTypeValue = vehicleTypeValue || (vehicleTypes.length > 0 ? vehicleTypes[0].typeName : '');
-    console.log('Final vehicleType value:', finalVehicleTypeValue);
 
     setEditingVehicle(vehicle);
     setFormData({
@@ -155,51 +147,33 @@ const VehicleManagement = () => {
       return;
     }
 
-    // Debug logging
-    console.log('Form data vehicleType:', formData.vehicleType);
-    console.log('Available vehicleTypes:', vehicleTypes);
-    
     // Find the selected vehicle type object
     const selectedVehicleType = vehicleTypes.find(type => type.typeName === formData.vehicleType);
-    console.log('Selected vehicle type:', selectedVehicleType);
-    
-    // Ensure vehicleType is never null - always create an object with typeName
-    let vehicleTypePayload = null;
-    if (selectedVehicleType) {
-      vehicleTypePayload = { 
-        id: selectedVehicleType.id,
-        typeName: selectedVehicleType.typeName 
-      };
-    } else if (formData.vehicleType && formData.vehicleType.trim()) {
-      vehicleTypePayload = { typeName: formData.vehicleType.trim() };
-    } else {
-      // Fallback to first available type or default
-      const defaultType = vehicleTypes.length > 0 ? vehicleTypes[0] : { typeName: 'Sedan' };
-      vehicleTypePayload = { typeName: defaultType.typeName };
-    }
-    
-    console.log('Final vehicleType payload:', vehicleTypePayload);
     
     const payload = {
       modelName: formData.modelName,
       brand: formData.brand,
       yearOfManufacture: parseInt(formData.yearOfManufacture) || new Date().getFullYear(),
-      vehicleType: vehicleTypePayload,
+      vehicleTypeId: selectedVehicleType?.id || (vehicleTypes.length > 0 ? vehicleTypes[0].id : 1),
       batteryCapacity: parseInt(formData.batteryCapacity) || 0,
       listedPrice: parseInt(formData.listedPrice) || 0,
-      status: formData.status,
+      status: formData.status || 'AVAILABLE',
       versionJson: JSON.stringify({ features: toArr(formData.versions) }),
       availableColorsJson: JSON.stringify(toArr(formData.colors)),
       specifications: {
         images: formData.image ? [formData.image] : [],
         battery: {
           capacity_kWh: parseInt(formData.batteryCapacity) || 0,
-          range_km: 0
+          range_km: 318 // Default range or calculate based on battery capacity
+        },
+        dimensions: {
+          length_mm: 4300,
+          width_mm: 1793,
+          height_mm: 1613
         }
       }
     };
-    
-    console.log('Payload vehicleType:', payload.vehicleType);
+
 
     try {
       if (editingVehicle) {

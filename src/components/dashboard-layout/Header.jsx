@@ -23,13 +23,19 @@ const Header = ({ user, onLogout, onProfileClick, notifications, onMarkAsRead, o
   }, []);
 
   const getRoleDisplayName = (role) => {
+    if (!role) return 'Guest';
+    
+    // Normalize role to handle different formats (DEALER_STAFF, dealer-staff, etc.)
+    const normalizedRole = role.toString().toUpperCase().replace(/-/g, '_');
+    
     const roleMap = {
-      'dealer-staff': 'Dealer Staff',
-      'dealer-manager': 'Dealer Manager',
-      'evm-manager': 'EVM Manager',
-      'admin': 'Administrator'
+      'DEALER_STAFF': 'Dealer Staff',
+      'DEALER_MANAGER': 'Dealer Manager',
+      'EVM_MANAGER': 'EVM Manager',
+      'ADMIN': 'Administrator'
     };
-    return roleMap[role] || role;
+    
+    return roleMap[normalizedRole] || role;
   };
 
   const handleProfileClick = () => {
@@ -49,14 +55,14 @@ const Header = ({ user, onLogout, onProfileClick, notifications, onMarkAsRead, o
   return (
     <div className="header">
       <div className="header__left">
-        <div className="header__search">
+        {/* <div className="header__search">
           <i className="bx bx-search header__search-icon"></i>
           <input
             type="text"
             className="header__search-input"
             placeholder="Search vehicles, orders, customers..."
           />
-        </div>
+        </div> */}
       </div>
 
       <div className="header__right">

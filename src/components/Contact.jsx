@@ -5,7 +5,7 @@ import './Contact.css';
 import Navbar from './Navbar';
 import Footer from './Footer';
 
-const Contact = () => {
+const Contact = ({ loggedInUser, onLogout }) => {
   const [formData, setFormData] = useState({
     name: '',
     email: '',
@@ -99,7 +99,7 @@ const Contact = () => {
   return (
     <div className="contact-page">
       {/* Navbar */}
-      <Navbar />
+      <Navbar loggedInUser={loggedInUser} onLogout={onLogout} />
 
       {/* Toast Notification */}
       {showToast.show && (
@@ -194,7 +194,7 @@ const Contact = () => {
             
             <form onSubmit={handleSubmit} className="contact-form">
               <div className="form-group">
-                <label htmlFor="name">Full Name *</label>
+                <label htmlFor="name">Full Name</label>
                 <input
                   type="text"
                   id="name"
@@ -203,12 +203,13 @@ const Contact = () => {
                   onChange={handleInputChange}
                   className={errors.name ? 'error' : ''}
                   placeholder="Enter your full name"
+                  required
                 />
                 {errors.name && <span className="error-message">{errors.name}</span>}
               </div>
 
               <div className="form-group">
-                <label htmlFor="email">Email *</label>
+                <label htmlFor="email">Email</label>
                 <input
                   type="email"
                   id="email"
@@ -217,6 +218,7 @@ const Contact = () => {
                   onChange={handleInputChange}
                   className={errors.email ? 'error' : ''}
                   placeholder="Enter your email address"
+                  required
                 />
                 {errors.email && <span className="error-message">{errors.email}</span>}
               </div>
@@ -234,7 +236,7 @@ const Contact = () => {
               </div>
 
               <div className="form-group">
-                <label htmlFor="message">Message *</label>
+                <label htmlFor="message">Message</label>
                 <textarea
                   id="message"
                   name="message"
@@ -243,6 +245,7 @@ const Contact = () => {
                   className={errors.message ? 'error' : ''}
                   placeholder="Enter your message..."
                   rows="6"
+                  required
                 />
                 {errors.message && <span className="error-message">{errors.message}</span>}
               </div>

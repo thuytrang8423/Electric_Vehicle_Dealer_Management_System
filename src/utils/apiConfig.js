@@ -2,6 +2,7 @@ import axios from "axios";
 
 export const API_BASE_URL =
   "https://fall25-swp-be-production-9b48.up.railway.app";
+  // "http://localhost:8080";
 
 const getAuthToken = () =>
   JSON.parse(localStorage.getItem("currentUser") || "{}")?.token || null;

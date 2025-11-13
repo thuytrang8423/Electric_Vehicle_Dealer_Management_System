@@ -39,7 +39,7 @@ const Sidebar = ({ user, activeItem, onItemClick }) => {
       { id: 'sales-contracts', label: 'Sales Contracts', icon: 'bx-file-blank', group: 'sales' },
       
       // Logistics
-      { id: 'vehicle-orders', label: 'Vehicle Orders', icon: 'bx-package', group: 'logistics' },
+      // { id: 'vehicle-orders', label: 'Vehicle Orders', icon: 'bx-package', group: 'logistics' },
       // { id: 'delivery-tracking', label: 'Delivery Tracking', icon: 'bx-location-plus', group: 'logistics' },
       // { id: 'vehicle-distribution', label: 'Vehicle Distribution', icon: 'bx-package', group: 'logistics' },
       { id: 'inventory', label: 'Inventory', icon: 'bx-box', group: 'logistics' },

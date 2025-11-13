@@ -112,10 +112,10 @@ const UserManagement = ({ user }) => {
   const getRoleColor = (role) => {
     const normalizedRole = normalizeRole(role);
     switch (normalizedRole) {
-      case 'admin': return 'var(--color-primary)';
-      case 'dealer-manager': return 'var(--color-info)';
-      case 'dealer-staff': return 'var(--color-secondary)';
-      case 'evm-manager': return 'var(--color-accent)';
+      case 'admin': return '#DC2626'; // Red
+      case 'dealer-manager': return '#3B82F6'; // Blue
+      case 'dealer-staff': return '#22C55E'; // Green
+      case 'evm-manager': return '#F59E0B'; // Orange/Amber
       default: return 'var(--color-text-muted)';
     }
   };

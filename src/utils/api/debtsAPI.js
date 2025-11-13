@@ -1,6 +1,20 @@
 import { apiClient } from '../apiConfig';
 
 export const debtsAPI = {
+  // ====================== GET DEBTS ======================
+  
+  // Get all customer debts
+  getCustomerDebts: async () => {
+    const response = await apiClient.get('/api/debts/customers');
+    return response.data;
+  },
+
+  // Get all dealer debts
+  getDealerDebts: async () => {
+    const response = await apiClient.get('/api/debts/dealers');
+    return response.data;
+  },
+
   // ====================== CUSTOMER DEBTS ======================
   
   // Add debt for customer

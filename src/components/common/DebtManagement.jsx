@@ -1,9 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { BarChart, Bar, PieChart, Pie, Cell, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer } from 'recharts';
-import { customersAPI } from '../../utils/api/customersAPI';
-import { dealersAPI } from '../../utils/api/dealersAPI';
 import { debtsAPI } from '../../utils/api/debtsAPI';
-import { showSuccessToast, showErrorToast } from '../../utils/toast';
+import { showErrorToast } from '../../utils/toast';
 import { handleAPIError } from '../../utils/apiConfig';
 import 'boxicons/css/boxicons.min.css';
 
@@ -12,13 +10,6 @@ const DebtManagement = ({ user }) => {
   const [dealerDebts, setDealerDebts] = useState([]);
   const [loading, setLoading] = useState(true);
   const [selectedType, setSelectedType] = useState('all'); // all, customer, dealer
-  const [showPaymentModal, setShowPaymentModal] = useState(false);
-  const [selectedDebt, setSelectedDebt] = useState(null);
-  const [paymentAmount, setPaymentAmount] = useState('');
-  const [showAdjustModal, setShowAdjustModal] = useState(false);
-  const [adjustAmount, setAdjustAmount] = useState('');
-
-  const userRole = user?.role?.toUpperCase().replace(/-/g, '_');
 
   // Load debts from customers and dealers
   useEffect(() => {
@@ -29,37 +20,37 @@ const DebtManagement = ({ user }) => {
     try {
       setLoading(true);
 
-      const [customers, dealers] = await Promise.all([
-        customersAPI.getAll(),
-        dealersAPI.getAll()
+      const [customerDebtsData, dealerDebtsData] = await Promise.all([
+        debtsAPI.getCustomerDebts(),
+        debtsAPI.getDealerDebts()
       ]);
 
-      // Filter customers with debt > 0
-      const customersWithDebt = Array.isArray(customers)
-        ? customers
+      // Normalize customer debts data
+      const customersWithDebt = Array.isArray(customerDebtsData)
+        ? customerDebtsData
             .filter(c => c.totalDebt && c.totalDebt > 0)
             .map(c => ({
-              id: c.id,
-              name: c.fullName || 'N/A',
+              id: c.customerId || c.id,
+              name: c.customerName || c.fullName || c.name || 'N/A',
               type: 'customer',
-              totalDebt: c.totalDebt || 0,
-              phone: c.phone,
+              totalDebt: c.totalDebt || c.outstandingDebt || 0,
+              phone: c.phone || c.phoneNumber,
               email: c.email,
               dealerName: c.dealerName,
               isVip: c.isVip
             }))
         : [];
 
-      // Filter dealers with debt > 0
-      const dealersWithDebt = Array.isArray(dealers)
-        ? dealers
-            .filter(d => d.outstandingDebt && d.outstandingDebt > 0)
+      // Normalize dealer debts data
+      const dealersWithDebt = Array.isArray(dealerDebtsData)
+        ? dealerDebtsData
+            .filter(d => (d.totalDebt && d.totalDebt > 0) || (d.outstandingDebt && d.outstandingDebt > 0))
             .map(d => ({
-              id: d.dealerId,
-              name: d.name || 'N/A',
+              id: d.dealerId || d.id,
+              name: d.dealerName || d.name || 'N/A',
               type: 'dealer',
-              totalDebt: d.outstandingDebt || 0,
-              phone: d.phone,
+              totalDebt: d.totalDebt || d.outstandingDebt || 0,
+              phone: d.phone || d.phoneNumber,
               address: d.address,
               region: d.region,
               status: d.status
@@ -73,80 +64,6 @@ const DebtManagement = ({ user }) => {
       showErrorToast(handleAPIError(error));
     } finally {
       setLoading(false);
-    }
-  };
-
-  const handlePayDebt = (debt) => {
-    setSelectedDebt(debt);
-    setPaymentAmount('');
-    setShowPaymentModal(true);
-  };
-
-  const handleAddDebt = (debt) => {
-    setSelectedDebt(debt);
-    setAdjustAmount('');
-    setShowAdjustModal(true);
-  };
-
-  const handleSubmitPayment = async () => {
-    if (!selectedDebt || !paymentAmount || parseFloat(paymentAmount) <= 0) {
-      showErrorToast('Please enter a valid payment amount');
-      return;
-    }
-
-    const amount = parseFloat(paymentAmount);
-
-    if (amount > selectedDebt.totalDebt) {
-      showErrorToast('Payment amount cannot exceed outstanding debt');
-      return;
-    }
-
-    try {
-      if (selectedDebt.type === 'customer') {
-        await debtsAPI.payCustomerDebt(selectedDebt.id, amount);
-        showSuccessToast(`Customer ${selectedDebt.name} paid $${amount.toLocaleString()}`);
-      } else {
-        await debtsAPI.payDealerDebt(selectedDebt.id, amount);
-        showSuccessToast(`Dealer ${selectedDebt.name} paid $${amount.toLocaleString()}`);
-      }
-
-      // Reload debts
-      await loadDebts();
-
-      // Close modal
-      setShowPaymentModal(false);
-      setSelectedDebt(null);
-      setPaymentAmount('');
-    } catch (error) {
-      console.error('Error processing payment:', error);
-      showErrorToast(handleAPIError(error));
-    }
-  };
-
-  const handleSubmitAdjust = async () => {
-    if (!selectedDebt || !adjustAmount || parseFloat(adjustAmount) <= 0) {
-      showErrorToast('Please enter a valid amount');
-      return;
-    }
-
-    const amount = parseFloat(adjustAmount);
-
-    try {
-      if (selectedDebt.type === 'customer') {
-        await debtsAPI.addCustomerDebt(selectedDebt.id, amount);
-        showSuccessToast(`Added $${amount.toLocaleString()} debt to ${selectedDebt.name}`);
-      } else {
-        await debtsAPI.addDealerDebt(selectedDebt.id, amount);
-        showSuccessToast(`Added $${amount.toLocaleString()} debt to ${selectedDebt.name}`);
-      }
-
-      await loadDebts();
-      setShowAdjustModal(false);
-      setSelectedDebt(null);
-      setAdjustAmount('');
-    } catch (error) {
-      console.error('Error adding debt:', error);
-      showErrorToast(handleAPIError(error));
     }
   };
 
@@ -295,7 +212,6 @@ const DebtManagement = ({ user }) => {
                 <th style={{ padding: '12px', textAlign: 'left', fontSize: '14px', fontWeight: '600', color: 'var(--color-text-muted)' }}>Name</th>
                 <th style={{ padding: '12px', textAlign: 'left', fontSize: '14px', fontWeight: '600', color: 'var(--color-text-muted)' }}>Contact</th>
                 <th style={{ padding: '12px', textAlign: 'right', fontSize: '14px', fontWeight: '600', color: 'var(--color-text-muted)' }}>Outstanding Debt</th>
-                <th style={{ padding: '12px', textAlign: 'center', fontSize: '14px', fontWeight: '600', color: 'var(--color-text-muted)' }}>Actions</th>
               </tr>
             </thead>
             <tbody>
@@ -330,26 +246,6 @@ const DebtManagement = ({ user }) => {
                   <td style={{ padding: '12px', textAlign: 'right', fontSize: '16px', fontWeight: '700', color: 'var(--color-error)' }}>
                     ${debt.totalDebt.toLocaleString()}
                   </td>
-                  <td style={{ padding: '12px', textAlign: 'center' }}>
-                    <div style={{ display: 'flex', gap: '8px', justifyContent: 'center', flexWrap: 'wrap' }}>
-                      <button
-                        className="btn btn-primary"
-                        style={{ fontSize: '12px' }}
-                        onClick={() => handlePayDebt(debt)}
-                      >
-                        <i className="bx bx-dollar-circle"></i>
-                        Pay Debt
-                      </button>
-                      <button
-                        className="btn btn-outline"
-                        style={{ fontSize: '12px' }}
-                        onClick={() => handleAddDebt(debt)}
-                      >
-                        <i className="bx bx-plus"></i>
-                        Add Debt
-                      </button>
-                    </div>
-                  </td>
                 </tr>
               ))}
             </tbody>
@@ -364,204 +260,6 @@ const DebtManagement = ({ user }) => {
           </div>
         )}
       </div>
-
-      {/* Payment Modal */}
-      {showPaymentModal && selectedDebt && (
-        <div style={{
-          position: 'fixed',
-          top: 0,
-          left: 0,
-          right: 0,
-          bottom: 0,
-          background: 'rgba(0, 0, 0, 0.5)',
-          display: 'flex',
-          alignItems: 'center',
-          justifyContent: 'center',
-          zIndex: 1000
-        }}>
-          <div style={{
-            background: 'var(--color-surface)',
-            borderRadius: 'var(--radius)',
-            padding: '24px',
-            width: '90%',
-            maxWidth: '500px'
-          }}>
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '24px' }}>
-              <h3>Record Payment</h3>
-              <button
-                onClick={() => {
-                  setShowPaymentModal(false);
-                  setSelectedDebt(null);
-                  setPaymentAmount('');
-                }}
-                style={{ background: 'none', border: 'none', fontSize: '24px', cursor: 'pointer', color: 'var(--color-text-muted)' }}
-              >
-                <i className="bx bx-x"></i>
-              </button>
-            </div>
-
-            <div style={{ marginBottom: '16px', padding: '12px', background: 'var(--color-bg)', borderRadius: 'var(--radius)' }}>
-              <div style={{ fontSize: '14px', color: 'var(--color-text-muted)', marginBottom: '4px' }}>
-                {selectedDebt.type === 'customer' ? 'Customer' : 'Dealer'}
-              </div>
-              <div style={{ fontWeight: '600', color: 'var(--color-text)', marginBottom: '8px' }}>
-                {selectedDebt.name}
-              </div>
-              <div style={{ fontSize: '12px', color: 'var(--color-text-muted)' }}>
-                Outstanding Debt: <span style={{ color: 'var(--color-error)', fontWeight: '600' }}>
-                  ${selectedDebt.totalDebt.toLocaleString()}
-                </span>
-              </div>
-            </div>
-
-            <div style={{ marginBottom: '16px' }}>
-              <label style={{ display: 'block', marginBottom: '8px', fontSize: '14px', fontWeight: '600', color: 'var(--color-text)' }}>
-                Payment Amount ($) *
-              </label>
-              <input
-                type="number"
-                value={paymentAmount}
-                onChange={(e) => setPaymentAmount(e.target.value)}
-                placeholder="Enter payment amount"
-                style={{
-                  width: '100%',
-                  padding: '12px',
-                  border: '1px solid var(--color-border)',
-                  borderRadius: 'var(--radius)',
-                  background: 'var(--color-bg)',
-                  color: 'var(--color-text)',
-                  fontSize: '14px'
-                }}
-                min="0"
-                max={selectedDebt.totalDebt}
-                step="0.01"
-                required
-              />
-              <div style={{ fontSize: '12px', color: 'var(--color-text-muted)', marginTop: '4px' }}>
-                Maximum: ${selectedDebt.totalDebt.toLocaleString()}
-              </div>
-            </div>
-
-            <div style={{ display: 'flex', gap: '12px', justifyContent: 'flex-end' }}>
-              <button
-                className="btn btn-outline"
-                onClick={() => {
-                  setShowPaymentModal(false);
-                  setSelectedDebt(null);
-                  setPaymentAmount('');
-                }}
-              >
-                Cancel
-              </button>
-              <button
-                className="btn btn-primary"
-                onClick={handleSubmitPayment}
-                disabled={!paymentAmount || parseFloat(paymentAmount) <= 0}
-              >
-                <i className="bx bx-check"></i>
-                Record Payment
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* Add Debt Modal */}
-      {showAdjustModal && selectedDebt && (
-        <div style={{
-          position: 'fixed',
-          top: 0,
-          left: 0,
-          right: 0,
-          bottom: 0,
-          background: 'rgba(0, 0, 0, 0.5)',
-          display: 'flex',
-          alignItems: 'center',
-          justifyContent: 'center',
-          zIndex: 1000
-        }}>
-          <div style={{
-            background: 'var(--color-surface)',
-            borderRadius: 'var(--radius)',
-            padding: '24px',
-            width: '90%',
-            maxWidth: '500px'
-          }}>
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '24px' }}>
-              <h3>Add Debt</h3>
-              <button
-                onClick={() => {
-                  setShowAdjustModal(false);
-                  setSelectedDebt(null);
-                  setAdjustAmount('');
-                }}
-                style={{ background: 'none', border: 'none', fontSize: '24px', cursor: 'pointer', color: 'var(--color-text-muted)' }}
-              >
-                <i className="bx bx-x"></i>
-              </button>
-            </div>
-
-            <div style={{ marginBottom: '16px', padding: '12px', background: 'var(--color-bg)', borderRadius: 'var(--radius)' }}>
-              <div style={{ fontSize: '14px', color: 'var(--color-text-muted)', marginBottom: '4px' }}>
-                {selectedDebt.type === 'customer' ? 'Customer' : 'Dealer'}
-              </div>
-              <div style={{ fontWeight: '600', color: 'var(--color-text)', marginBottom: '8px' }}>
-                {selectedDebt.name}
-              </div>
-              <div style={{ fontSize: '12px', color: 'var(--color-text-muted)' }}>
-                Current Debt: <span style={{ color: 'var(--color-error)', fontWeight: '600' }}>
-                  ${selectedDebt.totalDebt.toLocaleString()}
-                </span>
-              </div>
-            </div>
-
-            <div style={{ marginBottom: '16px' }}>
-              <label style={{ display: 'block', marginBottom: '8px', fontSize: '14px', fontWeight: '600', color: 'var(--color-text)' }}>
-                Amount to Add ($) *
-              </label>
-              <input
-                type="number"
-                value={adjustAmount}
-                onChange={(e) => setAdjustAmount(e.target.value)}
-                placeholder="Enter additional debt amount"
-                style={{
-                  width: '100%',
-                  padding: '12px',
-                  border: '1px solid var(--color-border)',
-                  borderRadius: 'var(--radius)',
-                  background: 'var(--color-bg)',
-                  color: 'var(--color-text)',
-                  fontSize: '14px'
-                }}
-                min="0"
-                step="0.01"
-                required
-              />
-            </div>
-
-            <div style={{ display: 'flex', gap: '12px', justifyContent: 'flex-end' }}>
-              <button
-                className="btn btn-outline"
-                onClick={() => {
-                  setShowAdjustModal(false);
-                  setSelectedDebt(null);
-                  setAdjustAmount('');
-                }}
-              >
-                Cancel
-              </button>
-              <button
-                className="btn btn-primary"
-                onClick={handleSubmitAdjust}
-                disabled={!adjustAmount || parseFloat(adjustAmount) <= 0}
-              >
-                <i className="bx bx-plus"></i>
-                Add Debt
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
     </div>
   );
 };

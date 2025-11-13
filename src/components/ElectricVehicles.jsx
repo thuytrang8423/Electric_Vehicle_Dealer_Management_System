@@ -7,7 +7,7 @@ import Footer from './Footer';
 import Navbar from './Navbar';
 import { vehiclesAPI } from '../utils/api/vehiclesAPI';
 
-const ElectricVehicles = () => {
+const ElectricVehicles = ({ loggedInUser, onLogout }) => {
   const navigate = useNavigate();
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedBrand, setSelectedBrand] = useState('All Brands');
@@ -123,7 +123,7 @@ const ElectricVehicles = () => {
   return (
     <div className="electric-vehicles-page">
       {/* Navbar */}
-      <Navbar />
+      <Navbar loggedInUser={loggedInUser} onLogout={onLogout} />
 
       {/* Page Header */}
       <div className="page-header">

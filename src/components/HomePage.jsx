@@ -53,7 +53,7 @@ const HomePage = ({ loggedInUser, onLogout }) => {
   return (
     <div className="homepage">
       {/* Navbar */}
-      <Navbar />
+      <Navbar loggedInUser={loggedInUser} onLogout={onLogout} />
 
       {/* Hero Section */}
       <section className="hero-section">
@@ -99,7 +99,7 @@ const HomePage = ({ loggedInUser, onLogout }) => {
                 whileHover={{ scale: 1.05 }}
                 whileTap={{ scale: 0.95 }}
                 className="btn-hero-secondary"
-                onClick={() => navigate('/auth')}
+                onClick={() => navigate('/vehicles')}
               >
                 Book a Test Drive
               </motion.button>
@@ -157,7 +157,7 @@ const HomePage = ({ loggedInUser, onLogout }) => {
           ) : vehicles.length === 0 ? (
             <div className="no-vehicles-message">No vehicles available</div>
           ) : (
-            vehicles.map((vehicle, index) => {
+            vehicles.slice(0, 4).map((vehicle, index) => {
               // Get the first image from specifications.images array
               const vehicleImage = vehicle.specifications?.images?.[0] || '/images/image.jpg';
               const range = vehicle.specifications?.battery?.range_km || 0;

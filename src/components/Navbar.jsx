@@ -3,7 +3,7 @@ import { useNavigate, useLocation } from 'react-router-dom';
 import 'boxicons/css/boxicons.min.css';
 import './HomePage.css';
 
-const Navbar = () => {
+const Navbar = ({ loggedInUser, onLogout }) => {
   const navigate = useNavigate();
   const location = useLocation();
   const [isScrolled, setIsScrolled] = useState(false);
@@ -29,6 +29,13 @@ const Navbar = () => {
 
   const currentPage = getCurrentPage();
 
+  const handleLogout = () => {
+    if (onLogout) {
+      onLogout();
+    }
+    navigate('/');
+  };
+
   return (
     <nav className={`navbar ${isScrolled ? 'scrolled' : ''}`}>
       <div className="nav-container">
@@ -43,12 +50,30 @@ const Navbar = () => {
           <li className={`nav-item ${currentPage === 'contact' ? 'active' : ''}`} onClick={() => { window.scrollTo(0, 0); navigate('/contact'); }} style={{ cursor: 'pointer' }}>Contact</li>
         </ul>
         <div className="nav-buttons">
-          <button 
-            className="btn-login"
-            onClick={() => navigate('/auth')}
-          >
-            Login
-          </button> 
+          {loggedInUser ? (
+            <>
+              <button 
+                className="btn-login"
+                onClick={() => navigate('/dashboard')}
+                style={{ marginRight: '8px' }}
+              >
+                Dashboard
+              </button>
+              <button 
+                className="btn-login"
+                onClick={handleLogout}
+              >
+                Logout
+              </button>
+            </>
+          ) : (
+            <button 
+              className="btn-login"
+              onClick={() => navigate('/auth')}
+            >
+              Login
+            </button>
+          )}
         </div>
       </div>
     </nav>

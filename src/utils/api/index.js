@@ -11,6 +11,7 @@ export { usersAPI } from './usersAPI';
 export { paymentsAPI } from './paymentsAPI';
 export { contractsAPI } from './contractsAPI';
 export { installmentsAPI } from './installmentsAPI';
+export { evmAPI } from './evmAPI';
 export { default as auditLogsAPI } from './auditLogsAPI';
 export { inventoryAPI } from './inventoryAPI';
 

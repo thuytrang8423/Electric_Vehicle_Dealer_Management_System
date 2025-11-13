@@ -3,7 +3,7 @@ import Navbar from './Navbar';
 import Footer from './Footer';
 import './Recruitment.css';
 
-const Recruitment = () => {
+const Recruitment = ({ loggedInUser, onLogout }) => {
   const [form, setForm] = useState({
     fullName: '',
     phone: '',
@@ -37,7 +37,7 @@ const Recruitment = () => {
 
   return (
     <div className="recruitment-page">
-      <Navbar />
+      <Navbar loggedInUser={loggedInUser} onLogout={onLogout} />
       <section className="recruitment-hero">
         <div className="recruitment-hero-overlay" />
         <div className="recruitment-hero-content">

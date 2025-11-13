@@ -9,7 +9,7 @@ import { vehiclesAPI } from '../utils/api/vehiclesAPI';
 import { dealersAPI } from '../utils/api/dealersAPI';
 import { customersAPI } from '../utils/api/customersAPI';
 
-const Details = () => {
+const Details = ({ loggedInUser, onLogout }) => {
   const { id } = useParams();
   const navigate = useNavigate();
   const [vehicle, setVehicle] = useState(null);
@@ -31,7 +31,7 @@ const Details = () => {
     phoneNumber: '',
     carModel: '',
     dealerId: '',
-    date: today,
+    date: '',
     time: '07:00:00',
     note: ''
   });
@@ -81,7 +81,7 @@ const Details = () => {
   if (loading) {
     return (
       <div className="details-page">
-        <Navbar />
+        <Navbar loggedInUser={loggedInUser} onLogout={onLogout} />
         <div className="loading-container">
           <div className="loading-message">Loading vehicle details...</div>
         </div>
@@ -93,7 +93,7 @@ const Details = () => {
   if (error || !vehicle) {
     return (
       <div className="details-page">
-        <Navbar />
+        <Navbar loggedInUser={loggedInUser} onLogout={onLogout} />
         <div className="error-container">
           <div className="error-message">{error || 'Vehicle not found'}</div>
           <button className="btn-back" onClick={() => navigate(-1)}>
@@ -287,7 +287,7 @@ const Details = () => {
       phoneNumber: '',
       carModel: vehicle?.modelName || '',
       dealerId: '',
-      date: today,
+      date: '',
       time: '07:00:00',
       note: ''
     });
@@ -303,7 +303,7 @@ const Details = () => {
       phoneNumber: '',
       carModel: vehicle?.modelName || '',
       dealerId: '',
-      date: today,
+      date: '',
       time: '07:00:00',
       note: ''
     });
@@ -350,10 +350,14 @@ const Details = () => {
 
     try {
       setSubmitting(true);
-      const formattedTime =
-        formData.time && formData.time.length === 5
-          ? `${formData.time}:00`
-          : formData.time || '07:00:00';
+      // Extract hour and minute from time (format: HH:mm:ss or HH:mm)
+      const timeParts = formData.time ? formData.time.split(':') : ['07', '00'];
+      const hour = timeParts[0] || '07';
+      const minute = timeParts[1] || '00';
+      
+      // Combine date and time into ISO datetime string: "YYYY-MM-DDTHH:mm:ss.sssZ"
+      const dateTimeString = `${formData.date}T${hour}:${minute}:00.000Z`;
+      const requestTime = new Date(dateTimeString).toISOString();
 
       const testDriveData = {
         customerName: formData.customerName.trim(),
@@ -362,7 +366,7 @@ const Details = () => {
         carModel: formData.carModel.trim(),
         dealerId: parseInt(formData.dealerId, 10),
         date: formData.date,
-        time: formattedTime,
+        requestTime: requestTime,
         note: formData.note.trim() || ''
       };
 
@@ -539,10 +543,10 @@ const Details = () => {
                 whileHover={{ scale: 1.05, boxShadow: '0 0 30px rgba(229, 9, 20, 0.8)' }}
                 whileTap={{ scale: 0.95 }}
                 className="btn-glow btn-order-now"
-                onClick={() => navigate('/contact')}
+                onClick={() => navigate('/auth')}
               >
                 <i className="bx bx-cart"></i>
-                Order Now
+                Order Now ( For Business )
               </motion.button>
             </div>
 

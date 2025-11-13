@@ -5,7 +5,7 @@ import './Contact.css';
 import Navbar from './Navbar';
 import Footer from './Footer';
 
-const Contact = () => {
+const Contact = ({ loggedInUser, onLogout }) => {
   const [formData, setFormData] = useState({
     name: '',
     email: '',
@@ -99,7 +99,7 @@ const Contact = () => {
   return (
     <div className="contact-page">
       {/* Navbar */}
-      <Navbar />
+      <Navbar loggedInUser={loggedInUser} onLogout={onLogout} />
 
       {/* Toast Notification */}
       {showToast.show && (

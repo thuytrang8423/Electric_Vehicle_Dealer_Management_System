@@ -1,4 +1,5 @@
 import { useState, useEffect } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { motion } from 'framer-motion';
 import 'boxicons/css/boxicons.min.css';
 import './Dealers.css';
@@ -6,7 +7,8 @@ import Footer from './Footer';
 import Navbar from './Navbar';
 import { dealersAPI } from '../utils/api/dealersAPI';
 
-const Dealer = () => {
+const Dealer = ({ loggedInUser, onLogout }) => {
+  const navigate = useNavigate();
   const [dealers, setDealers] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
@@ -71,7 +73,7 @@ const Dealer = () => {
   return (
     <div className="dealers-page">
       {/* Navbar */}
-      <Navbar />
+      <Navbar loggedInUser={loggedInUser} onLogout={onLogout} />
 
       {/* Page Header */}
       <div className="page-header">
@@ -215,9 +217,15 @@ const Dealer = () => {
                   </div>
                   
                   <div className="dealer-actions">
-                    <button className="btn-contact-dealer">
-                      <i className="bx bx-phone"></i>
-                      Contact
+                    <button
+                      className="btn-contact-dealer"
+                      onClick={() => {
+                        const dealerId = dealer.dealerId || dealer.id || index;
+                        navigate(`/detail-dealer/${dealerId}`, { state: { dealer } });
+                      }}
+                    >
+                      <i className="bx bx-comment-dots"></i>
+                      Feedback
                     </button>
                     <button 
                       className="btn-view-details"

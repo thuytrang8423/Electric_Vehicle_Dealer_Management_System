@@ -274,13 +274,23 @@ const CustomerManagement = ({ user }) => {
                           transition: 'all 0.2s ease'
                         }}
                         onMouseEnter={(e) => {
-                          e.target.style.background = 'transparent';
-                          e.target.querySelector('i').style.transform = 'scale(1.2)';
-                          e.target.querySelector('i').style.transition = 'transform 0.2s ease';
+                          if (e.target && e.target.style) {
+                            e.target.style.background = 'transparent';
+                            const icon = e.target.querySelector('i');
+                            if (icon && icon.style) {
+                              icon.style.transform = 'scale(1.2)';
+                              icon.style.transition = 'transform 0.2s ease';
+                            }
+                          }
                         }}
                         onMouseLeave={(e) => {
-                          e.target.style.background = 'transparent';
-                          e.target.querySelector('i').style.transform = 'scale(1)';
+                          if (e.target && e.target.style) {
+                            e.target.style.background = 'transparent';
+                            const icon = e.target.querySelector('i');
+                            if (icon && icon.style) {
+                              icon.style.transform = 'scale(1)';
+                            }
+                          }
                         }}
                         onClick={() => handleEditCustomer(customer)}
                         title="Edit Customer"
@@ -297,13 +307,23 @@ const CustomerManagement = ({ user }) => {
                           transition: 'all 0.2s ease'
                         }}
                         onMouseEnter={(e) => {
-                          e.target.style.background = 'transparent';
-                          e.target.querySelector('i').style.transform = 'scale(1.2)';
-                          e.target.querySelector('i').style.transition = 'transform 0.2s ease';
+                          if (e.target && e.target.style) {
+                            e.target.style.background = 'transparent';
+                            const icon = e.target.querySelector('i');
+                            if (icon && icon.style) {
+                              icon.style.transform = 'scale(1.2)';
+                              icon.style.transition = 'transform 0.2s ease';
+                            }
+                          }
                         }}
                         onMouseLeave={(e) => {
-                          e.target.style.background = 'transparent';
-                          e.target.querySelector('i').style.transform = 'scale(1)';
+                          if (e.target && e.target.style) {
+                            e.target.style.background = 'transparent';
+                            const icon = e.target.querySelector('i');
+                            if (icon && icon.style) {
+                              icon.style.transform = 'scale(1)';
+                            }
+                          }
                         }}
                         onClick={() => handleDeleteCustomer(customer)}
                         title="Delete Customer"

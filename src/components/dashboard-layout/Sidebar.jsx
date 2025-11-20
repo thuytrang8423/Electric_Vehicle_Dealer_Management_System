@@ -95,9 +95,10 @@ const Sidebar = ({ user, activeItem, onItemClick }) => {
       case 'ADMIN':
         // ADMIN: All EVM_MANAGER permissions + Audit Logs
         // NOTE: NO Customers, Customer Feedback, Test Drives (as per ROLE_FEATURES.md)
+        // Updated: hide Quotes & Orders entries for Admin dashboard
         return allItems.filter(item => 
           ['overview', 'activity', 'vehicles', 'vehicle-management', 'vehicle-types', 
-           'vehicle-orders', 'vehicle-distribution', 'quotes', 'orders', 'sales-contracts', 
+           'vehicle-orders', 'vehicle-distribution', 'sales-contracts', 
            'inventory', 'payments', 'installments', 'debt-management', 'promotions', 'dealers', 'users', 'reports', 
            'delivery-tracking', 'audit-logs', 'settings'].includes(item.id)
         );
@@ -130,7 +131,7 @@ const Sidebar = ({ user, activeItem, onItemClick }) => {
       case 'admin':
         return allItems.filter(item => 
           ['overview', 'activity', 'vehicles', 'vehicle-management', 'vehicle-types', 
-           'vehicle-orders', 'vehicle-distribution', 'quotes', 'orders', 'sales-contracts', 
+           'vehicle-orders', 'vehicle-distribution', 'sales-contracts', 
            'inventory', 'payments', 'installments', 'debt-management', 'promotions', 'dealers', 'users', 'reports', 
            'delivery-tracking', 'audit-logs', 'settings'].includes(item.id)
         );
@@ -150,7 +151,7 @@ const Sidebar = ({ user, activeItem, onItemClick }) => {
     sales: 'SALES & CONTRACTS',
     logistics: 'LOGISTICS & DISTRIBUTION',
     customers: 'CUSTOMERS & SERVICES',
-    finance: 'FINANCE & PROMOTIONS',
+    finance: 'FINANCE',
     organization: 'ORGANIZATION',
     reports: 'REPORTS & AUDIT',
     settings: 'Setting'

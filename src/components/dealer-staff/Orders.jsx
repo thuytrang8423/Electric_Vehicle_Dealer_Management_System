@@ -264,7 +264,42 @@ const normalizeOrder = (order) => {
 const normalizeOrdersList = (data) =>
   Array.isArray(data) ? data.map(normalizeOrder).filter(Boolean) : [];
 
+const extractOrderTimestamp = (order) => {
+  if (!order) return 0;
+  const candidates = [
+    order.createdDate,
+    order.createdAt,
+    order.creationDate,
+    order.created_on,
+    order.createdOn,
+    order.orderDate,
+    order.orderedAt,
+    order.updatedDate,
+    order.updatedAt,
+    order.approvedDate,
+    order.approvedAt,
+    order.deliveryDate,
+  ];
+
+  for (const candidate of candidates) {
+    if (!candidate) continue;
+    const time = new Date(candidate).getTime();
+    if (!Number.isNaN(time)) {
+      return time;
+    }
+  }
+
+  const numericFallback = Number(order.orderId ?? order.id ?? 0);
+  return Number.isNaN(numericFallback) ? 0 : numericFallback;
+};
+
+const sortOrdersByNewest = (list = []) => {
+  if (!Array.isArray(list)) return [];
+  return [...list].sort((a, b) => extractOrderTimestamp(b) - extractOrderTimestamp(a));
+};
+
 const INSTALLMENT_MONTH_OPTIONS = [3, 6, 9, 12];
+const ORDERS_PER_PAGE = 5;
 
 const addDaysToDateString = (dateString, days) => {
   if (!dateString) return '';
@@ -459,6 +494,7 @@ const Orders = ({ user }) => {
   // 1. THÊM STATE CHO TAB MỚI
   // 'all_dealer' (tất cả orders của dealer), 'my_orders' (chính manager tạo), 'staff_orders' (staff tạo)
   const [tabFilter, setTabFilter] = useState('all_dealer'); 
+  const [currentPage, setCurrentPage] = useState(1);
   
   const userRole = user?.role?.toUpperCase().replace(/-/g, '_');
   const userId = user?.id || user?.userId || user?.user?.id;
@@ -838,6 +874,23 @@ const Orders = ({ user }) => {
     });
   }, [enhancedOrders, searchTerm, filterStatus, tabFilter, userRole, userId]);
 
+  const totalPages = Math.max(1, Math.ceil(filteredOrders.length / ORDERS_PER_PAGE));
+
+  const paginatedOrders = useMemo(() => {
+    const start = (currentPage - 1) * ORDERS_PER_PAGE;
+    return filteredOrders.slice(start, start + ORDERS_PER_PAGE);
+  }, [filteredOrders, currentPage]);
+
+  useEffect(() => {
+    setCurrentPage(1);
+  }, [searchTerm, filterStatus, tabFilter, userRole, userId]);
+
+  useEffect(() => {
+    if (currentPage > totalPages) {
+      setCurrentPage(totalPages);
+    }
+  }, [totalPages, currentPage]);
+
   const quoteTotalAmount = useMemo(() => {
     if (!selectedQuote) return 0;
     const candidates = [
@@ -1156,7 +1209,7 @@ const Orders = ({ user }) => {
           data = await ordersAPI.getAll();
         }
         
-        setOrders(normalizeOrdersList(data));
+        setOrders(sortOrdersByNewest(normalizeOrdersList(data)));
       } catch (error) {
         console.error('Error loading orders:', error);
         showErrorToast(handleAPIError(error));
@@ -1571,26 +1624,36 @@ const Orders = ({ user }) => {
     quoteSuggestedFirstDueDate
   ]);
 
+  const resolveStatusTokens = (status, approvalStatus) => {
+    const toUpper = (value) =>
+      typeof value === 'string' ? value.trim().toUpperCase() : '';
+    const tokens = [
+      toUpper(status),
+      toUpper(approvalStatus),
+    ].filter(Boolean);
+    return tokens;
+  };
+
+  const hasKeyword = (tokens, candidates) =>
+    tokens.some((token) => candidates.some((candidate) => token.includes(candidate)));
+
   const getStatusColor = (status, approvalStatus) => {
-    const normalizedApprovalStatus = (approvalStatus || '').toUpperCase();
-    const normalizedStatus = (status || '').toUpperCase();
-    if (normalizedApprovalStatus === 'REJECTED') return 'var(--color-error)';
-    if (normalizedApprovalStatus === 'APPROVED' && normalizedStatus === 'APPROVED') return 'var(--color-success)';
-    if (normalizedApprovalStatus === 'PENDING_APPROVAL' || normalizedStatus === 'PENDING') return 'var(--color-warning)';
-    if (normalizedStatus === 'DELIVERED') return 'var(--color-success)';
-    if (normalizedStatus === 'CANCELLED') return 'var(--color-error)';
+    const tokens = resolveStatusTokens(status, approvalStatus);
+    if (hasKeyword(tokens, ['REJECT', 'DECLINE', 'CANCEL'])) return 'var(--color-error)';
+    if (hasKeyword(tokens, ['COMPLETE', 'DELIVER'])) return 'var(--color-success)';
+    if (hasKeyword(tokens, ['APPROV'])) return 'var(--color-info)';
+    if (hasKeyword(tokens, ['PEND', 'REVIEW', 'PROCESS'])) return 'var(--color-warning)';
     return 'var(--color-text-muted)';
   };
 
   const getStatusLabel = (status, approvalStatus) => {
-    const normalizedApprovalStatus = (approvalStatus || '').toUpperCase();
-    const normalizedStatus = (status || '').toUpperCase();
-    if (normalizedApprovalStatus === 'REJECTED') return 'Rejected';
-    if (normalizedApprovalStatus === 'APPROVED' && normalizedStatus === 'APPROVED') return 'Approved';
-    if (normalizedApprovalStatus === 'PENDING_APPROVAL' || normalizedStatus === 'PENDING') return 'Pending Approval';
-    if (normalizedStatus === 'DELIVERED') return 'Delivered';
-    if (normalizedStatus === 'CANCELLED') return 'Cancelled';
-    return normalizedStatus || 'Unknown';
+    const tokens = resolveStatusTokens(status, approvalStatus);
+    if (hasKeyword(tokens, ['REJECT', 'DECLINE', 'CANCEL'])) return 'Rejected';
+    if (hasKeyword(tokens, ['DELIVER'])) return 'Delivered';
+    if (hasKeyword(tokens, ['COMPLETE'])) return 'Completed';
+    if (hasKeyword(tokens, ['APPROV'])) return 'Approved';
+    if (hasKeyword(tokens, ['PEND', 'REVIEW', 'PROCESS'])) return 'Pending Approval';
+    return tokens[0] || 'Unknown';
   };
 
   const handleCreateFromQuote = () => {
@@ -2004,7 +2067,7 @@ const Orders = ({ user }) => {
         reloadedOrders = await ordersAPI.getAll();
       }
       
-      setOrders(normalizeOrdersList(reloadedOrders));
+      setOrders(sortOrdersByNewest(normalizeOrdersList(reloadedOrders)));
       
       // Reset form
       handleDismissOrderForm();
@@ -2059,7 +2122,7 @@ const Orders = ({ user }) => {
       } else {
         reloadedOrders = await ordersAPI.getAll();
       }
-      setOrders(normalizeOrdersList(reloadedOrders));
+      setOrders(sortOrdersByNewest(normalizeOrdersList(reloadedOrders)));
       
       setShowApproveModal(false);
       setSelectedOrder(null);
@@ -2102,7 +2165,7 @@ const Orders = ({ user }) => {
       } else {
         reloadedOrders = await ordersAPI.getAll();
       }
-      setOrders(normalizeOrdersList(reloadedOrders));
+      setOrders(sortOrdersByNewest(normalizeOrdersList(reloadedOrders)));
     } catch (error) {
       console.error('Error rejecting order:', error);
       showErrorToast(handleAPIError(error));
@@ -2139,121 +2202,160 @@ const Orders = ({ user }) => {
     return String(creatorId) === String(userId);
   }).length;
   const staffOrdersCount = enhancedOrders.length - myOrdersCount; // Chỉ chính xác nếu API chỉ trả về orders của Dealer
+  const startIndex = filteredOrders.length === 0 ? 0 : (currentPage - 1) * ORDERS_PER_PAGE;
+  const endIndex = filteredOrders.length === 0 ? 0 : Math.min(startIndex + paginatedOrders.length, filteredOrders.length);
 
   return (
     <div className="main">
       {/* Order Stats */}
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: '16px', marginBottom: '24px' }}>
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: '18px', marginBottom: '28px' }}>
         {[
-          { label: 'Total Orders', value: orders.length, icon: 'bx-shopping-bag', color: 'var(--color-primary)' },
-          { label: 'Pending Approval', value: pendingOrders, icon: 'bx-time', color: 'var(--color-warning)' },
-          { label: 'Approved', value: approvedOrders, icon: 'bx-check-circle', color: 'var(--color-success)' },
-          { label: 'Total Revenue', value: `$${totalRevenue.toLocaleString()}`, icon: 'bx-dollar-circle', color: 'var(--color-info)' }
+          { label: 'Total Orders', value: orders.length, icon: 'bx-receipt', gradient: ['rgba(239,68,68,0.18)', 'rgba(239,68,68,0.05)'], border: 'rgba(239,68,68,0.35)', subtext: 'Across all sources' },
+          { label: 'Pending Approval', value: pendingOrders, icon: 'bx-time', gradient: ['rgba(251,191,36,0.25)', 'rgba(251,191,36,0.07)'], border: 'rgba(251,191,36,0.45)', subtext: 'Awaiting manager review' },
+          { label: 'Approved', value: approvedOrders, icon: 'bx-check-circle', gradient: ['rgba(52,211,153,0.25)', 'rgba(52,211,153,0.08)'], border: 'rgba(52,211,153,0.45)', subtext: 'Ready for delivery' },
+          { label: 'Total Revenue', value: `$${totalRevenue.toLocaleString()}`, icon: 'bx-dollar-circle', gradient: ['rgba(59,130,246,0.25)', 'rgba(59,130,246,0.08)'], border: 'rgba(59,130,246,0.45)', subtext: 'Booked via orders' }
         ].map((stat, index) => (
-          <div key={index} style={{ padding: '16px', background: 'var(--color-bg)', borderRadius: 'var(--radius)' }}>
-            <div style={{ display: 'flex', alignItems: 'center', gap: '12px', marginBottom: '8px' }}>
+          <div
+            key={stat.label}
+            style={{
+              padding: '20px',
+              borderRadius: '18px',
+              background: `linear-gradient(135deg, ${stat.gradient[0]}, ${stat.gradient[1]})`,
+              border: `1px solid ${stat.border}`,
+              boxShadow: '0 20px 40px rgba(15,23,42,0.35)',
+              minHeight: '150px',
+              display: 'flex',
+              flexDirection: 'column',
+              justifyContent: 'space-between'
+            }}
+          >
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '8px' }}>
+              <div style={{ fontSize: '14px', color: 'var(--color-text-muted)', fontWeight: 600 }}>{stat.label}</div>
               <div style={{
-                width: '32px',
-                height: '32px',
+                width: '38px',
+                height: '38px',
                 borderRadius: '50%',
-                background: stat.color,
+                background: 'rgba(15,23,42,0.2)',
                 display: 'flex',
                 alignItems: 'center',
                 justifyContent: 'center',
-                color: 'white',
-                fontSize: '16px'
+                color: '#fff',
+                fontSize: '18px'
               }}>
                 <i className={`bx ${stat.icon}`}></i>
               </div>
-              <div style={{ fontSize: '14px', color: 'var(--color-text-muted)' }}>{stat.label}</div>
             </div>
-            <div style={{ fontSize: '24px', fontWeight: '700', color: 'var(--color-text)' }}>{stat.value}</div>
+            <div style={{ fontSize: '28px', fontWeight: '700', color: 'var(--color-text)' }}>{stat.value}</div>
+            <div style={{ fontSize: '12px', color: 'var(--color-text-muted)' }}>{stat.subtext}</div>
           </div>
         ))}
       </div>
 
-      <div className="card">
-        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '24px' }}>
-          <h2>Orders Management</h2>
-          <div style={{ display: 'flex', gap: '8px' }}>
-            {/* EVM_MANAGER không được tạo order, chỉ approve */}
-            {canCreateFromQuote() && (
-              <button className="btn btn-primary" onClick={handleCreateFromQuote}>
-                <i className="bx bx-cart"></i>
-                Create from Quote
-              </button>
-            )}
+      <div className="card" style={{ padding: '24px', display: 'flex', flexDirection: 'column', gap: '18px' }}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '12px' }}>
+          <div>
+            <h2 style={{ margin: 0 }}>Orders Management</h2>
+            <p style={{ margin: '4px 0 0', color: 'var(--color-text-muted)', fontSize: '13px' }}>
+              Track every quote that turned into a confirmed purchase order.
+            </p>
+          </div>
+          {canCreateFromQuote() && (
+            <button className="btn btn-primary" onClick={handleCreateFromQuote} style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+              <i className="bx bx-cart"></i>
+              Create from Quote
+            </button>
+          )}
+        </div>
+
+        <div style={{ display: 'flex', flexWrap: 'wrap', gap: '12px', alignItems: 'center' }}>
+          <div style={{ flex: '1 1 320px', position: 'relative' }}>
+            <i className="bx bx-search" style={{ position: 'absolute', left: '12px', top: '50%', transform: 'translateY(-50%)', color: 'var(--color-text-muted)' }}></i>
+            <input
+              type="text"
+              placeholder="Search by order no., customer, vehicle..."
+              value={searchTerm}
+              onChange={(e) => setSearchTerm(e.target.value)}
+              style={{
+                width: '100%',
+                padding: '12px 12px 12px 42px',
+                border: '1px solid var(--color-border)',
+                borderRadius: '999px',
+                background: 'var(--color-bg)',
+                color: 'var(--color-text)',
+                fontSize: '14px'
+              }}
+            />
+          </div>
+          <div style={{ display: 'flex', flexWrap: 'wrap', gap: '8px' }}>
+            {['all', 'pending', 'approved', 'rejected', 'delivered'].map((status) => {
+              const isActive = filterStatus === status;
+              return (
+                <button
+                  key={status}
+                  onClick={() => setFilterStatus(status)}
+                  className="btn"
+                  style={{
+                    padding: '8px 16px',
+                    borderRadius: '999px',
+                    border: isActive ? '1px solid transparent' : '1px solid var(--color-border)',
+                    background: isActive ? 'var(--color-primary)' : 'transparent',
+                    color: isActive ? '#fff' : 'var(--color-text)',
+                    fontWeight: 600,
+                    textTransform: 'capitalize'
+                  }}
+                >
+                  {status}
+                </button>
+              );
+            })}
           </div>
         </div>
 
-        {/* Search and Filters */}
-        <div style={{ display: 'flex', gap: '16px', marginBottom: '24px', flexWrap: 'wrap' }}>
-          <div style={{ flex: 1, minWidth: '300px' }}>
-            <div style={{ position: 'relative' }}>
-              <i className="bx bx-search" style={{ position: 'absolute', left: '12px', top: '50%', transform: 'translateY(-50%)', color: 'var(--color-text-muted)' }}></i>
-              <input
-                type="text"
-                placeholder="Search orders..."
-                value={searchTerm}
-                onChange={(e) => setSearchTerm(e.target.value)}
-                style={{
-                  width: '100%',
-                  padding: '10px 12px 10px 40px',
-                  border: '1px solid var(--color-border)',
-                  borderRadius: 'var(--radius)',
-                  background: 'var(--color-bg)',
-                  color: 'var(--color-text)',
-                  fontSize: '14px'
-                }}
-              />
-            </div>
-          </div>
-          <div style={{ display: 'flex', gap: '8px' }}>
-            {['all', 'pending', 'approved', 'rejected', 'delivered'].map(status => (
-              <button
-                key={status}
-                onClick={() => setFilterStatus(status)}
-                className={`btn ${filterStatus === status ? 'btn-primary' : 'btn-outline'}`}
-                style={{ textTransform: 'capitalize' }}
-              >
-                {status}
-              </button>
-            ))}
-          </div>
-        </div>
-        
-        {/* 3. THÊM TAB CHO DEALER MANAGER */}
         {userRole === 'DEALER_MANAGER' && (
-          <div style={{ display: 'flex', gap: '8px', marginBottom: '24px', borderBottom: '1px solid var(--color-border)' }}>
+          <div
+            style={{
+              display: 'flex',
+              flexWrap: 'wrap',
+              gap: '8px',
+              padding: '8px',
+              borderRadius: '999px',
+              border: '1px solid var(--color-border)',
+              background: 'var(--color-bg)'
+            }}
+          >
             {[
               { key: 'all_dealer', label: `All Dealer Orders (${orders.length})` },
               { key: 'my_orders', label: `My Orders (${myOrdersCount})` },
               { key: 'staff_orders', label: `Staff Orders (${staffOrdersCount})` }
-            ].map(tab => (
-              <button
-                key={tab.key}
-                onClick={() => setTabFilter(tab.key)}
-                style={{
-                  padding: '8px 16px',
-                  background: 'none',
-                  border: 'none',
-                  borderBottom: `2px solid ${tabFilter === tab.key ? 'var(--color-primary)' : 'transparent'}`,
-                  color: tabFilter === tab.key ? 'var(--color-primary)' : 'var(--color-text-muted)',
-                  fontWeight: tabFilter === tab.key ? '600' : '500',
-                  cursor: 'pointer',
-                  transition: 'color 0.2s, border-bottom 0.2s',
-                  fontSize: '14px'
-                }}
-              >
-                {tab.label}
-              </button>
-            ))}
+            ].map((tab) => {
+              const isActive = tabFilter === tab.key;
+              return (
+                <button
+                  key={tab.key}
+                  onClick={() => setTabFilter(tab.key)}
+                  style={{
+                    flex: '1 1 140px',
+                    minWidth: '140px',
+                    border: 'none',
+                    borderRadius: '999px',
+                    padding: '10px 16px',
+                    background: isActive ? 'var(--color-primary)' : 'transparent',
+                    color: isActive ? '#fff' : 'var(--color-text-muted)',
+                    fontWeight: isActive ? 700 : 500,
+                    cursor: 'pointer',
+                    transition: 'all 0.2s ease'
+                  }}
+                >
+                  {tab.label}
+                </button>
+              );
+            })}
           </div>
         )}
 
         {/* Orders List */}
         <div style={{ display: 'grid', gap: '16px' }}>
-          {filteredOrders.map(order => {
+          {paginatedOrders.map(order => {
             // Kiểm tra order có customerId không (null = EVM workflow order từ DEALER_MANAGER)
             const orderCustomerId = order.customerId || order.customer?.id || order.customer?.customerId;
             const isEVMWorkflowOrder = orderCustomerId === null || orderCustomerId === undefined;
@@ -2296,19 +2398,21 @@ const Orders = ({ user }) => {
 
             return (
               <div key={order.orderId || order.id} style={{ 
-                padding: '20px', 
-                background: 'var(--color-bg)', 
-                borderRadius: 'var(--radius)',
-                border: `1px solid var(--color-border)`
+                padding: '20px',
+                background: 'rgba(15,23,42,0.55)',
+                borderRadius: '20px',
+                border: `1px solid ${isMyOrder ? 'var(--color-primary)' : 'var(--color-border)'}`,
+                boxShadow: '0 20px 40px rgba(15,23,42,0.45)',
+                backdropFilter: 'blur(6px)'
               }}>
                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '16px' }}>
                   <div style={{ flex: 1 }}>
-                    <div style={{ display: 'flex', alignItems: 'center', gap: '12px', marginBottom: '8px' }}>
-                      <h3 style={{ margin: '0', fontSize: '18px', fontWeight: '600' }}>{orderNumber}{creatorTag}</h3>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '12px', marginBottom: '8px', flexWrap: 'wrap' }}>
+                      <h3 style={{ margin: '0', fontSize: '18px', fontWeight: '600', color: 'var(--color-text)' }}>{orderNumber}{creatorTag}</h3>
                       <span style={{
                         padding: '4px 12px',
                         borderRadius: 'var(--radius)',
-                        background: 'var(--color-surface)',
+                        background: 'rgba(255,255,255,0.04)',
                         color: statusColor,
                         fontSize: '12px',
                         fontWeight: '600',
@@ -2318,10 +2422,15 @@ const Orders = ({ user }) => {
                       </span>
                     </div>
                     <div style={{ fontSize: '16px', fontWeight: '600', color: 'var(--color-text)', marginBottom: '4px' }}>
-                      {customerName ? `${customerName} - ${vehicleName}` : vehicleName}
+                      {vehicleName}
                     </div>
-                    <div style={{ fontSize: '14px', color: 'var(--color-text-muted)' }}>
-                      Order Date: {order.orderDate ? new Date(order.orderDate).toLocaleDateString() : 'N/A'}
+                    {customerName && (
+                      <div style={{ fontSize: '13px', color: 'var(--color-text-muted)', marginBottom: '2px' }}>
+                        Customer: {customerName}
+                      </div>
+                    )}
+                    <div style={{ fontSize: '13px', color: 'var(--color-text-muted)' }}>
+                      Order Date · {order.orderDate ? new Date(order.orderDate).toLocaleDateString() : 'N/A'}
                     </div>
                     {order.quoteId && (
                       <div style={{ fontSize: '12px', color: 'var(--color-text-muted)', marginTop: '4px' }}>
@@ -2393,6 +2502,55 @@ const Orders = ({ user }) => {
             );
           })}
         </div>
+
+        {filteredOrders.length > 0 && (
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: '24px', flexWrap: 'wrap', gap: '12px' }}>
+            <div style={{ fontSize: '13px', color: 'var(--color-text-muted)' }}>
+              {filteredOrders.length === 0
+                ? 'No orders to display'
+                : `Showing ${startIndex + 1}-${endIndex} of ${filteredOrders.length} orders`}
+            </div>
+            <div style={{ display: 'flex', gap: '6px', flexWrap: 'wrap', alignItems: 'center' }}>
+              <button
+                className="btn btn-outline"
+                onClick={() => setCurrentPage((prev) => Math.max(1, prev - 1))}
+                disabled={currentPage === 1}
+                style={{ padding: '8px 12px' }}
+              >
+                Prev
+              </button>
+              {Array.from({ length: totalPages }).map((_, idx) => {
+                const page = idx + 1;
+                const isActive = page === currentPage;
+                return (
+                  <button
+                    key={page}
+                    className="btn"
+                    onClick={() => setCurrentPage(page)}
+                    style={{
+                      padding: '8px 12px',
+                      borderRadius: '10px',
+                      border: isActive ? '1px solid transparent' : '1px solid var(--color-border)',
+                      background: isActive ? 'var(--color-primary)' : 'transparent',
+                      color: isActive ? '#fff' : 'var(--color-text)',
+                      fontWeight: 600
+                    }}
+                  >
+                    {page}
+                  </button>
+                );
+              })}
+              <button
+                className="btn btn-outline"
+                onClick={() => setCurrentPage((prev) => Math.min(totalPages, prev + 1))}
+                disabled={currentPage === totalPages}
+                style={{ padding: '8px 12px' }}
+              >
+                Next
+              </button>
+            </div>
+          </div>
+        )}
 
         {filteredOrders.length === 0 && !loading && (
           <div style={{ textAlign: 'center', padding: '40px', color: 'var(--color-text-muted)' }}>
@@ -2629,9 +2787,9 @@ const Orders = ({ user }) => {
           <div style={{
             background: 'var(--color-surface)',
             borderRadius: 'var(--radius)',
-            padding: '24px',
-            width: '90%',
-            maxWidth: '500px',
+            padding: '28px',
+            width: '96%',
+            maxWidth: '900px',
             maxHeight: '90vh',
             overflowY: 'auto'
           }}>
@@ -2725,9 +2883,9 @@ const Orders = ({ user }) => {
                       fontSize: '14px'
                     }}
                   >
-                    <option value="CASH">Cash (Tiền mặt) - Thanh toán ngay</option>
-                    <option value="TRANSFER">Bank Transfer (Chuyển khoản)</option>
-                    <option value="VNPAY">VNPay - Thanh toán online</option>
+                    <option value="CASH">Cash - pay in full</option>
+                    <option value="TRANSFER">Bank Transfer</option>
+                    <option value="VNPAY">VNPay - online payment</option>
                   </select>
                 </div>
 
@@ -2754,10 +2912,10 @@ const Orders = ({ user }) => {
                       color: 'var(--color-text)',
                       fontSize: '14px'
                     }}
-                  >
+                    >
                     {[0, 30, 50, 70, 100].map((percent) => (
                       <option key={percent} value={percent}>
-                        {percent === 0 ? '0 (Thanh toán sau qua VNPay)' : `${percent}%`}
+                        {percent === 0 ? '0 (pay later via VNPay)' : `${percent}%`}
                       </option>
                     ))}
                   </select>
@@ -2792,7 +2950,7 @@ const Orders = ({ user }) => {
                       Installment Plan Preview (Optional)
                     </div>
                     <p style={{ fontSize: '13px', color: 'var(--color-text-muted)', marginBottom: '12px' }}>
-                      Chọn một gói trả góp để xem lịch dự kiến trước khi tạo order. Hãy đảm bảo đã nhập ngày đến hạn đầu tiên.
+                      Choose an installment bundle to preview payments before creating the order. Be sure to set the first due date.
                     </p>
 
                     <div style={{ marginBottom: '12px' }}>
@@ -2839,10 +2997,10 @@ const Orders = ({ user }) => {
                             {isActive && installmentPreviewLoading ? (
                               <>
                                 <i className="bx bx-loader-alt bx-spin" style={{ marginRight: '6px' }}></i>
-                                Đang tính...
+                                Calculating...
                               </>
                             ) : (
-                              `${months} tháng`
+                              `${months} months`
                             )}
                           </button>
                         );
@@ -2858,7 +3016,7 @@ const Orders = ({ user }) => {
                     {installmentPreviewLoading && !installmentPreview && (
                       <div style={{ color: 'var(--color-text-muted)', fontSize: '13px', marginBottom: '12px', display: 'flex', alignItems: 'center', gap: '6px' }}>
                         <i className="bx bx-loader-alt bx-spin"></i>
-                        Đang tải kế hoạch trả góp...
+                        Loading installment plan...
                       </div>
                     )}
 
@@ -2866,12 +3024,12 @@ const Orders = ({ user }) => {
                       <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
                         <div style={{ display: 'grid', gap: '12px', gridTemplateColumns: 'repeat(auto-fit, minmax(160px, 1fr))' }}>
                           {[
-                            { label: 'Tổng tiền gốc', value: formatCurrency(Number(installmentPreview.totalAmount || 0)) },
-                            { label: 'Thuế VAT', value: formatCurrency(Number(installmentPreview.vatAmount || 0)) },
-                            { label: 'Tiền lãi', value: formatCurrency(Number(installmentPreview.interestAmount || 0)) },
-                            { label: 'Tổng phải trả', value: formatCurrency(Number(installmentPreview.totalPayable || 0)) },
-                            { label: 'Số tháng', value: installmentPreview.months },
-                            { label: 'Thanh toán mỗi kỳ', value: formatCurrency(Number(installmentPreview.monthlyPayment || 0)) }
+                            { label: 'Principal total', value: formatCurrency(Number(installmentPreview.totalAmount || 0)) },
+                            { label: 'VAT', value: formatCurrency(Number(installmentPreview.vatAmount || 0)) },
+                            { label: 'Interest', value: formatCurrency(Number(installmentPreview.interestAmount || 0)) },
+                            { label: 'Total payable', value: formatCurrency(Number(installmentPreview.totalPayable || 0)) },
+                            { label: 'Term (months)', value: installmentPreview.months },
+                            { label: 'Payment per period', value: formatCurrency(Number(installmentPreview.monthlyPayment || 0)) }
                           ].map((item) => (
                             <div
                               key={item.label}
@@ -2901,16 +3059,16 @@ const Orders = ({ user }) => {
                             }}
                           >
                             <div style={{ padding: '12px', fontWeight: 600, color: 'var(--color-text)' }}>
-                              Chi tiết các kỳ thanh toán
+                              Installment breakdown
                             </div>
                             <div style={{ maxHeight: '240px', overflowY: 'auto' }}>
                               <table style={{ width: '100%', borderCollapse: 'collapse' }}>
                                 <thead>
                                   <tr style={{ borderBottom: '1px solid var(--color-border)' }}>
                                     <th style={{ padding: '10px', fontSize: '13px', color: 'var(--color-text-muted)', textAlign: 'left' }}>#</th>
-                                    <th style={{ padding: '10px', fontSize: '13px', color: 'var(--color-text-muted)', textAlign: 'left' }}>Ngày đến hạn</th>
-                                    <th style={{ padding: '10px', fontSize: '13px', color: 'var(--color-text-muted)', textAlign: 'right' }}>Số tiền</th>
-                                    <th style={{ padding: '10px', fontSize: '13px', color: 'var(--color-text-muted)', textAlign: 'center' }}>Trạng thái</th>
+                                    <th style={{ padding: '10px', fontSize: '13px', color: 'var(--color-text-muted)', textAlign: 'left' }}>Due date</th>
+                                    <th style={{ padding: '10px', fontSize: '13px', color: 'var(--color-text-muted)', textAlign: 'right' }}>Amount</th>
+                                    <th style={{ padding: '10px', fontSize: '13px', color: 'var(--color-text-muted)', textAlign: 'center' }}>Status</th>
                                   </tr>
                                 </thead>
                                 <tbody>
@@ -2974,7 +3132,7 @@ const Orders = ({ user }) => {
                               fontSize: '13px'
                             }}
                           >
-                            Không có dữ liệu lịch trả góp cho gói này.
+                            No installment data available for this plan.
                           </div>
                         )}
                       </div>
@@ -3044,11 +3202,11 @@ const Orders = ({ user }) => {
             {orderDetailLoading ? (
               <div style={{ padding: '40px 0', textAlign: 'center', color: 'var(--color-text-muted)' }}>
                 <i className="bx bx-loader-alt bx-spin" style={{ fontSize: '32px', marginBottom: '12px' }}></i>
-                <div>Đang tải chi tiết đơn hàng...</div>
+                <div>Loading order details...</div>
               </div>
             ) : orderDetailError && !activeOrderDetail ? (
               <div style={{ padding: '24px', borderRadius: 'var(--radius)', border: '1px solid var(--color-border)', background: 'var(--color-bg)', color: 'var(--color-error)' }}>
-                {orderDetailError || 'Không thể tải chi tiết đơn hàng.'}
+                {orderDetailError || 'Unable to load order details.'}
               </div>
             ) : (
               <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
@@ -3064,25 +3222,25 @@ const Orders = ({ user }) => {
                   gap: '12px'
                 }}>
                   <div style={{ padding: '14px', borderRadius: 'var(--radius)', border: '1px solid var(--color-border)', background: 'var(--color-bg)' }}>
-                    <div style={{ fontSize: '12px', color: 'var(--color-text-muted)', marginBottom: '4px' }}>Trạng thái</div>
+                    <div style={{ fontSize: '12px', color: 'var(--color-text-muted)', marginBottom: '4px' }}>Status</div>
                     <div style={{ fontWeight: 700, color: getStatusColor(activeOrderDetail?.status, activeOrderDetail?.approvalStatus) }}>
                       {getStatusLabel(activeOrderDetail?.status, activeOrderDetail?.approvalStatus)}
                     </div>
                   </div>
                   <div style={{ padding: '14px', borderRadius: 'var(--radius)', border: '1px solid var(--color-border)', background: 'var(--color-bg)' }}>
-                    <div style={{ fontSize: '12px', color: 'var(--color-text-muted)', marginBottom: '4px' }}>Ngày tạo</div>
+                    <div style={{ fontSize: '12px', color: 'var(--color-text-muted)', marginBottom: '4px' }}>Created At</div>
                     <div style={{ fontWeight: 600, color: 'var(--color-text)' }}>
                       {activeOrderDetail?.orderDate ? new Date(activeOrderDetail.orderDate).toLocaleString() : 'N/A'}
                     </div>
                   </div>
                   <div style={{ padding: '14px', borderRadius: 'var(--radius)', border: '1px solid var(--color-border)', background: 'var(--color-bg)' }}>
-                    <div style={{ fontSize: '12px', color: 'var(--color-text-muted)', marginBottom: '4px' }}>Thanh toán</div>
+                    <div style={{ fontSize: '12px', color: 'var(--color-text-muted)', marginBottom: '4px' }}>Payment Method</div>
                     <div style={{ fontWeight: 600, color: 'var(--color-text)' }}>
                       {activeOrderDetail?.displayPaymentMethod || activeOrderDetail?.paymentMethod || 'N/A'}
                     </div>
                   </div>
                   <div style={{ padding: '14px', borderRadius: 'var(--radius)', border: '1px solid var(--color-border)', background: 'var(--color-bg)' }}>
-                    <div style={{ fontSize: '12px', color: 'var(--color-text-muted)', marginBottom: '4px' }}>Tổng tiền</div>
+                    <div style={{ fontSize: '12px', color: 'var(--color-text-muted)', marginBottom: '4px' }}>Total Amount</div>
                     <div style={{ fontWeight: 700, color: 'var(--color-primary)' }}>
                       {typeof activeOrderDetail?.totalAmount === 'number'
                         ? `$${Number(activeOrderDetail.totalAmount).toLocaleString()}`
@@ -3091,19 +3249,19 @@ const Orders = ({ user }) => {
                   </div>
                 </div>
 
-                {/* Chỉ hiển thị khách hàng cho DEALER_STAFF */}
+                {/* Customer info only for Dealer Staff */}
                 {userRole === 'DEALER_STAFF' && (
                   <div style={{ padding: '16px', borderRadius: 'var(--radius)', border: '1px solid var(--color-border)', background: 'var(--color-bg)' }}>
                     <div style={{ fontWeight: 600, color: 'var(--color-text)', marginBottom: '8px' }}>
-                      Khách hàng
+                      Customer
                     </div>
                     <div style={{ fontSize: '13px', color: 'var(--color-text-muted)', lineHeight: 1.6 }}>
-                      <div><span style={{ color: 'var(--color-text)' }}>Tên:</span> {activeOrderDetail?.displayCustomerName || 'N/A'}</div>
+                      <div><span style={{ color: 'var(--color-text)' }}>Name:</span> {activeOrderDetail?.displayCustomerName || 'N/A'}</div>
                       {activeOrderDetail?.resolvedCustomer?.email && (
                         <div><span style={{ color: 'var(--color-text)' }}>Email:</span> {activeOrderDetail.resolvedCustomer.email}</div>
                       )}
                       {activeOrderDetail?.resolvedCustomer?.phone && (
-                        <div><span style={{ color: 'var(--color-text)' }}>Điện thoại:</span> {activeOrderDetail.resolvedCustomer.phone}</div>
+                        <div><span style={{ color: 'var(--color-text)' }}>Phone:</span> {activeOrderDetail.resolvedCustomer.phone}</div>
                       )}
                     </div>
                   </div>
@@ -3111,10 +3269,10 @@ const Orders = ({ user }) => {
 
                 <div style={{ padding: '16px', borderRadius: 'var(--radius)', border: '1px solid var(--color-border)', background: 'var(--color-bg)' }}>
                   <div style={{ fontWeight: 600, color: 'var(--color-text)', marginBottom: '8px' }}>
-                    Xe / Sản phẩm
+                    Vehicle / Product
                   </div>
                   <div style={{ fontSize: '13px', color: 'var(--color-text-muted)', lineHeight: 1.6 }}>
-                    <div><span style={{ color: 'var(--color-text)' }}>Tên:</span> {activeOrderDetail?.displayVehicleName || 'N/A'}</div>
+                    <div><span style={{ color: 'var(--color-text)' }}>Name:</span> {activeOrderDetail?.displayVehicleName || 'N/A'}</div>
                     {activeOrderDetail?.resolvedVehicle?.vin && (
                       <div><span style={{ color: 'var(--color-text)' }}>VIN:</span> {activeOrderDetail.resolvedVehicle.vin}</div>
                     )}
@@ -3127,7 +3285,7 @@ const Orders = ({ user }) => {
                 {(activeOrderDetail?.notes || activeOrderDetail?.internalNotes) && (
                   <div style={{ padding: '16px', borderRadius: 'var(--radius)', border: '1px solid var(--color-border)', background: 'var(--color-bg)' }}>
                     <div style={{ fontWeight: 600, color: 'var(--color-text)', marginBottom: '8px' }}>
-                      Ghi chú
+                      Notes
                     </div>
                     <div style={{ fontSize: '13px', color: 'var(--color-text-muted)', lineHeight: 1.6 }}>
                       {activeOrderDetail?.notes || activeOrderDetail?.internalNotes}
@@ -3137,7 +3295,7 @@ const Orders = ({ user }) => {
 
                 {activeOrderDetail?.quoteId && (
                   <div style={{ fontSize: '13px', color: 'var(--color-text-muted)' }}>
-                    Nguồn từ Quote: #{activeOrderDetail.quoteId}
+                    Source Quote: #{activeOrderDetail.quoteId}
                   </div>
                 )}
               </div>

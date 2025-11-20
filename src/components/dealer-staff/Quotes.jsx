@@ -67,7 +67,7 @@
                     
                     if (userRole === 'DEALER_STAFF' && userId) {
                         data = await quotesAPI.getByUser(userId);
-                        setQuotes(normalizeQuotes(data));
+                        setQuotes(sortQuotesByNewest(normalizeQuotes(data)));
                     } else if (userRole === 'DEALER_MANAGER' && userId) { 
                         
                         // SỬA LỖI: Dùng hàm API có sẵn getPendingDealerManagerApproval
@@ -80,11 +80,11 @@
                         const normalizedStaffQuotes = normalizeQuotes(staffQuotes);
 
                         // Combine quotes Manager và quotes Staff cần duyệt
-                        const combinedManagerData = [...normalizedMyQuotes, ...normalizedStaffQuotes];
+                        const combinedManagerData = sortQuotesByNewest([...normalizedMyQuotes, ...normalizedStaffQuotes]);
                         setManagerAllQuotes(combinedManagerData);
                         
                         // Khởi tạo quotes chính bằng My Quotes (tab mặc định)
-                        setQuotes(normalizedMyQuotes); 
+                        setQuotes(sortQuotesByNewest(normalizedMyQuotes)); 
 
                     } else if (userRole === 'EVM_MANAGER' || userRole === 'ADMIN') {
                         const [pendingQuotes, approvedQuotes] = await Promise.all([
@@ -98,10 +98,10 @@
                         data = allWorkflowQuotes.filter((quote) => {
                             return quote?.creatorRole === 'DEALER_MANAGER';
                         });
-                        setQuotes(normalizeQuotes(data));
+                        setQuotes(sortQuotesByNewest(normalizeQuotes(data)));
                     } else {
                         data = await quotesAPI.getAll();
-                        setQuotes(normalizeQuotes(data));
+                        setQuotes(sortQuotesByNewest(normalizeQuotes(data)));
                     }
                     
                 } catch (error) {
@@ -120,14 +120,14 @@
         useEffect(() => {
             if (userRole === 'DEALER_MANAGER') {
                 // Lọc My Quotes: Quotes do Manager tạo (userId khớp)
-                const myQuotes = managerAllQuotes.filter(q => 
+                const myQuotes = sortQuotesByNewest(managerAllQuotes.filter(q => 
                     (q.creatorRole === 'DEALER_MANAGER' || !q.creatorRole) && String(q.userId) === String(userId)
-                );
+                ));
                 
                 // Lọc Staff Quotes for Approval: Quotes của Staff đang chờ duyệt
-                const staffQuotes = managerAllQuotes.filter(q => 
+                const staffQuotes = sortQuotesByNewest(managerAllQuotes.filter(q => 
                     q.creatorRole === 'DEALER_STAFF' && q.approvalStatus === 'PENDING_DEALER_MANAGER_APPROVAL'
-                );
+                ));
 
                 if (activeManagerTab === 'myQuotes') {
                     setQuotes(myQuotes);
@@ -313,6 +313,34 @@
             return status || 'Unknown';
         };
 
+        const extractQuoteTimestamp = (quote) => {
+            if (!quote) return 0;
+            const candidates = [
+                quote.createdDate,
+                quote.createdAt,
+                quote.created_on,
+                quote.creationDate,
+                quote.createdOn,
+                quote.updatedDate,
+                quote.updatedAt,
+                quote.quoteDate,
+            ];
+            for (const candidate of candidates) {
+                if (!candidate) continue;
+                const time = new Date(candidate).getTime();
+                if (!Number.isNaN(time)) {
+                    return time;
+                }
+            }
+            const numericFallback = Number(quote.quoteId ?? quote.id ?? 0);
+            return Number.isNaN(numericFallback) ? 0 : numericFallback;
+        };
+
+        const sortQuotesByNewest = (list = []) => {
+            if (!Array.isArray(list)) return [];
+            return [...list].sort((a, b) => extractQuoteTimestamp(b) - extractQuoteTimestamp(a));
+        };
+
         const normalizeQuotes = (data) =>
             Array.isArray(data)
                 ? data.map((quote) => ({
@@ -439,9 +467,9 @@
             const normalizedMyQuotes = normalizeQuotes(myQuotes);
             const normalizedStaffQuotes = normalizeQuotes(staffQuotes);
 
-            const combinedManagerData = [...normalizedMyQuotes, ...normalizedStaffQuotes];
+            const combinedManagerData = sortQuotesByNewest([...normalizedMyQuotes, ...normalizedStaffQuotes]);
             setManagerAllQuotes(combinedManagerData);
-            setQuotes(tabToRender === 'myQuotes' ? normalizedMyQuotes : normalizedStaffQuotes);
+            setQuotes(sortQuotesByNewest(tabToRender === 'myQuotes' ? normalizedMyQuotes : normalizedStaffQuotes));
         };
 
         const handleSubmitForApproval = async (quoteId) => {
@@ -464,7 +492,7 @@
                     await refreshManagerQuotes('myQuotes');
                 } else if (userId) {
                     const data = await quotesAPI.getByUser(userId);
-                    setQuotes(normalizeQuotes(data));
+                    setQuotes(sortQuotesByNewest(normalizeQuotes(data)));
                 }
                 
             } catch (error) {
@@ -656,6 +684,49 @@
 
         // Xác định xem có nên ẩn cột Customer hay không
         const hideCustomerColumn = userRole === 'DEALER_MANAGER' && activeManagerTab === 'myQuotes';
+
+        const detailModalCardStyle = {
+            padding: '20px',
+            borderRadius: 'var(--radius)',
+            border: '1px solid rgba(148,163,184,0.25)',
+            background: 'var(--color-surface)',
+            boxShadow: '0 14px 34px rgba(15,23,42,0.35)',
+            display: 'flex',
+            flexDirection: 'column',
+            gap: '12px'
+        };
+
+        const detailSectionTitleStyle = {
+            fontSize: '15px',
+            fontWeight: 600,
+            color: 'var(--color-text)',
+            marginBottom: '8px'
+        };
+
+        const detailRowStyle = {
+            display: 'flex',
+            justifyContent: 'space-between',
+            alignItems: 'center',
+            fontSize: '13px',
+            color: 'var(--color-text)',
+            gap: '12px'
+        };
+
+        const detailLabelStyle = {
+            fontWeight: 600,
+            color: 'var(--color-text-muted)',
+            minWidth: '120px'
+        };
+
+        const renderDetailRow = (label, value) => {
+            if (value === undefined || value === null || value === '') return null;
+            return (
+                <div style={detailRowStyle}>
+                    <span style={detailLabelStyle}>{label}</span>
+                    <span style={{ textAlign: 'right', flex: 1 }}>{value}</span>
+                </div>
+            );
+        };
 
 
         if (loading) {
@@ -984,10 +1055,10 @@
                                         setActiveManagerTab('myQuotes'); 
                                     } else if (userId) {
                                         const data = await quotesAPI.getByUser(userId);
-                                        setQuotes(normalizeQuotes(data));
+                                        setQuotes(sortQuotesByNewest(normalizeQuotes(data)));
                                     } else {
                                         const data = await quotesAPI.getAll();
-                                        setQuotes(normalizeQuotes(data));
+                                        setQuotes(sortQuotesByNewest(normalizeQuotes(data)));
                                     }
                                     
                                     setShowCreateQuoteModal(false);
@@ -1432,61 +1503,39 @@
 
                                 return (
                                     <div style={{ display: 'grid', gap: '16px' }}>
-                                        <div style={{ padding: '16px', borderRadius: 'var(--radius)', border: '1px solid var(--color-border)', background: 'var(--color-bg)' }}>
-                                            <div style={{ fontWeight: 600, color: 'var(--color-text)', marginBottom: '8px' }}>Quote Information</div>
-                                            <div style={{ fontSize: '13px', color: 'var(--color-text-muted)', lineHeight: 1.6 }}>
-                                                <div><span style={{ color: 'var(--color-text)' }}>ID:</span> #{selectedQuoteDetail.quoteId || selectedQuoteDetail.id}</div>
-                                                <div><span style={{ color: 'var(--color-text)' }}>Status:</span> {combinedStatus}</div>
-                                                <div><span style={{ color: 'var(--color-text)' }}>Created:</span> {selectedQuoteDetail.createdDate ? new Date(selectedQuoteDetail.createdDate).toLocaleDateString() : 'N/A'}</div>
-                                                <div><span style={{ color: 'var(--color-text)' }}>Total:</span> ${totalAmount.toLocaleString()}</div>
-                                            </div>
+                                        <div style={detailModalCardStyle}>
+                                            <div style={detailSectionTitleStyle}>Quote Overview</div>
+                                            {renderDetailRow('ID', `#${selectedQuoteDetail.quoteId || selectedQuoteDetail.id}`)}
+                                            {renderDetailRow('Status', combinedStatus)}
+                                            {renderDetailRow('Created', selectedQuoteDetail.createdDate ? new Date(selectedQuoteDetail.createdDate).toLocaleDateString() : 'N/A')}
+                                            {renderDetailRow('Total Value', `$${totalAmount.toLocaleString()}`)}
                                         </div>
 
-                                        {/* Chỉ hiển thị khách hàng cho DEALER_STAFF */}
+                                        {/* Customer details */}
                                         {userRole === 'DEALER_STAFF' && (
-                                            <div style={{ padding: '16px', borderRadius: 'var(--radius)', border: '1px solid var(--color-border)', background: 'var(--color-bg)' }}>
-                                                <div style={{ fontWeight: 600, color: 'var(--color-text)', marginBottom: '8px' }}>Khách hàng</div>
-                                                <div style={{ fontSize: '13px', color: 'var(--color-text-muted)', lineHeight: 1.6 }}>
-                                                    <div><span style={{ color: 'var(--color-text)' }}>Tên:</span> {customerName}</div>
-                                                    {customer?.email && (
-                                                        <div><span style={{ color: 'var(--color-text)' }}>Email:</span> {customer.email}</div>
-                                                    )}
-                                                    {customer?.phone && (
-                                                        <div><span style={{ color: 'var(--color-text)' }}>Phone:</span> {customer.phone}</div>
-                                                    )}
-                                                </div>
+                                            <div style={detailModalCardStyle}>
+                                                <div style={detailSectionTitleStyle}>Customer</div>
+                                                {renderDetailRow('Name', customerName)}
+                                                {renderDetailRow('Email', customer?.email)}
+                                                {renderDetailRow('Phone', customer?.phone)}
                                             </div>
                                         )}
 
-                                        <div style={{ padding: '16px', borderRadius: 'var(--radius)', border: '1px solid var(--color-border)', background: 'var(--color-bg)' }}>
-                                            <div style={{ fontWeight: 600, color: 'var(--color-text)', marginBottom: '8px' }}>Xe / Sản phẩm</div>
-                                            <div style={{ fontSize: '13px', color: 'var(--color-text-muted)', lineHeight: 1.6 }}>
-                                                <div><span style={{ color: 'var(--color-text)' }}>Tên:</span> {vehicleName}</div>
-                                                {vehicle?.brand && (
-                                                    <div><span style={{ color: 'var(--color-text)' }}>Brand:</span> {vehicle.brand}</div>
-                                                )}
-                                                {vehicle?.modelName && (
-                                                    <div><span style={{ color: 'var(--color-text)' }}>Model:</span> {vehicle.modelName}</div>
-                                                )}
-                                                {vehicle?.yearOfManufacture && (
-                                                    <div><span style={{ color: 'var(--color-text)' }}>Year:</span> {vehicle.yearOfManufacture}</div>
-                                                )}
-                                                {vehicle?.listedPrice && (
-                                                    <div><span style={{ color: 'var(--color-text)' }}>Price:</span> ${vehicle.listedPrice.toLocaleString()}</div>
-                                                )}
-                                                {detail?.quantity && (
-                                                    <div><span style={{ color: 'var(--color-text)' }}>Quantity:</span> {detail.quantity}</div>
-                                                )}
-                                                {detail?.unitPrice && (
-                                                    <div><span style={{ color: 'var(--color-text)' }}>Unit Price:</span> ${detail.unitPrice.toLocaleString()}</div>
-                                                )}
-                                            </div>
+                                        <div style={detailModalCardStyle}>
+                                            <div style={detailSectionTitleStyle}>Vehicle & Pricing</div>
+                                            {renderDetailRow('Name', vehicleName)}
+                                            {renderDetailRow('Brand', vehicle?.brand)}
+                                            {renderDetailRow('Model', vehicle?.modelName || vehicle?.name)}
+                                            {renderDetailRow('Year', vehicle?.yearOfManufacture)}
+                                            {renderDetailRow('Listed Price', vehicle?.listedPrice ? `$${vehicle.listedPrice.toLocaleString()}` : null)}
+                                            {renderDetailRow('Quantity', detail?.quantity)}
+                                            {renderDetailRow('Unit Price', detail?.unitPrice ? `$${detail.unitPrice.toLocaleString()}` : null)}
                                         </div>
 
                                         {selectedQuoteDetail.notes && (
-                                            <div style={{ padding: '16px', borderRadius: 'var(--radius)', border: '1px solid var(--color-border)', background: 'var(--color-bg)' }}>
-                                                <div style={{ fontWeight: 600, color: 'var(--color-text)', marginBottom: '8px' }}>Notes</div>
-                                                <div style={{ fontSize: '13px', color: 'var(--color-text-muted)', lineHeight: 1.6 }}>
+                                            <div style={detailModalCardStyle}>
+                                                <div style={detailSectionTitleStyle}>Notes</div>
+                                                <div style={{ fontSize: '13px', color: 'var(--color-text)' }}>
                                                     {selectedQuoteDetail.notes}
                                                 </div>
                                             </div>

@@ -111,15 +111,24 @@ const Profile = ({ user = {}, onUpdateProfile }) => {
 
     setStatusMessage({
       type: 'success',
-      message: 'Thông tin tài khoản đã được cập nhật.'
+      message: 'Account information has been updated.'
     });
     setFormData((prev) => ({ ...prev, password: '' }));
   };
 
   return (
     <div className="main">
-      <div style={{ display: 'grid', gap: '24px', maxWidth: '960px', margin: '0 auto' }}>
-        <div className="card">
+      <div
+        style={{
+          display: 'grid',
+          gap: '24px',
+          maxWidth: '1100px',
+          width: '100%',
+          margin: '0 auto',
+          padding: '0 24px'
+        }}
+      >
+        <div className="card" style={{ padding: '32px' }}>
           <div style={{ display: 'flex', flexDirection: 'column', gap: '24px' }}>
             <div style={{ display: 'flex', gap: '24px', flexWrap: 'wrap' }}>
               <div

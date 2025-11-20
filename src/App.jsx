@@ -5,7 +5,7 @@ import HomePage from './components/HomePage'
 import AuthPage from './components/AuthPage'
 import ElectricVehicles from './components/ElectricVehicles'
 import Contact from './components/Contact'
-import Recruitment from './components/Recruitment'
+import CustomerPortal from './components/CustomerPortal'
 import Dealer from './components/Dealer'
 import DetailDealer from './components/DetailDealer'
 import Details from './components/Details'
@@ -83,13 +83,13 @@ function App() {
         <Route path="/vehicles" element={<ElectricVehicles loggedInUser={loggedInUser} onLogout={handleLogout} />} />
         <Route path="/details/:id" element={<Details loggedInUser={loggedInUser} onLogout={handleLogout} />} />
         <Route path="/contact" element={<Contact loggedInUser={loggedInUser} onLogout={handleLogout} />} />
-        <Route path="/recruitment" element={<Recruitment loggedInUser={loggedInUser} onLogout={handleLogout} />} />
+        <Route path="/customer-portal" element={<CustomerPortal loggedInUser={loggedInUser} onLogout={handleLogout} />} />
         <Route path="/dealer" element={<Dealer loggedInUser={loggedInUser} onLogout={handleLogout} />} />
         <Route path="/detail-dealer/:id" element={<DetailDealer loggedInUser={loggedInUser} onLogout={handleLogout} />} />
         <Route path="/dashboard" element={
           loggedInUser
             ? <DashboardApp user={loggedInUser} onLogout={handleLogout} />
-            : <Navigate to="/auth" replace />
+            : <Navigate to="/" replace />
         } />
         <Route path="/payment-result" element={<PaymentResult />} />
         <Route path="*" element={<Navigate to="/" replace />} />

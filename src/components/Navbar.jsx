@@ -21,7 +21,7 @@ const Navbar = ({ loggedInUser, onLogout }) => {
     const path = location.pathname;
     if (path === '/') return 'home';
     if (path === '/vehicles') return 'vehicles';
-    if (path === '/recruitment') return 'recruitment';
+    if (path === '/customer-portal') return 'customer-portal';
     if (path === '/dealer') return 'dealer';
     if (path === '/contact') return 'contact';
     return '';
@@ -45,7 +45,7 @@ const Navbar = ({ loggedInUser, onLogout }) => {
         <ul className="nav-menu">
           <li className={`nav-item ${currentPage === 'home' ? 'active' : ''}`} onClick={() => { window.scrollTo(0, 0); navigate('/'); }} style={{ cursor: 'pointer' }}>Home</li>
           <li className={`nav-item ${currentPage === 'vehicles' ? 'active' : ''}`} onClick={() => { window.scrollTo(0, 0); navigate('/vehicles'); }} style={{ cursor: 'pointer' }}>Electric Vehicles</li>
-          <li className={`nav-item ${currentPage === 'recruitment' ? 'active' : ''}`} onClick={() => { window.scrollTo(0, 0); navigate('/recruitment'); }} style={{ cursor: 'pointer' }}>Recruitment</li>
+          <li className={`nav-item ${currentPage === 'customer-portal' ? 'active' : ''}`} onClick={() => { window.scrollTo(0, 0); navigate('/customer-portal'); }} style={{ cursor: 'pointer' }}>Customer Portal</li>
           <li className={`nav-item ${currentPage === 'dealer' ? 'active' : ''}`} onClick={() => { window.scrollTo(0, 0); navigate('/dealer'); }} style={{ cursor: 'pointer' }}>Dealer</li>
           <li className={`nav-item ${currentPage === 'contact' ? 'active' : ''}`} onClick={() => { window.scrollTo(0, 0); navigate('/contact'); }} style={{ cursor: 'pointer' }}>Contact</li>
         </ul>

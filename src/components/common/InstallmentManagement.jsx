@@ -46,7 +46,7 @@ const InstallmentManagement = ({ user }) => {
   const handlePreview = async (event) => {
     event.preventDefault();
     if (!previewForm.totalAmount || !previewForm.months || !previewForm.firstDueDate) {
-      showErrorToast('Vui lòng nhập đầy đủ Tổng số tiền, Số tháng và Ngày đến hạn đầu tiên');
+      showErrorToast('Please enter Total Amount, Months, and First Due Date.');
       return;
     }
 
@@ -55,7 +55,7 @@ const InstallmentManagement = ({ user }) => {
       const payload = buildPayload();
       const result = await installmentsAPI.preview(payload);
       setPreviewResult(result);
-      showSuccessToast('Xem trước kế hoạch trả góp thành công');
+      showSuccessToast('Installment preview created successfully.');
     } catch (error) {
       console.error('Error previewing installment plan:', error);
       showErrorToast(handleAPIError(error));
@@ -67,11 +67,11 @@ const InstallmentManagement = ({ user }) => {
 
   const handleGenerate = async () => {
     if (!generateOrderId) {
-      showErrorToast('Vui lòng nhập Order ID cần tạo lịch trả góp');
+      showErrorToast('Please enter the Order ID that needs an installment plan.');
       return;
     }
     if (!previewForm.totalAmount || !previewForm.months || !previewForm.firstDueDate) {
-      showErrorToast('Vui lòng nhập đầy đủ thông tin kế hoạch trước khi tạo');
+      showErrorToast('Please complete the plan information before generating.');
       return;
     }
 
@@ -79,7 +79,7 @@ const InstallmentManagement = ({ user }) => {
       setGenerateLoading(true);
       const payload = buildPayload();
       await installmentsAPI.generate(Number(generateOrderId), payload);
-      showSuccessToast(`Tạo lịch trả góp cho Order #${generateOrderId} thành công`);
+      showSuccessToast(`Installment schedule for Order #${generateOrderId} created successfully.`);
       if (scheduleOrderId === generateOrderId) {
         await handleFetchSchedule();
       }
@@ -96,7 +96,7 @@ const InstallmentManagement = ({ user }) => {
       event.preventDefault();
     }
     if (!scheduleOrderId) {
-      showErrorToast('Vui lòng nhập Order ID để lấy lịch trả góp');
+      showErrorToast('Please enter an Order ID to fetch the schedule.');
       return;
     }
 
@@ -104,7 +104,7 @@ const InstallmentManagement = ({ user }) => {
       setScheduleLoading(true);
       const data = await installmentsAPI.getScheduleByOrder(Number(scheduleOrderId));
       setSchedule(Array.isArray(data) ? data : []);
-      showSuccessToast(`Đã tải lịch trả góp cho Order #${scheduleOrderId}`);
+      showSuccessToast(`Loaded installment schedule for Order #${scheduleOrderId}.`);
     } catch (error) {
       console.error('Error fetching installment schedule:', error);
       showErrorToast(handleAPIError(error));
@@ -116,7 +116,7 @@ const InstallmentManagement = ({ user }) => {
 
   const handlePaySchedule = async (item) => {
     if (!item?.id && !item?.scheduleId) {
-      showErrorToast('Không tìm thấy thông tin kỳ trả góp');
+      showErrorToast('Unable to detect installment information.');
       return;
     }
 
@@ -124,7 +124,7 @@ const InstallmentManagement = ({ user }) => {
     try {
       setPayingScheduleId(scheduleId);
       await installmentsAPI.paySchedule(scheduleId);
-      showSuccessToast(`Đã đánh dấu kỳ trả góp #${item.installmentNumber} là PAID`);
+      showSuccessToast(`Installment #${item.installmentNumber} marked as PAID.`);
       await handleFetchSchedule();
     } catch (error) {
       console.error('Error paying installment schedule:', error);
@@ -139,9 +139,9 @@ const InstallmentManagement = ({ user }) => {
       <div className="main">
         <div className="card" style={{ textAlign: 'center', padding: '48px' }}>
           <i className="bx bx-error" style={{ fontSize: '48px', color: 'var(--color-warning)' }}></i>
-          <h3 style={{ marginTop: '16px' }}>Bạn không có quyền truy cập chức năng này</h3>
+          <h3 style={{ marginTop: '16px' }}>You don’t have permission to access this feature.</h3>
           <p style={{ color: 'var(--color-text-muted)', marginTop: '8px' }}>
-            Chỉ Dealer Manager hoặc Administrator mới thao tác được với kế hoạch trả góp.
+            Only Dealer Managers or Administrators can manage installment plans.
           </p>
         </div>
       </div>
@@ -158,10 +158,10 @@ const InstallmentManagement = ({ user }) => {
         <h2 style={{ marginBottom: '24px' }}>Installment Management</h2>
 
         <form onSubmit={handlePreview} style={sectionStyle}>
-          <h3 style={sectionTitleStyle}>1. Xem trước kế hoạch trả góp</h3>
+          <h3 style={sectionTitleStyle}>1. Preview Installment Plan</h3>
           <div style={gridStyle}>
             <div>
-              <label style={labelStyle}>Payment ID (tuỳ chọn)</label>
+              <label style={labelStyle}>Payment ID (optional)</label>
               <input
                 type="number"
                 value={previewForm.paymentId}
@@ -171,7 +171,7 @@ const InstallmentManagement = ({ user }) => {
               />
             </div>
             <div>
-              <label style={labelStyle}>Tổng số tiền *</label>
+              <label style={labelStyle}>Total amount *</label>
               <input
                 type="number"
                 min="0"
@@ -182,7 +182,7 @@ const InstallmentManagement = ({ user }) => {
               />
             </div>
             <div>
-              <label style={labelStyle}>Số tháng *</label>
+              <label style={labelStyle}>Months *</label>
               <input
                 type="number"
                 min="1"
@@ -193,7 +193,7 @@ const InstallmentManagement = ({ user }) => {
               />
             </div>
             <div>
-              <label style={labelStyle}>Lãi suất năm (%)</label>
+              <label style={labelStyle}>Annual interest (%)</label>
               <input
                 type="number"
                 min="0"
@@ -203,7 +203,7 @@ const InstallmentManagement = ({ user }) => {
               />
             </div>
             <div>
-              <label style={labelStyle}>Ngày đến hạn đầu tiên *</label>
+              <label style={labelStyle}>First due date *</label>
               <input
                 type="date"
                 required
@@ -218,12 +218,12 @@ const InstallmentManagement = ({ user }) => {
               {previewLoading ? (
                 <>
                   <i className="bx bx-loader-alt bx-spin" style={{ marginRight: '6px' }}></i>
-                  Đang tính...
+                  Calculating...
                 </>
               ) : (
                 <>
                   <i className="bx bx-show" style={{ marginRight: '6px' }}></i>
-                  Xem trước kế hoạch
+                  Preview plan
                 </>
               )}
             </button>
@@ -232,31 +232,31 @@ const InstallmentManagement = ({ user }) => {
 
         {previewResult && (
           <div style={sectionStyle}>
-            <h3 style={sectionTitleStyle}>Kết quả xem trước</h3>
+            <h3 style={sectionTitleStyle}>Preview result</h3>
             <div style={{ display: 'grid', gap: '12px', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', marginBottom: '16px' }}>
-              <InfoCard label="Tổng tiền gốc" value={previewResult.totalAmount} prefix="$" />
-              <InfoCard label="Thuế VAT" value={previewResult.vatAmount} prefix="$" />
-              <InfoCard label="Tiền lãi" value={previewResult.interestAmount} prefix="$" />
-              <InfoCard label="Tổng phải trả" value={previewResult.totalPayable} prefix="$" highlight />
-              <InfoCard label="Số tháng" value={previewResult.months} />
-              <InfoCard label="Thanh toán mỗi tháng" value={previewResult.monthlyPayment} prefix="$" />
+              <InfoCard label="Principal total" value={previewResult.totalAmount} prefix="$" />
+              <InfoCard label="VAT" value={previewResult.vatAmount} prefix="$" />
+              <InfoCard label="Interest" value={previewResult.interestAmount} prefix="$" />
+              <InfoCard label="Total payable" value={previewResult.totalPayable} prefix="$" highlight />
+              <InfoCard label="Months" value={previewResult.months} />
+              <InfoCard label="Monthly payment" value={previewResult.monthlyPayment} prefix="$" />
             </div>
 
             {hasPreviewSchedule ? (
               <ScheduleTable
                 data={previewSchedule}
                 actionColumn={false}
-                caption="Bảng chi tiết các kỳ thanh toán (xem trước)"
+                caption="Schedule details (preview)"
               />
             ) : (
-              <div style={emptyStateStyle}>Không có dữ liệu lịch trả góp trong kết quả xem trước.</div>
+              <div style={emptyStateStyle}>No installment schedule was generated for this preview.</div>
             )}
           </div>
         )}
       </div>
 
       <div className="card" style={{ marginTop: '24px' }}>
-        <h3 style={{ marginBottom: '16px' }}>2. Tạo lịch trả góp chính thức</h3>
+        <h3 style={{ marginBottom: '16px' }}>2. Generate official installment schedule</h3>
         <div style={{ display: 'flex', flexWrap: 'wrap', gap: '16px', marginBottom: '16px' }}>
           <div style={{ flex: '1 1 220px' }}>
             <label style={labelStyle}>Order ID *</label>
@@ -266,7 +266,7 @@ const InstallmentManagement = ({ user }) => {
               value={generateOrderId}
               onChange={(e) => setGenerateOrderId(e.target.value)}
               style={inputStyle}
-              placeholder="Nhập Order ID"
+              placeholder="Enter Order ID"
             />
           </div>
           <div style={{ alignSelf: 'flex-end' }}>
@@ -279,25 +279,25 @@ const InstallmentManagement = ({ user }) => {
               {generateLoading ? (
                 <>
                   <i className="bx bx-loader-alt bx-spin" style={{ marginRight: '6px' }}></i>
-                  Đang tạo...
+                  Generating...
                 </>
               ) : (
                 <>
                   <i className="bx bx-layer" style={{ marginRight: '6px' }}></i>
-                  Tạo lịch trả góp
+                  Generate schedule
                 </>
               )}
             </button>
           </div>
         </div>
         <p style={{ color: 'var(--color-text-muted)', fontSize: '13px', marginBottom: '0' }}>
-          Sử dụng cùng thông tin ở phần xem trước phía trên để tạo lịch trả góp chính thức trong hệ thống.
+          Use the same information as the preview section above to create the official plan.
         </p>
       </div>
 
       <div className="card" style={{ marginTop: '24px' }}>
         <form onSubmit={handleFetchSchedule}>
-          <h3 style={{ marginBottom: '16px' }}>3. Tra cứu lịch trả góp theo Order</h3>
+          <h3 style={{ marginBottom: '16px' }}>3. Lookup schedule by Order ID</h3>
           <div style={{ display: 'flex', gap: '12px', flexWrap: 'wrap' }}>
             <div style={{ flex: '1 1 220px', minWidth: '200px' }}>
               <label style={labelStyle}>Order ID *</label>
@@ -307,7 +307,7 @@ const InstallmentManagement = ({ user }) => {
                 value={scheduleOrderId}
                 onChange={(e) => setScheduleOrderId(e.target.value)}
                 style={inputStyle}
-                placeholder="Nhập Order ID"
+                placeholder="Enter Order ID"
               />
             </div>
             <div style={{ alignSelf: 'flex-end' }}>
@@ -315,12 +315,12 @@ const InstallmentManagement = ({ user }) => {
                 {scheduleLoading ? (
                   <>
                     <i className="bx bx-loader-alt bx-spin" style={{ marginRight: '6px' }}></i>
-                    Đang tải...
+                    Loading...
                   </>
                 ) : (
                   <>
                     <i className="bx bx-search" style={{ marginRight: '6px' }}></i>
-                    Xem lịch trả góp
+                    View installment schedule
                   </>
                 )}
               </button>
@@ -332,19 +332,19 @@ const InstallmentManagement = ({ user }) => {
           {scheduleLoading ? (
             <div style={emptyStateStyle}>
               <i className="bx bx-loader-alt bx-spin" style={{ fontSize: '28px' }}></i>
-              <div style={{ marginTop: '8px' }}>Đang tải lịch trả góp...</div>
+              <div style={{ marginTop: '8px' }}>Loading installment schedule...</div>
             </div>
           ) : hasSchedule ? (
             <ScheduleTable
               data={schedule}
-              caption={`Lịch trả góp của Order #${scheduleOrderId}`}
+              caption={`Installment schedule for Order #${scheduleOrderId}`}
               actionColumn
               onPaySchedule={handlePaySchedule}
               payingScheduleId={payingScheduleId}
             />
           ) : (
             <div style={emptyStateStyle}>
-              Chưa có dữ liệu lịch trả góp. Nhập Order ID rồi chọn "Xem lịch trả góp" để tải dữ liệu.
+              No installment data found. Enter an order ID and choose “View installment schedule” to load it.
             </div>
           )}
         </div>
@@ -377,10 +377,10 @@ const ScheduleTable = ({ data, caption, actionColumn, onPaySchedule, payingSched
       <thead>
         <tr style={{ borderBottom: '2px solid var(--color-border)' }}>
           <th style={tableHeaderStyle}>#</th>
-          <th style={tableHeaderStyle}>Ngày đến hạn</th>
-          <th style={{ ...tableHeaderStyle, textAlign: 'right' }}>Số tiền</th>
-          <th style={{ ...tableHeaderStyle, textAlign: 'center' }}>Trạng thái</th>
-          {actionColumn && <th style={{ ...tableHeaderStyle, textAlign: 'center' }}>Thao tác</th>}
+          <th style={tableHeaderStyle}>Due date</th>
+          <th style={{ ...tableHeaderStyle, textAlign: 'right' }}>Amount</th>
+          <th style={{ ...tableHeaderStyle, textAlign: 'center' }}>Status</th>
+          {actionColumn && <th style={{ ...tableHeaderStyle, textAlign: 'center' }}>Actions</th>}
         </tr>
       </thead>
       <tbody>
@@ -418,7 +418,7 @@ const ScheduleTable = ({ data, caption, actionColumn, onPaySchedule, payingSched
               {actionColumn && (
                 <td style={{ ...tableCellStyle, textAlign: 'center' }}>
                   {status === 'PAID' ? (
-                    <span style={{ fontSize: '12px', color: 'var(--color-success)' }}>Đã thanh toán</span>
+                    <span style={{ fontSize: '12px', color: 'var(--color-success)' }}>Paid</span>
                   ) : (
                     <button
                       className="btn btn-outline"
@@ -428,11 +428,11 @@ const ScheduleTable = ({ data, caption, actionColumn, onPaySchedule, payingSched
                     >
                       {payingScheduleId === scheduleId ? (
                         <>
-                          <i className="bx bx-loader-alt bx-spin"></i> Đang cập nhật...
+                          <i className="bx bx-loader-alt bx-spin"></i> Updating...
                         </>
                       ) : (
                         <>
-                          <i className="bx bx-check"></i> Đánh dấu đã trả
+                          <i className="bx bx-check"></i> Mark as paid
                         </>
                       )}
                     </button>

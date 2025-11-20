@@ -1234,7 +1234,7 @@ const Orders = ({ user }) => {
   // Load missing vehicles from availableQuotes
   useEffect(() => {
     if (!Array.isArray(availableQuotes) || availableQuotes.length === 0) return;
-    if (!vehicleLookup) return; // Chỉ kiểm tra vehicleLookup 是否存在，不检查是否为空
+    if (!vehicleLookup) return; // Chỉ kiểm tra vehicleLookup 
 
     const missingVehicleIds = new Set();
 

@@ -128,8 +128,14 @@ const DashboardApp = ({ user: propUser, onLogout }) => {
   };
 
   const handleLogout = () => {
-    localStorage.removeItem('currentUser');
-    navigate('/');
+    navigate('/', { replace: true });
+    if (onLogout) {
+      onLogout();
+    } else {
+      localStorage.removeItem('currentUser');
+      window.dispatchEvent(new Event('userStateChanged'));
+      setUser(null);
+    }
   };
 
   const handleProfileClick = () => {

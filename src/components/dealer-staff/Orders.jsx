@@ -632,6 +632,62 @@ const Orders = ({ user }) => {
     [vehicleLookup, quoteLookup]
   );
 
+  const resolveVehicleTypeName = (value) => {
+    if (!value) return null;
+    if (typeof value === 'string') return value;
+    if (typeof value === 'object') {
+      const candidates = [
+        value.typeName,
+        value.name,
+        value.displayName,
+        value.description,
+        value.title,
+      ].filter(Boolean);
+      if (candidates.length > 0) {
+        return candidates[0];
+      }
+      if (value.id !== undefined && value.id !== null) {
+        return `Vehicle Type #${value.id}`;
+      }
+    }
+    return null;
+  };
+
+  const getVehicleTypeLabelFromOrder = (order) => {
+    if (!order) return null;
+    const candidateSources = [];
+
+    if (order.resolvedVehicle) {
+      candidateSources.push(order.resolvedVehicle.vehicleType);
+      candidateSources.push(order.resolvedVehicle.type);
+      candidateSources.push(order.resolvedVehicle.vehicleCategory);
+    }
+
+    if (Array.isArray(order.orderDetails) && order.orderDetails.length > 0) {
+      const detail = order.orderDetails[0];
+      candidateSources.push(detail.vehicleType);
+      candidateSources.push(detail.vehicle?.vehicleType);
+      candidateSources.push(detail.vehicle?.type);
+    }
+
+    const quoteData = order.quoteData || order.quote;
+    if (quoteData) {
+      candidateSources.push(quoteData.vehicleType);
+      if (Array.isArray(quoteData.quoteDetails) && quoteData.quoteDetails.length > 0) {
+        const quoteDetail = quoteData.quoteDetails[0];
+        candidateSources.push(quoteDetail.vehicleType);
+        candidateSources.push(quoteDetail.vehicle?.vehicleType);
+      }
+    }
+
+    for (const source of candidateSources) {
+      const label = resolveVehicleTypeName(source);
+      if (label) return label;
+    }
+
+    return null;
+  };
+
   const enhancedOrders = useMemo(() => {
     if (!Array.isArray(orders) || orders.length === 0) return [];
     return orders.map((order) => {
@@ -3267,18 +3323,25 @@ const Orders = ({ user }) => {
                   </div>
                 )}
 
-                <div style={{ padding: '16px', borderRadius: 'var(--radius)', border: '1px solid var(--color-border)', background: 'var(--color-bg)' }}>
-                  <div style={{ fontWeight: 600, color: 'var(--color-text)', marginBottom: '8px' }}>
+                <div style={{ borderRadius: 'var(--radius)', border: '1px solid var(--color-border)', background: 'var(--color-bg)' }}>
+                  <div style={{ padding: '16px 16px 8px', fontWeight: 600, color: 'var(--color-text)', fontSize: '14px' }}>
                     Vehicle / Product
                   </div>
-                  <div style={{ fontSize: '13px', color: 'var(--color-text-muted)', lineHeight: 1.6 }}>
-                    <div><span style={{ color: 'var(--color-text)' }}>Name:</span> {activeOrderDetail?.displayVehicleName || 'N/A'}</div>
-                    {activeOrderDetail?.resolvedVehicle?.vin && (
-                      <div><span style={{ color: 'var(--color-text)' }}>VIN:</span> {activeOrderDetail.resolvedVehicle.vin}</div>
-                    )}
-                    {activeOrderDetail?.resolvedVehicle?.model && (
-                      <div><span style={{ color: 'var(--color-text)' }}>Model:</span> {activeOrderDetail.resolvedVehicle.model}</div>
-                    )}
+                  <div style={{ padding: '0 16px 16px', display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: '12px' }}>
+                    {[
+                      { label: 'Full Name', value: activeOrderDetail?.displayVehicleName || activeOrderDetail?.resolvedVehicle?.modelName || 'N/A' },
+                      { label: 'Brand', value: activeOrderDetail?.resolvedVehicle?.brand },
+                      { label: 'Model', value: activeOrderDetail?.resolvedVehicle?.modelName || activeOrderDetail?.resolvedVehicle?.model },
+                      { label: 'Variant', value: activeOrderDetail?.resolvedVehicle?.variantName },
+                      { label: 'Year', value: activeOrderDetail?.resolvedVehicle?.yearOfManufacture },
+                      { label: 'Vehicle Type', value: getVehicleTypeLabelFromOrder(activeOrderDetail) },
+                      { label: 'VIN', value: activeOrderDetail?.resolvedVehicle?.vin }
+                    ].filter(item => item.value).map((item) => (
+                      <div key={item.label} style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
+                        <div style={{ fontSize: '12px', color: 'var(--color-text-muted)', textTransform: 'uppercase', letterSpacing: '0.5px' }}>{item.label}</div>
+                        <div style={{ fontSize: '13px', color: 'var(--color-text)', fontWeight: 600 }}>{item.value}</div>
+                      </div>
+                    ))}
                   </div>
                 </div>
 

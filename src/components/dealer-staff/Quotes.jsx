@@ -2,6 +2,7 @@
     import { quotesAPI } from '../../utils/api/quotesAPI';
     import { customersAPI } from '../../utils/api/customersAPI';
     import { vehiclesAPI } from '../../utils/api/vehiclesAPI';
+    import { ordersAPI } from '../../utils/api/ordersAPI';
     import { showSuccessToast, showErrorToast } from '../../utils/toast';
     import { handleAPIError } from '../../utils/apiConfig';
     import 'boxicons/css/boxicons.min.css';
@@ -37,6 +38,8 @@
         const [inventoryRejectReason, setInventoryRejectReason] = useState('');
         const [showQuoteDetailModal, setShowQuoteDetailModal] = useState(false);
         const [selectedQuoteDetail, setSelectedQuoteDetail] = useState(null);
+        const [deletingQuoteId, setDeletingQuoteId] = useState(null);
+        const [quotePendingDelete, setQuotePendingDelete] = useState(null);
         
         // State cho Dealer Manager
         const [managerAllQuotes, setManagerAllQuotes] = useState([]); // Chứa tất cả quotes Manager cần xem
@@ -728,6 +731,58 @@
             );
         };
 
+        const handleDeleteQuote = async (rawQuoteId) => {
+            const quoteId = rawQuoteId && Number(rawQuoteId);
+            if (!quoteId || userRole !== 'DEALER_STAFF') return;
+
+            try {
+                setDeletingQuoteId(quoteId);
+                
+                // Check if quote has related orders before attempting deletion
+                try {
+                    const relatedOrders = await ordersAPI.getByQuote(quoteId);
+                    if (Array.isArray(relatedOrders) && relatedOrders.length > 0) {
+                        showErrorToast(`Cannot delete quote: This quote is referenced by ${relatedOrders.length} order(s). Please delete or update the related orders first.`);
+                        setDeletingQuoteId(null);
+                        return;
+                    }
+                } catch (checkError) {
+                    // If the check fails, log but continue with deletion attempt
+                    // (API might not support getByQuote, or quote might not have orders)
+                    console.warn('Could not check for related orders:', checkError);
+                }
+                
+                await quotesAPI.delete(quoteId);
+                showSuccessToast('Quote deleted successfully');
+
+                setQuotes((prev) => {
+                    const updated = prev.filter((quote) => Number(quote.quoteId || quote.id) !== quoteId);
+                    return sortQuotesByNewest(updated);
+                });
+                
+                // Close modal after successful deletion
+                setQuotePendingDelete(null);
+            } catch (error) {
+                console.error('Failed to delete quote:', error);
+                let errorMessage = handleAPIError(error);
+                
+                // Provide specific error message for Hibernate TransientObjectException
+                if (error?.response?.status === 500) {
+                    const errorData = error?.response?.data;
+                    if (errorData?.message?.includes('TransientObjectException') || 
+                        errorData?.message?.includes('persistent instance references')) {
+                        errorMessage = 'Cannot delete quote: This quote is referenced by one or more orders. Please delete or update the related orders first.';
+                    } else {
+                        errorMessage = 'Server error: Unable to delete quote. The quote may be referenced by other records (e.g., orders).';
+                    }
+                }
+                
+                showErrorToast(errorMessage);
+            } finally {
+                setDeletingQuoteId(null);
+            }
+        };
+
 
         if (loading) {
             return (
@@ -927,6 +982,25 @@
                                                     >
                                                         <i className="bx bx-show"></i>
                                                     </button>
+
+                                                    {/* Delete Quote - Staff only */}
+                                                    {userRole === 'DEALER_STAFF' && (
+                                                        <button
+                                                            className="btn btn-outline"
+                                                            style={{
+                                                                padding: '6px 10px',
+                                                                fontSize: '12px',
+                                                                borderColor: 'var(--color-error)',
+                                                                color: 'var(--color-error)'
+                                                            }}
+                                                            title="Delete quote"
+                                                            onClick={() => setQuotePendingDelete(quote)}
+                                                            disabled={deletingQuoteId === Number(quote.quoteId || quote.id)}
+                                                        >
+                                                            <i className={`bx ${deletingQuoteId === Number(quote.quoteId || quote.id) ? 'bx-loader-alt bx-spin' : 'bx-trash'}`}></i>
+                                                            {deletingQuoteId === Number(quote.quoteId || quote.id) ? 'Deleting...' : 'Delete'}
+                                                        </button>
+                                                    )}
                                                 </div>
                                             </td>
                                         </tr>
@@ -943,6 +1017,182 @@
                         </div>
                     )}
                 </div>
+
+                {/* Delete Confirmation Modal */}
+                {quotePendingDelete && (
+                    <div
+                        style={{
+                            position: 'fixed',
+                            top: 0,
+                            left: 0,
+                            right: 0,
+                            bottom: 0,
+                            background: 'rgba(0, 0, 0, 0.5)',
+                            display: 'flex',
+                            alignItems: 'center',
+                            justifyContent: 'center',
+                            zIndex: 1300
+                        }}
+                        onClick={(e) => {
+                            if (e.target === e.currentTarget && !deletingQuoteId) {
+                                setQuotePendingDelete(null);
+                            }
+                        }}
+                    >
+                        <div
+                            style={{
+                                background: '#ffffff',
+                                borderRadius: '12px',
+                                width: '90%',
+                                maxWidth: '700px',
+                                boxShadow: '0 10px 40px rgba(0, 0, 0, 0.3)',
+                                overflow: 'hidden',
+                                position: 'relative'
+                            }}
+                            onClick={(e) => e.stopPropagation()}
+                        >
+                            <div
+                                style={{
+                                    background: '#ef4444',
+                                    padding: '20px 30px',
+                                    display: 'flex',
+                                    justifyContent: 'space-between',
+                                    alignItems: 'center'
+                                }}
+                            >
+                                <h3
+                                    style={{
+                                        margin: 0,
+                                        fontSize: '20px',
+                                        fontWeight: 'bold',
+                                        color: 'white'
+                                    }}
+                                >
+                                    Confirm Deletion
+                                </h3>
+                                <button
+                                    onClick={() => setQuotePendingDelete(null)}
+                                    style={{
+                                        background: 'transparent',
+                                        border: 'none',
+                                        cursor: 'pointer',
+                                        color: 'white',
+                                        padding: '4px',
+                                        fontSize: '20px',
+                                        display: 'flex',
+                                        alignItems: 'center',
+                                        justifyContent: 'center',
+                                        transition: 'opacity 0.2s ease',
+                                        width: '32px',
+                                        height: '32px'
+                                    }}
+                                    disabled={Boolean(deletingQuoteId)}
+                                >
+                                    <i className="bx bx-x"></i>
+                                </button>
+                            </div>
+                            <div style={{ padding: '40px 30px', textAlign: 'center', background: 'white' }}>
+                                <div style={{ display: 'flex', justifyContent: 'center', marginBottom: '24px' }}>
+                                    <div
+                                        style={{
+                                            width: '80px',
+                                            height: '80px',
+                                            background: '#ef4444',
+                                            borderRadius: '50%',
+                                            display: 'flex',
+                                            alignItems: 'center',
+                                            justifyContent: 'center'
+                                        }}
+                                    >
+                                        <i
+                                            className="bx bxs-error-circle"
+                                            style={{
+                                                fontSize: '48px',
+                                                color: 'white'
+                                            }}
+                                        ></i>
+                                    </div>
+                                </div>
+                                <p
+                                    style={{
+                                        fontSize: '16px',
+                                        color: '#374151',
+                                        margin: '0 0 12px 0',
+                                        fontWeight: '500'
+                                    }}
+                                >
+                                    Are you sure you want to delete{' '}
+                                    <strong style={{ color: '#1f2937' }}>
+                                        {resolveCustomerName(quotePendingDelete) || `Quote #${quotePendingDelete.quoteId || quotePendingDelete.id}`}
+                                    </strong>
+                                    ?
+                                </p>
+                                <p
+                                    style={{
+                                        fontSize: '14px',
+                                        color: '#6b7280',
+                                        margin: 0
+                                    }}
+                                >
+                                    This action cannot be undone and will permanently remove this quote.
+                                </p>
+                            </div>
+                            <div
+                                style={{
+                                    padding: '20px 30px',
+                                    borderTop: '1px solid #e5e7eb',
+                                    display: 'flex',
+                                    gap: '12px',
+                                    justifyContent: 'flex-end',
+                                    background: 'white'
+                                }}
+                            >
+                                <button
+                                    onClick={() => setQuotePendingDelete(null)}
+                                    style={{
+                                        padding: '10px 20px',
+                                        borderRadius: '8px',
+                                        border: 'none',
+                                        background: '#e5e7eb',
+                                        color: '#374151',
+                                        fontSize: '14px',
+                                        fontWeight: '600',
+                                        cursor: 'pointer',
+                                        transition: 'all 0.2s ease',
+                                        display: 'flex',
+                                        alignItems: 'center',
+                                        gap: '8px'
+                                    }}
+                                    disabled={Boolean(deletingQuoteId)}
+                                >
+                                    <i className="bx bx-x" style={{ fontSize: '18px' }}></i>
+                                    Cancel
+                                </button>
+                                <button
+                                    onClick={() => handleDeleteQuote(quotePendingDelete.quoteId || quotePendingDelete.id)}
+                                    style={{
+                                        padding: '10px 20px',
+                                        borderRadius: '8px',
+                                        border: 'none',
+                                        background: '#ef4444',
+                                        color: 'white',
+                                        fontSize: '14px',
+                                        fontWeight: '600',
+                                        cursor: 'pointer',
+                                        transition: 'all 0.2s ease',
+                                        display: 'flex',
+                                        alignItems: 'center',
+                                        gap: '8px'
+                                    }}
+                                    disabled={Boolean(deletingQuoteId && quotePendingDelete && Number(quotePendingDelete.quoteId || quotePendingDelete.id) !== deletingQuoteId)}
+                                >
+                                    <i className={`bx ${deletingQuoteId === Number(quotePendingDelete.quoteId || quotePendingDelete.id) ? 'bx-loader-alt bx-spin' : 'bx-trash'}`} style={{ fontSize: '18px' }}></i>
+                                    {deletingQuoteId === Number(quotePendingDelete.quoteId || quotePendingDelete.id) ? 'Deleting...' : 'Delete Quote'}
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+                )}
 
                 {/* Create Quote Modal (Giữ nguyên) */}
                 {showCreateQuoteModal && (

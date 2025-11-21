@@ -7,7 +7,7 @@ export const installmentsAPI = {
    * Body: { paymentId, totalAmount, months, annualInterestRate, firstDueDate }
    */
   create: async (payload) => {
-    const response = await apiClient.post('/api/installments/create', payload);
+    const response = await apiClient.post('/api/installments/{orderId}/generate', payload);
     return response.data;
   },
 
@@ -29,61 +29,12 @@ export const installmentsAPI = {
     return response.data;
   },
 
-  // ========== CÁC API CŨ (Giữ lại để tương thích) ==========
-  
   /**
-   * Xem trước kế hoạch trả góp (Preview)
-   * API: POST /api/installments/preview
+   * Xóa kế hoạch trả góp (nếu backend hỗ trợ)
+   * API: DELETE /api/installments/{paymentId}
    */
-  preview: async (payload) => {
-    const response = await apiClient.post('/api/installments/preview', payload);
-    return response.data;
-  },
-
-  /**
-   * Tạo lịch trả góp cho đơn hàng
-   * API: POST /api/installments/{orderId}/generate
-   */
-  generate: async (orderId, payload) => {
-    const response = await apiClient.post(`/api/installments/${orderId}/generate`, payload);
-    return response.data;
-  },
-
-  /**
-   * Lấy lịch trả góp theo Order
-   * API: GET /api/installments/order/{orderId}
-   */
-  getScheduleByOrder: async (orderId) => {
-    const response = await apiClient.get(`/api/installments/order/${orderId}`);
-    return response.data;
-  },
-
-  /**
-   * Thanh toán một kỳ trả góp (sử dụng scheduleId)
-   * API: PUT /api/installments/pay/{scheduleId}
-   */
-  paySchedule: async (scheduleId) => {
-    const response = await apiClient.put(`/api/installments/pay/${scheduleId}`);
+  delete: async (paymentId) => {
+    const response = await apiClient.delete(`/api/installments/${paymentId}`);
     return response.data;
   }
 };
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-

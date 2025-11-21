@@ -180,7 +180,6 @@ const InventoryManagement = ({ user }) => {
               <th style={tableHeaderStyle}>Vehicle</th>
               <th style={tableHeaderStyle}>Brand</th>
               <th style={tableHeaderStyle}>Available</th>
-              <th style={tableHeaderStyle}>Reserved</th>
               <th style={tableHeaderStyle}>Last Updated</th>
               <th style={tableHeaderStyle}>Dealer</th>
             </tr>
@@ -196,7 +195,6 @@ const InventoryManagement = ({ user }) => {
                   <td style={{ ...tableCellStyle, fontWeight: 600 }}>
                     {item.availableQuantity ?? 0}
                   </td>
-                  <td style={tableCellStyle}>{item.reservedQuantity ?? 0}</td>
                   <td style={tableCellStyle}>
                     {item.lastUpdated ? new Date(item.lastUpdated).toLocaleString() : 'N/A'}
                   </td>
@@ -451,6 +449,8 @@ const selectStyle = {
 };
 
 export default InventoryManagement;
+
+
 
 
 

@@ -284,32 +284,6 @@ const ProductCatalog = ({ user }) => {
                       <i className="bx bx-car" style={{ fontSize: '48px', color: 'var(--color-text-muted)' }}></i>
                     </div>
                     
-                    {/* Compare Button */}
-                    <button
-                      onClick={(e) => toggleCompare(vehicle.id, e)}
-                      disabled={processingClick.has(vehicle.id)}
-                      style={{
-                        position: 'absolute',
-                        top: '12px',
-                        right: '12px',
-                        width: '32px',
-                        height: '32px',
-                        borderRadius: '50%',
-                        border: selectedModels.includes(vehicle.id) ? '2px solid var(--color-primary)' : '1px solid rgba(255,255,255,0.3)',
-                        background: selectedModels.includes(vehicle.id) ? 'var(--color-primary)' : 'rgba(0,0,0,0.5)',
-                        color: 'white',
-                        cursor: processingClick.has(vehicle.id) ? 'not-allowed' : 'pointer',
-                        display: 'flex',
-                        alignItems: 'center',
-                        justifyContent: 'center',
-                        fontSize: '16px',
-                        transition: 'all 0.2s ease',
-                        opacity: processingClick.has(vehicle.id) ? 0.6 : 1
-                      }}
-                    >
-                      <i className="bx bx-check"></i>
-                    </button>
-
                     {/* Promotion Badge */}
                     {promo && (
                       <div style={{
@@ -362,15 +336,24 @@ const ProductCatalog = ({ user }) => {
                     </div>
                     
                     <button 
-                      className="btn btn-primary" 
-                      style={{ width: '100%', padding: '10px', fontSize: '14px' }}
+                      className={`btn ${selectedModels.includes(vehicle.id) ? 'btn-primary' : 'btn-outline'}`}
+                      style={{ 
+                        width: '100%', 
+                        padding: '10px', 
+                        fontSize: '14px',
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                        gap: '8px'
+                      }}
                       onClick={(e) => {
                         e.stopPropagation();
-                        showSuccessToast(`${vehicle.name} added to quote`);
+                        toggleCompare(vehicle.id, e);
                       }}
+                      disabled={processingClick.has(vehicle.id)}
                     >
-                      <i className="bx bx-cart-add"></i>
-                      Add to Quote
+                      <i className="bx bx-bar-chart-alt-2"></i>
+                      Compare
                     </button>
                   </div>
                 </div>
@@ -465,15 +448,16 @@ const ProductCatalog = ({ user }) => {
                       Compare
                     </button>
                     <button 
-                      className="btn btn-secondary" 
+                      className={`btn ${selectedModels.includes(vehicle.id) ? 'btn-primary' : 'btn-outline'}`}
                       style={{ minWidth: '100px' }}
                       onClick={(e) => {
                         e.stopPropagation();
-                        showSuccessToast(`${vehicle.name} added to quote`);
+                        toggleCompare(vehicle.id, e);
                       }}
+                      disabled={processingClick.has(vehicle.id)}
                     >
-                      <i className="bx bx-cart-add"></i>
-                      Add to Quote
+                      <i className="bx bx-bar-chart-alt-2"></i>
+                      Compare
                     </button>
                   </div>
                 </div>

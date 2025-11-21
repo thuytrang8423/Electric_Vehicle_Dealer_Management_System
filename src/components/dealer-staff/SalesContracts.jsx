@@ -77,23 +77,6 @@ const normalizeContract = (contract) => {
 
   let documentImage = documentMeta?.cachedPdfUrl || documentMeta?.pdfUrl || contract.documentImage || '';
 
-  const resolvedOrderId =
-    contract.orderId ||
-    order.orderId ||
-    order.id ||
-    contract.order?.orderId ||
-    contract.order?.id ||
-    contract.orderCode ||
-    contract.orderNumber ||
-    null;
-
-  const resolvedOrderNumber =
-    contract.orderNumber ||
-    contract.orderCode ||
-    order.orderNumber ||
-    order.orderCode ||
-    (resolvedOrderId ? `ORD-${resolvedOrderId}` : 'N/A');
-
   return {
     raw: contract,
     id: contract.contractId || contract.id || contract.contractCode || `CON-${contract.orderId || 'N/A'}`,
@@ -103,8 +86,8 @@ const normalizeContract = (contract) => {
       customer.name ||
       `Customer #${contract.customerId || customer.id || 'N/A'}`,
     customerId: contract.customerId || customer.id || null,
-    orderId: resolvedOrderId,
-    orderNumber: resolvedOrderNumber,
+    orderId: contract.orderId || order.orderId || order.id || null,
+    orderNumber: order.orderNumber || `ORD-${order.orderId || order.id || 'N/A'}`,
     dealerId: contract.dealerId || order.dealerId || null,
     status,
     documentImage,
@@ -191,35 +174,6 @@ const enrichOrderWithVehicles = async (order) => {
     ...order,
     orderDetails: enrichedDetails,
   };
-};
-
-// 获取订单的客户名称（支持多种数据格式）
-const getOrderCustomerName = (order) => {
-  if (!order) return 'N/A';
-  
-  // 优先从 customer 对象获取
-  if (order.customer) {
-    return order.customer.fullName || 
-           order.customer.name || 
-           order.customer.customerName ||
-           (order.customer.firstName && order.customer.lastName 
-             ? `${order.customer.firstName} ${order.customer.lastName}`.trim()
-             : null) ||
-           order.customer.email ||
-           `Customer #${order.customer.id || order.customer.customerId || 'N/A'}`;
-  }
-  
-  // 其次从 customerName 字段获取
-  if (order.customerName) {
-    return order.customerName;
-  }
-  
-  // 最后从 customerId 构造
-  if (order.customerId) {
-    return `Customer #${order.customerId}`;
-  }
-  
-  return 'N/A';
 };
 
 const extractCustomerSnapshot = (customer) => {
@@ -816,8 +770,6 @@ const SalesContracts = ({ user }) => {
         customerId,
         orderId,
         dealerId: Number(dealerId || formData.dealerId),
-        signatureUrl: signatureUrl, // 单独保存签名 URL
-        notes: formData.notes || '', // 单独保存 notes
       };
 
       await contractsAPI.create(payload);
@@ -980,19 +932,16 @@ const SalesContracts = ({ user }) => {
     if (!contract) throw new Error('Contract data is missing.');
     const existingMeta = contract.documentMeta || parseContractDocumentMeta(contract.documentImage);
 
-    let documentUrl = existingMeta?.pdfUrl || existingMeta?.cachedPdfUrl || null;
+    let documentUrl = existingMeta?.cachedPdfUrl || existingMeta?.pdfUrl || null;
 
     if (!documentUrl && contract.documentImage && typeof contract.documentImage === 'string' && !contract.documentImage.startsWith('{')) {
       documentUrl = contract.documentImage;
     }
 
-    // 如果是 Cloudinary URL，直接返回
     if (documentUrl && typeof documentUrl === 'string' && !isDataUri(documentUrl)) {
-      // 检查是否是 PDF（优先使用 pdfUrl）
-      const isPdf = existingMeta?.pdfUrl || documentUrl.toLowerCase().includes('.pdf') || documentUrl.includes('/raw/upload/');
       return {
         url: documentUrl,
-        mime: isPdf ? 'application/pdf' : (inferMimeFromUrl(documentUrl) || 'image/png'),
+        mime: inferMimeFromUrl(documentUrl) || 'image/png',
         meta: existingMeta || null,
       };
     }
@@ -1071,21 +1020,18 @@ const SalesContracts = ({ user }) => {
       const prepared = await prepareContractDocument(contract);
       if (!prepared || !prepared.url) throw new Error('Contract document is not available.');
 
-      const url = prepared.url;
-      const mimeType = prepared.mime || inferMimeFromUrl(url) || 'application/pdf';
-
-      // 如果是 data URI，转换为 blob URL
-      if (isDataUri(url)) {
-        const blob = dataUriToBlob(url);
+      if (isDataUri(prepared.url)) {
+        const blob = dataUriToBlob(prepared.url);
+        const mimeType = extractMimeFromDataUri(prepared.url) || 'application/pdf';
         const objectUrl = createObjectUrl(blob);
         previewObjectUrlRef.current = objectUrl;
         setDocumentPreviewMime(mimeType);
         setDocumentPreviewUrl(objectUrl);
       } else {
-        // Cloudinary URL - 对于 PDF，直接使用 URL；对于图片，也直接使用
-        // 如果浏览器支持，可以直接在 iframe 中显示 PDF
-        setDocumentPreviewMime(mimeType);
-        setDocumentPreviewUrl(url);
+        // direct url (Cloudinary secure_url). If it's an image, show <img>, if pdf show iframe.
+        const mimeType = prepared.mime || inferMimeFromUrl(prepared.url);
+        setDocumentPreviewMime(mimeType || 'image/png');
+        setDocumentPreviewUrl(prepared.url);
       }
     } catch (error) {
       releasePreviewObjectUrl();
@@ -1100,59 +1046,50 @@ const SalesContracts = ({ user }) => {
   const handleDownloadContract = async (contract) => {
     try {
       const meta = contract.documentMeta || parseContractDocumentMeta(contract.documentImage);
+      if (!meta) throw new Error('No document meta');
+
+      const cloud = CLOUDINARY_CONFIG.cloud_name;
       const filename = buildContractFilename(contract, 'application/pdf');
-      
+      const safeFilename = filename.replace(/\s/g, '_');
 
-      let downloadUrl = meta?.pdfUrl || null;
-      
-  
-      if (!downloadUrl) {
-        downloadUrl = meta?.cachedPdfUrl || null;
-      }
-      
-
-      if (!downloadUrl && contract.documentImage && typeof contract.documentImage === 'string' && !contract.documentImage.startsWith('{')) {
-        downloadUrl = contract.documentImage;
-      }
-
-      if (!downloadUrl) {
-        throw new Error('No downloadable document available. Contract may not have been generated yet.');
-      }
-
-  
-      try {
-        const response = await fetch(downloadUrl);
-        if (!response.ok) {
-          throw new Error(`Failed to fetch document: ${response.statusText}`);
-        }
-        
-        const blob = await response.blob();
-        const objectUrl = URL.createObjectURL(blob);
-        
-        const link = document.createElement('a');
-        link.href = objectUrl;
-        link.download = filename;
-        document.body.appendChild(link);
-        link.click();
-        document.body.removeChild(link);
-        
-        // 清理 object URL
-        setTimeout(() => URL.revokeObjectURL(objectUrl), 100);
-        
-        showSuccessToast('Contract downloaded successfully');
-      } catch (fetchError) {
-        console.warn('Fetch download failed, trying direct download:', fetchError);
-        // Fallback: 直接下载（可能因为 CORS 失败）
+      // Prefer original raw pdf public_id
+      if (meta.pdfPublicId) {
+        const downloadUrl = `https://res.cloudinary.com/${cloud}/raw/upload/fl_attachment:${encodeURIComponent(safeFilename)}/${meta.pdfPublicId}`;
         const link = document.createElement('a');
         link.href = downloadUrl;
         link.download = filename;
-        link.target = '_blank';
         document.body.appendChild(link);
         link.click();
         document.body.removeChild(link);
+        return;
       }
+
+      // Fallback: direct secure_url (pdfUrl)
+      if (meta.pdfUrl) {
+        const link = document.createElement('a');
+        link.href = meta.pdfUrl;
+        link.download = filename;
+        document.body.appendChild(link);
+        link.click();
+        document.body.removeChild(link);
+        return;
+      }
+
+      // If only have thumbnail image, try to convert/raster -> pdf via transformation
+      if (meta.cachedPdfPublicId) {
+        const downloadUrl = `https://res.cloudinary.com/${cloud}/image/upload/fl_attachment:${encodeURIComponent(safeFilename)},f_pdf/${meta.cachedPdfPublicId}`;
+        const link = document.createElement('a');
+        link.href = downloadUrl;
+        link.download = filename;
+        document.body.appendChild(link);
+        link.click();
+        document.body.removeChild(link);
+        return;
+      }
+
+      throw new Error('No downloadable document available.');
     } catch (err) {
-      console.error('Download error:', err);
+      console.error(err);
       showErrorToast(err.message || 'Unable to download contract document.');
     }
   };
@@ -1182,7 +1119,6 @@ const SalesContracts = ({ user }) => {
     });
   }, [contracts, filterStatus]);
 
-  const totalContractValue = contracts.reduce((sum, contract) => sum + (contract.totalAmount || 0), 0);
   const totalContracts = contracts.length;
   const activeContracts = contracts.filter((contract) => contract.status === 'ACTIVE').length;
 
@@ -1206,11 +1142,10 @@ const SalesContracts = ({ user }) => {
           </div>
         </div>
 
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '16px', marginBottom: '24px' }}>
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: '16px', marginBottom: '24px' }}>
           {[
             { label: 'Total Contracts', value: totalContracts, icon: 'bx-file', color: 'var(--color-primary)' },
             { label: 'Active Contracts', value: activeContracts, icon: 'bx-check-circle', color: 'var(--color-success)' },
-            { label: 'Total Value', value: `$${totalContractValue.toLocaleString()}`, icon: 'bx-dollar-circle', color: 'var(--color-info)' },
           ].map((stat, index) => (
             <div key={index} style={{ padding: '16px', background: 'var(--color-bg)', borderRadius: 'var(--radius)' }}>
               <div style={{ display: 'flex', alignItems: 'center', gap: '12px', marginBottom: '8px' }}>
@@ -1261,7 +1196,6 @@ const SalesContracts = ({ user }) => {
                   <tr style={{ borderBottom: '2px solid var(--color-border)' }}>
                     <th style={tableHeaderStyle}>Contract ID</th>
                     <th style={tableHeaderStyle}>Customer</th>
-                    <th style={tableHeaderStyle}>Order</th>
                     <th style={{ ...tableHeaderStyle, textAlign: 'center' }}>Status</th>
                     <th style={{ ...tableHeaderStyle, textAlign: 'center' }}>Actions</th>
                   </tr>
@@ -1271,7 +1205,6 @@ const SalesContracts = ({ user }) => {
                     <tr key={contract.id} style={{ borderBottom: '1px solid var(--color-border)' }}>
                       <td style={tableCellStyle}><strong>{contract.id}</strong></td>
                       <td style={tableCellStyle}>{contract.customerName}</td>
-                      <td style={tableCellStyle}>{contract.orderNumber || `Order #${contract.orderId || 'N/A'}`}</td>
                       <td style={{ ...tableCellStyle, textAlign: 'center' }}>
                         <span style={{ padding: '4px 12px', borderRadius: 'var(--radius)', background: 'var(--color-bg)', color: contract.status === 'ACTIVE' ? 'var(--color-success)' : contract.status === 'COMPLETED' ? 'var(--color-info)' : contract.status === 'CANCELLED' ? 'var(--color-error)' : 'var(--color-text-muted)', fontSize: '12px', fontWeight: '600' }}>
                           {contract.status}
@@ -1470,37 +1403,9 @@ const SalesContracts = ({ user }) => {
               </div>
             ) : documentPreviewUrl ? (
               isPdfDocument(documentPreviewUrl) ? (
-                <iframe 
-                  src={documentPreviewUrl} 
-                  title="Contract Document" 
-                  style={{ 
-                    width: '100%', 
-                    height: 'calc(80vh - 80px)', 
-                    border: 'none', 
-                    borderRadius: 'var(--radius)', 
-                    background: '#f5f5f5' 
-                  }}
-                  onError={(e) => {
-                    console.error('Iframe load error:', e);
-                    showErrorToast('Failed to load PDF preview. Please try downloading the document.');
-                  }}
-                />
+                <iframe src={documentPreviewUrl} title="Contract Document" style={{ width: '100%', height: 'calc(80vh - 80px)', border: 'none', borderRadius: 'var(--radius)', background: '#f5f5f5' }} />
               ) : (
-                <img 
-                  src={documentPreviewUrl} 
-                  alt="Contract Document" 
-                  style={{ 
-                    width: '100%', 
-                    maxHeight: '70vh', 
-                    objectFit: 'contain', 
-                    borderRadius: 'var(--radius)', 
-                    border: '1px solid var(--color-border)' 
-                  }}
-                  onError={(e) => {
-                    console.error('Image load error:', e);
-                    showErrorToast('Failed to load image preview.');
-                  }}
-                />
+                <img src={documentPreviewUrl} alt="Contract Document" style={{ width: '100%', maxHeight: '70vh', objectFit: 'contain', borderRadius: 'var(--radius)', border: '1px solid var(--color-border)' }} />
               )
             ) : (
               <div style={{ textAlign: 'center', padding: '40px 0', color: 'var(--color-text-muted)' }}>Unable to load contract preview.</div>

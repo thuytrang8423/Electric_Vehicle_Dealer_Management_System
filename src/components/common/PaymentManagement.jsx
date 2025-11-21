@@ -40,6 +40,8 @@ const PaymentManagement = ({ user }) => {
   const [installmentSchedule, setInstallmentSchedule] = useState([]);
   const [installmentLoading, setInstallmentLoading] = useState(false);
   const [installmentCreating, setInstallmentCreating] = useState(false);
+  const [installmentPreview, setInstallmentPreview] = useState(null);
+  const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
 
   const userRole = user?.role?.toUpperCase().replace(/-/g, '_');
   const userId = user?.id || user?.userId || user?.user?.id;
@@ -53,7 +55,6 @@ const PaymentManagement = ({ user }) => {
           vehiclesAPI.getAll()
         ]);
         
-        // Build customer lookup map
         const customerMap = {};
         if (Array.isArray(customers)) {
           customers.forEach(customer => {
@@ -62,7 +63,6 @@ const PaymentManagement = ({ user }) => {
         }
         setCustomerLookup(customerMap);
         
-        // Build vehicle lookup map
         const vehicleMap = {};
         if (Array.isArray(vehicles)) {
           vehicles.forEach(vehicle => {
@@ -72,7 +72,6 @@ const PaymentManagement = ({ user }) => {
         setVehicleLookup(vehicleMap);
       } catch (error) {
         console.error('Error loading lookup data:', error);
-        // Don't show error toast for lookup data - just log it
       }
     };
     
@@ -85,7 +84,6 @@ const PaymentManagement = ({ user }) => {
       try {
         setLoading(true);
         
-        // Load approved orders for payment
         const orders = await ordersAPI.getAll();
         const approved = Array.isArray(orders) ? orders.filter(order => {
           const approvalStatus = order.approvalStatus || order.orderApprovalStatus || '';
@@ -203,18 +201,13 @@ const PaymentManagement = ({ user }) => {
     loadData();
   }, [userRole, userId, refreshTrigger, customerLookup, vehicleLookup]);
 
-  // Reload data when returning from payment result page
   useEffect(() => {
     if (location.state?.fromPaymentResult) {
       console.log('Returning from payment result - reloading data...');
       setRefreshTrigger(prev => prev + 1);
-      // Clear the state to avoid re-triggering
       window.history.replaceState({}, document.title);
     }
   }, [location]);
-
-  // VNPay callback is now handled by backend redirect to PaymentResult page
-  // No need to handle VNPay callback here anymore
 
   const handleCreateVNPayPayment = async (order) => {
     if (!order) {
@@ -223,9 +216,6 @@ const PaymentManagement = ({ user }) => {
     }
 
     const orderId = order.orderId || order.id;
-    
-    // Backend chỉ nhận orderId, sẽ tự động dùng order.getTotalAmount()
-    // VNPay không hỗ trợ partial payment - phải thanh toán toàn bộ số tiền còn lại
     const remainingAmount =
       order.remainingAmount ??
       (order.totalAmount || order.amount || 0) - (order.paidAmount || 0);
@@ -236,7 +226,6 @@ const PaymentManagement = ({ user }) => {
     }
 
     try {
-      // Backend chỉ cần orderId, sẽ tự động tạo payment với order.getTotalAmount()
       const paymentData = {
         orderId: orderId
       };
@@ -244,16 +233,13 @@ const PaymentManagement = ({ user }) => {
       const response = await paymentsAPI.createVNPayPayment(paymentData);
       
       if (response.paymentUrl) {
-        // Redirect to VNPay payment page
         window.location.href = response.paymentUrl;
       } else if (response.error) {
         showErrorToast(`VNPay error: ${response.error}. Please use Cash/Transfer payment instead.`);
-        // Nếu VNPay lỗi, mở manual payment modal để dùng Cash
         setShowCreatePaymentModal(false);
         handleOpenManualPayment(order);
       } else {
         showErrorToast('VNPay service is currently unavailable. Please use Cash/Transfer payment instead.');
-        // Nếu VNPay không khả dụng, mở manual payment modal để dùng Cash
         setShowCreatePaymentModal(false);
         handleOpenManualPayment(order);
       }
@@ -261,7 +247,6 @@ const PaymentManagement = ({ user }) => {
       console.error('Error creating VNPay payment:', error);
       const errorMessage = handleAPIError(error);
       showErrorToast(`VNPay error: ${errorMessage}. Please use Cash/Transfer payment instead.`);
-      // Nếu VNPay lỗi, mở manual payment modal để dùng Cash
       setShowCreatePaymentModal(false);
       handleOpenManualPayment(order);
     }
@@ -269,7 +254,6 @@ const PaymentManagement = ({ user }) => {
 
   const handleSelectOrderForPayment = (order) => {
     setSelectedOrder(order);
-    // VNPay sẽ thanh toán toàn bộ số tiền còn lại, không cần nhập amount
     setShowCreatePaymentModal(true);
   };
 
@@ -302,7 +286,6 @@ const PaymentManagement = ({ user }) => {
       return;
     }
 
-    // Validate payment percentage
     const validPercentages = [30, 50, 70, 100];
     const percentageNum = Number(paymentPercentage);
     if (!validPercentages.includes(percentageNum)) {
@@ -314,14 +297,13 @@ const PaymentManagement = ({ user }) => {
       setManualPaymentLoading(true);
       const orderId = selectedOrder.orderId || selectedOrder.id;
       
-      // Prepare payment data according to API specification
       const paymentData = {
-        paymentMethod: String(paymentMethod).toUpperCase(), // Ensure uppercase: CASH, TRANSFER
-        paymentPercentage: percentageNum, // Ensure it's a number: 30, 50, 70, 100
-        paymentNotes: paymentNotes?.trim() || undefined // Optional field
+        paymentMethod: String(paymentMethod).toUpperCase(),
+        paymentPercentage: percentageNum,
+        paymentNotes: paymentNotes?.trim() || undefined
       };
 
-      console.log('Creating payment with data:', paymentData); // Debug log
+      console.log('Creating payment with data:', paymentData);
 
       await paymentsAPI.createDealerWorkflowPayment(orderId, paymentData);
 
@@ -362,7 +344,32 @@ const PaymentManagement = ({ user }) => {
     ) || null;
   };
 
-  // Installment handlers
+  // ========== INSTALLMENT FUNCTIONS - IMPROVED ==========
+  
+  const calculateInstallmentPreview = (totalAmount, months, annualInterestRate) => {
+    if (!totalAmount || !months || months <= 0) return null;
+    
+    const monthlyRate = annualInterestRate / 100 / 12;
+    let monthlyPayment;
+    
+    if (monthlyRate === 0) {
+      monthlyPayment = totalAmount / months;
+    } else {
+      monthlyPayment = totalAmount * (monthlyRate * Math.pow(1 + monthlyRate, months)) / 
+                       (Math.pow(1 + monthlyRate, months) - 1);
+    }
+    
+    const totalPayment = monthlyPayment * months;
+    const totalInterest = totalPayment - totalAmount;
+    
+    return {
+      monthlyPayment: Math.round(monthlyPayment * 100) / 100,
+      totalPayment: Math.round(totalPayment * 100) / 100,
+      totalInterest: Math.round(totalInterest * 100) / 100,
+      months
+    };
+  };
+
   const handleOpenInstallmentModal = async (payment) => {
     const paymentId = payment.paymentId || payment.id;
     if (!paymentId) {
@@ -372,29 +379,50 @@ const PaymentManagement = ({ user }) => {
 
     setSelectedPaymentForInstallment(payment);
     
-    // Set default first due date (30 days from now)
     const defaultDate = new Date();
     defaultDate.setDate(defaultDate.getDate() + 30);
-    setInstallmentForm({
+    const formData = {
       months: 12,
       annualInterestRate: 0,
       firstDueDate: defaultDate.toISOString().split('T')[0]
-    });
+    };
+    setInstallmentForm(formData);
+    
+    // Calculate initial preview
+    const preview = calculateInstallmentPreview(
+      payment.amount || 0,
+      formData.months,
+      formData.annualInterestRate
+    );
+    setInstallmentPreview(preview);
 
-    // Try to load existing installment schedule
     try {
       setInstallmentLoading(true);
       const schedule = await installmentsAPI.getByPayment(paymentId);
       setInstallmentSchedule(Array.isArray(schedule) ? schedule : []);
     } catch (error) {
       console.error('Error loading installment schedule:', error);
-      // If no schedule exists, that's okay - user can create one
       setInstallmentSchedule([]);
     } finally {
       setInstallmentLoading(false);
     }
 
     setShowInstallmentModal(true);
+  };
+
+  const handleInstallmentFormChange = (field, value) => {
+    const newForm = { ...installmentForm, [field]: value };
+    setInstallmentForm(newForm);
+    
+    // Update preview when form changes
+    if (field === 'months' || field === 'annualInterestRate') {
+      const preview = calculateInstallmentPreview(
+        selectedPaymentForInstallment?.amount || 0,
+        field === 'months' ? value : newForm.months,
+        field === 'annualInterestRate' ? value : newForm.annualInterestRate
+      );
+      setInstallmentPreview(preview);
+    }
   };
 
   const handleCreateInstallment = async (e) => {
@@ -413,7 +441,17 @@ const PaymentManagement = ({ user }) => {
     }
 
     if (!installmentForm.months || installmentForm.months <= 0) {
-      showErrorToast('Vui lòng nhập số tháng hợp lệ');
+      showErrorToast('Vui lòng nhập số tháng hợp lệ (1-36)');
+      return;
+    }
+
+    if (installmentForm.months > 36) {
+      showErrorToast('Số tháng tối đa là 36 tháng');
+      return;
+    }
+
+    if (installmentForm.annualInterestRate < 0 || installmentForm.annualInterestRate > 100) {
+      showErrorToast('Lãi suất phải từ 0% đến 100%');
       return;
     }
 
@@ -430,7 +468,6 @@ const PaymentManagement = ({ user }) => {
       await installmentsAPI.create(payload);
       showSuccessToast('Tạo kế hoạch trả góp thành công');
 
-      // Reload schedule
       const schedule = await installmentsAPI.getByPayment(paymentId);
       setInstallmentSchedule(Array.isArray(schedule) ? schedule : []);
     } catch (error) {
@@ -451,7 +488,6 @@ const PaymentManagement = ({ user }) => {
       await installmentsAPI.payInstallment(transactionId, 'INSTALLMENT');
       showSuccessToast('Đánh dấu kỳ trả góp đã thanh toán thành công');
 
-      // Reload schedule
       const paymentId = selectedPaymentForInstallment?.paymentId || selectedPaymentForInstallment?.id;
       if (paymentId) {
         const schedule = await installmentsAPI.getByPayment(paymentId);
@@ -459,6 +495,25 @@ const PaymentManagement = ({ user }) => {
       }
     } catch (error) {
       console.error('Error paying installment:', error);
+      showErrorToast(handleAPIError(error));
+    }
+  };
+
+  const handleDeleteInstallment = async () => {
+    if (!selectedPaymentForInstallment) {
+      showErrorToast('Payment không hợp lệ');
+      return;
+    }
+
+    const paymentId = selectedPaymentForInstallment.paymentId || selectedPaymentForInstallment.id;
+
+    try {
+      await installmentsAPI.delete(paymentId);
+      showSuccessToast('Đã xóa kế hoạch trả góp');
+      setInstallmentSchedule([]);
+      setShowDeleteConfirm(false);
+    } catch (error) {
+      console.error('Error deleting installment:', error);
       showErrorToast(handleAPIError(error));
     }
   };
@@ -478,13 +533,11 @@ const PaymentManagement = ({ user }) => {
     .filter(p => (p.status === 'PENDING' || p.status === 'pending'))
     .reduce((sum, p) => sum + (p.amount || 0), 0);
 
-  // Calculate chart data from actual payments
   const calculateChartData = () => {
     const monthNames = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
     const now = new Date();
     const last6Months = [];
     
-    // Get last 6 months
     for (let i = 5; i >= 0; i--) {
       const date = new Date(now.getFullYear(), now.getMonth() - i, 1);
       last6Months.push({
@@ -496,7 +549,6 @@ const PaymentManagement = ({ user }) => {
       });
     }
 
-    // Group payments by month
     payments.forEach(payment => {
       const paymentDate = payment.paidDate || payment.createdDate || payment.paymentDate;
       if (!paymentDate) return;
@@ -513,9 +565,9 @@ const PaymentManagement = ({ user }) => {
 
       if (monthData) {
         if (status === 'COMPLETED' || status === 'completed') {
-          monthData.revenue += amount / 1000; // Convert to K
+          monthData.revenue += amount / 1000;
         } else if (status === 'PENDING' || status === 'pending') {
-          monthData.pending += amount / 1000; // Convert to K
+          monthData.pending += amount / 1000;
         }
       }
     });
@@ -612,10 +664,6 @@ const PaymentManagement = ({ user }) => {
               const paymentMethod = (order.paymentMethod || 'VNPAY').toUpperCase();
               const hasCashPaymentCompleted = order.hasCashPaymentCompleted || false;
               
-              // Chỉ hiển thị nút VNPay nếu:
-              // 1. Còn tiền chưa thanh toán (remainingAmount > 0)
-              // 2. Payment method là VNPAY (hoặc không có payment method - mặc định VNPAY)
-              // 3. Không có payment CASH đã completed
               const shouldShowVNPayButton = remainingAmount > 0 && 
                                            paymentMethod === 'VNPAY' && 
                                            !hasCashPaymentCompleted;
@@ -762,7 +810,6 @@ const PaymentManagement = ({ user }) => {
                 <th style={{ padding: '12px', textAlign: 'left', fontSize: '14px', fontWeight: '600', color: 'var(--color-text-muted)' }}>Method</th>
                 <th style={{ padding: '12px', textAlign: 'left', fontSize: '14px', fontWeight: '600', color: 'var(--color-text-muted)' }}>Date</th>
                 <th style={{ padding: '12px', textAlign: 'center', fontSize: '14px', fontWeight: '600', color: 'var(--color-text-muted)' }}>Status</th>
-                <th style={{ padding: '12px', textAlign: 'left', fontSize: '14px', fontWeight: '600', color: 'var(--color-text-muted)' }}>Transaction ID</th>
                 <th style={{ padding: '12px', textAlign: 'center', fontSize: '14px', fontWeight: '600', color: 'var(--color-text-muted)' }}>Actions</th>
               </tr>
             </thead>
@@ -789,8 +836,27 @@ const PaymentManagement = ({ user }) => {
                       {payment.paymentMethod || 'VNPay'}
                     </td>
                     <td style={{ padding: '12px', fontSize: '14px', color: 'var(--color-text-muted)' }}>
-                      {payment.paidDate ? new Date(payment.paidDate).toLocaleDateString() : 
-                       payment.createdDate ? new Date(payment.createdDate).toLocaleDateString() : 'N/A'}
+                      {(() => {
+                        const dateValue = payment.paidDate || 
+                                        payment.paymentDate || 
+                                        payment.createdDate || 
+                                        payment.createdAt || 
+                                        payment.date || 
+                                        payment.timestamp || 
+                                        null;
+                        
+                        if (dateValue) {
+                          try {
+                            const date = new Date(dateValue);
+                            if (!isNaN(date.getTime())) {
+                              return date.toLocaleDateString('vi-VN');
+                            }
+                          } catch (e) {
+                            console.warn('Invalid date value:', dateValue);
+                          }
+                        }
+                        return 'N/A';
+                      })()}
                     </td>
                     <td style={{ padding: '12px', textAlign: 'center' }}>
                       <span style={{
@@ -805,9 +871,6 @@ const PaymentManagement = ({ user }) => {
                       }}>
                         {statusLabel}
                       </span>
-                    </td>
-                    <td style={{ padding: '12px', fontSize: '12px', color: 'var(--color-text-muted)' }}>
-                      {payment.vnpayTransactionNo || payment.transactionId || 'N/A'}
                     </td>
                     <td style={{ padding: '12px', textAlign: 'center' }}>
                       <div style={{ display: 'flex', gap: '8px', justifyContent: 'center', flexWrap: 'wrap' }}>
@@ -1131,7 +1194,7 @@ const PaymentManagement = ({ user }) => {
         </div>
       )}
 
-      {/* Installment Modal */}
+      {/* Installment Modal - IMPROVED VERSION */}
       {showInstallmentModal && selectedPaymentForInstallment && (
         <div style={{
           position: 'fixed',
@@ -1152,7 +1215,7 @@ const PaymentManagement = ({ user }) => {
             borderRadius: 'var(--radius)',
             padding: '24px',
             width: '90%',
-            maxWidth: '800px',
+            maxWidth: '900px',
             maxHeight: '90vh',
             overflow: 'auto'
           }}>
@@ -1163,6 +1226,7 @@ const PaymentManagement = ({ user }) => {
                   setShowInstallmentModal(false);
                   setSelectedPaymentForInstallment(null);
                   setInstallmentSchedule([]);
+                  setInstallmentPreview(null);
                 }}
                 style={{ background: 'none', border: 'none', fontSize: '24px', cursor: 'pointer', color: 'var(--color-text-muted)' }}
               >
@@ -1209,24 +1273,27 @@ const PaymentManagement = ({ user }) => {
                 marginBottom: '24px',
                 background: 'var(--color-bg)'
               }}>
-                <h4 style={{ marginBottom: '16px', fontSize: '16px', fontWeight: '600' }}>Tạo kế hoạch trả góp</h4>
+                <h4 style={{ marginBottom: '16px', fontSize: '16px', fontWeight: '600' }}>
+                  <i className="bx bx-plus-circle" style={{ marginRight: '8px' }}></i>
+                  Tạo kế hoạch trả góp
+                </h4>
                 <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: '16px' }}>
                   <div>
                     <label style={{ display: 'block', marginBottom: '8px', fontSize: '14px', fontWeight: '600', color: 'var(--color-text)' }}>
-                      Số tháng *
+                      Số tháng * <span style={{ fontSize: '12px', fontWeight: 'normal', color: 'var(--color-text-muted)' }}>(1-36)</span>
                     </label>
                     <input
                       type="number"
                       min="1"
                       max="36"
                       value={installmentForm.months}
-                      onChange={(e) => setInstallmentForm(prev => ({ ...prev, months: Number(e.target.value) }))}
+                      onChange={(e) => handleInstallmentFormChange('months', Number(e.target.value))}
                       style={{
                         width: '100%',
                         padding: '10px 12px',
                         border: '1px solid var(--color-border)',
                         borderRadius: 'var(--radius)',
-                        background: 'var(--color-bg)',
+                        background: 'var(--color-surface)',
                         color: 'var(--color-text)',
                         fontSize: '14px'
                       }}
@@ -1235,20 +1302,21 @@ const PaymentManagement = ({ user }) => {
                   </div>
                   <div>
                     <label style={{ display: 'block', marginBottom: '8px', fontSize: '14px', fontWeight: '600', color: 'var(--color-text)' }}>
-                      Lãi suất năm (%)
+                      Lãi suất năm (%) <span style={{ fontSize: '12px', fontWeight: 'normal', color: 'var(--color-text-muted)' }}>(0-100)</span>
                     </label>
                     <input
                       type="number"
                       min="0"
+                      max="100"
                       step="0.1"
                       value={installmentForm.annualInterestRate}
-                      onChange={(e) => setInstallmentForm(prev => ({ ...prev, annualInterestRate: Number(e.target.value) }))}
+                      onChange={(e) => handleInstallmentFormChange('annualInterestRate', Number(e.target.value))}
                       style={{
                         width: '100%',
                         padding: '10px 12px',
                         border: '1px solid var(--color-border)',
                         borderRadius: 'var(--radius)',
-                        background: 'var(--color-bg)',
+                        background: 'var(--color-surface)',
                         color: 'var(--color-text)',
                         fontSize: '14px'
                       }}
@@ -1261,13 +1329,13 @@ const PaymentManagement = ({ user }) => {
                     <input
                       type="date"
                       value={installmentForm.firstDueDate}
-                      onChange={(e) => setInstallmentForm(prev => ({ ...prev, firstDueDate: e.target.value }))}
+                      onChange={(e) => handleInstallmentFormChange('firstDueDate', e.target.value)}
                       style={{
                         width: '100%',
                         padding: '10px 12px',
                         border: '1px solid var(--color-border)',
                         borderRadius: 'var(--radius)',
-                        background: 'var(--color-bg)',
+                        background: 'var(--color-surface)',
                         color: 'var(--color-text)',
                         fontSize: '14px'
                       }}
@@ -1275,6 +1343,49 @@ const PaymentManagement = ({ user }) => {
                     />
                   </div>
                 </div>
+
+                {/* Preview Section */}
+                {installmentPreview && (
+                  <div style={{
+                    marginTop: '20px',
+                    padding: '16px',
+                    borderRadius: 'var(--radius)',
+                    background: 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)',
+                    color: 'white'
+                  }}>
+                    <h5 style={{ marginBottom: '12px', fontSize: '14px', fontWeight: '600', display: 'flex', alignItems: 'center', gap: '8px' }}>
+                      <i className="bx bx-calculator"></i>
+                      Dự kiến thanh toán
+                    </h5>
+                    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(150px, 1fr))', gap: '12px' }}>
+                      <div>
+                        <div style={{ fontSize: '11px', opacity: '0.9', marginBottom: '4px' }}>Trả hàng tháng</div>
+                        <div style={{ fontSize: '18px', fontWeight: '700' }}>
+                          ${installmentPreview.monthlyPayment.toLocaleString()}
+                        </div>
+                      </div>
+                      <div>
+                        <div style={{ fontSize: '11px', opacity: '0.9', marginBottom: '4px' }}>Tổng tiền phải trả</div>
+                        <div style={{ fontSize: '18px', fontWeight: '700' }}>
+                          ${installmentPreview.totalPayment.toLocaleString()}
+                        </div>
+                      </div>
+                      <div>
+                        <div style={{ fontSize: '11px', opacity: '0.9', marginBottom: '4px' }}>Tổng lãi suất</div>
+                        <div style={{ fontSize: '18px', fontWeight: '700' }}>
+                          ${installmentPreview.totalInterest.toLocaleString()}
+                        </div>
+                      </div>
+                      <div>
+                        <div style={{ fontSize: '11px', opacity: '0.9', marginBottom: '4px' }}>Số kỳ</div>
+                        <div style={{ fontSize: '18px', fontWeight: '700' }}>
+                          {installmentPreview.months} tháng
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                )}
+
                 <div style={{ display: 'flex', gap: '12px', justifyContent: 'flex-end', marginTop: '20px' }}>
                   <button
                     type="button"
@@ -1283,6 +1394,7 @@ const PaymentManagement = ({ user }) => {
                       setShowInstallmentModal(false);
                       setSelectedPaymentForInstallment(null);
                       setInstallmentSchedule([]);
+                      setInstallmentPreview(null);
                     }}
                     disabled={installmentCreating}
                   >
@@ -1317,12 +1429,84 @@ const PaymentManagement = ({ user }) => {
               </div>
             ) : installmentSchedule.length > 0 ? (
               <div>
-                <h4 style={{ marginBottom: '16px', fontSize: '16px', fontWeight: '600' }}>Lịch trả góp</h4>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px' }}>
+                  <h4 style={{ margin: '0', fontSize: '16px', fontWeight: '600', display: 'flex', alignItems: 'center', gap: '8px' }}>
+                    <i className="bx bx-list-ul"></i>
+                    Lịch trả góp ({installmentSchedule.length} kỳ)
+                  </h4>
+                  <button
+                    className="btn btn-outline"
+                    style={{ fontSize: '12px', color: 'var(--color-error)', borderColor: 'var(--color-error)' }}
+                    onClick={() => setShowDeleteConfirm(true)}
+                  >
+                    <i className="bx bx-trash" style={{ marginRight: '4px' }}></i>
+                    Xóa kế hoạch
+                  </button>
+                </div>
+
+                {/* Summary Stats */}
+                <div style={{
+                  display: 'grid',
+                  gridTemplateColumns: 'repeat(auto-fit, minmax(150px, 1fr))',
+                  gap: '12px',
+                  marginBottom: '20px',
+                  padding: '16px',
+                  background: 'var(--color-bg)',
+                  borderRadius: 'var(--radius)',
+                  border: '1px solid var(--color-border)'
+                }}>
+                  <div>
+                    <div style={{ fontSize: '12px', color: 'var(--color-text-muted)', marginBottom: '4px' }}>Tổng số tiền</div>
+                    <div style={{ fontSize: '16px', fontWeight: '700', color: 'var(--color-primary)' }}>
+                      ${installmentSchedule.reduce((sum, item) => sum + (item.amount || 0), 0).toLocaleString()}
+                    </div>
+                  </div>
+                  <div>
+                    <div style={{ fontSize: '12px', color: 'var(--color-text-muted)', marginBottom: '4px' }}>Đã thanh toán</div>
+                    <div style={{ fontSize: '16px', fontWeight: '700', color: 'var(--color-success)' }}>
+                      {installmentSchedule.filter(item => (item.status || '').toUpperCase() === 'PAID').length} / {installmentSchedule.length}
+                    </div>
+                  </div>
+                  <div>
+                    <div style={{ fontSize: '12px', color: 'var(--color-text-muted)', marginBottom: '4px' }}>Chưa thanh toán</div>
+                    <div style={{ fontSize: '16px', fontWeight: '700', color: 'var(--color-warning)' }}>
+                      ${installmentSchedule
+                        .filter(item => (item.status || '').toUpperCase() !== 'PAID')
+                        .reduce((sum, item) => sum + (item.amount || 0), 0)
+                        .toLocaleString()}
+                    </div>
+                  </div>
+                  <div>
+                    <div style={{ fontSize: '12px', color: 'var(--color-text-muted)', marginBottom: '4px' }}>Tiến độ</div>
+                    <div style={{ fontSize: '16px', fontWeight: '700', color: 'var(--color-info)' }}>
+                      {Math.round((installmentSchedule.filter(item => (item.status || '').toUpperCase() === 'PAID').length / installmentSchedule.length) * 100)}%
+                    </div>
+                  </div>
+                </div>
+
+                {/* Progress Bar */}
+                <div style={{ marginBottom: '20px' }}>
+                  <div style={{
+                    height: '8px',
+                    background: 'var(--color-bg)',
+                    borderRadius: '4px',
+                    overflow: 'hidden'
+                  }}>
+                    <div style={{
+                      height: '100%',
+                      background: 'linear-gradient(90deg, #667eea 0%, #764ba2 100%)',
+                      width: `${(installmentSchedule.filter(item => (item.status || '').toUpperCase() === 'PAID').length / installmentSchedule.length) * 100}%`,
+                      transition: 'width 0.3s ease'
+                    }}></div>
+                  </div>
+                </div>
+
+                {/* Table */}
                 <div style={{ overflowX: 'auto' }}>
                   <table style={{ width: '100%', borderCollapse: 'collapse' }}>
                     <thead>
                       <tr style={{ borderBottom: '2px solid var(--color-border)' }}>
-                        <th style={{ padding: '12px', textAlign: 'left', fontSize: '14px', fontWeight: '600', color: 'var(--color-text-muted)' }}>#</th>
+                        <th style={{ padding: '12px', textAlign: 'center', fontSize: '14px', fontWeight: '600', color: 'var(--color-text-muted)' }}>#</th>
                         <th style={{ padding: '12px', textAlign: 'left', fontSize: '14px', fontWeight: '600', color: 'var(--color-text-muted)' }}>Ngày đến hạn</th>
                         <th style={{ padding: '12px', textAlign: 'right', fontSize: '14px', fontWeight: '600', color: 'var(--color-text-muted)' }}>Số tiền</th>
                         <th style={{ padding: '12px', textAlign: 'center', fontSize: '14px', fontWeight: '600', color: 'var(--color-text-muted)' }}>Trạng thái</th>
@@ -1334,13 +1518,27 @@ const PaymentManagement = ({ user }) => {
                         const status = (item.status || '').toUpperCase();
                         const transactionId = item.transactionId || item.id;
                         const isPaid = status === 'PAID';
+                        const dueDate = item.dueDate ? new Date(item.dueDate) : null;
+                        const isOverdue = dueDate && !isPaid && dueDate < new Date();
+                        
                         return (
-                          <tr key={transactionId || index} style={{ borderBottom: '1px solid var(--color-border)' }}>
-                            <td style={{ padding: '12px', fontSize: '14px', color: 'var(--color-text)' }}>
+                          <tr key={transactionId || index} style={{ 
+                            borderBottom: '1px solid var(--color-border)',
+                            background: isPaid ? 'rgba(16, 185, 129, 0.05)' : isOverdue ? 'rgba(239, 68, 68, 0.05)' : 'transparent'
+                          }}>
+                            <td style={{ padding: '12px', textAlign: 'center', fontSize: '14px', fontWeight: '600', color: 'var(--color-text)' }}>
                               {item.installmentNumber || index + 1}
                             </td>
                             <td style={{ padding: '12px', fontSize: '14px', color: 'var(--color-text)' }}>
-                              {item.dueDate ? new Date(item.dueDate).toLocaleDateString('vi-VN') : 'N/A'}
+                              <div>
+                                {dueDate ? dueDate.toLocaleDateString('vi-VN') : 'N/A'}
+                              </div>
+                              {isOverdue && (
+                                <div style={{ fontSize: '11px', color: 'var(--color-error)', marginTop: '2px', display: 'flex', alignItems: 'center', gap: '4px' }}>
+                                  <i className="bx bx-error-circle"></i>
+                                  Quá hạn
+                                </div>
+                              )}
                             </td>
                             <td style={{ padding: '12px', textAlign: 'right', fontSize: '14px', fontWeight: '600', color: 'var(--color-primary)' }}>
                               ${(item.amount || 0).toLocaleString()}
@@ -1349,22 +1547,41 @@ const PaymentManagement = ({ user }) => {
                               <span style={{
                                 padding: '4px 12px',
                                 borderRadius: 'var(--radius)',
-                                background: 'var(--color-bg)',
-                                color: isPaid ? 'var(--color-success)' : 'var(--color-warning)',
+                                background: isPaid ? 'var(--color-success)' : isOverdue ? 'var(--color-error)' : 'var(--color-warning)',
+                                color: 'white',
                                 fontSize: '12px',
-                                fontWeight: '600'
+                                fontWeight: '600',
+                                display: 'inline-flex',
+                                alignItems: 'center',
+                                gap: '4px'
                               }}>
-                                {isPaid ? 'Đã trả' : 'Chờ trả'}
+                                {isPaid ? (
+                                  <>
+                                    <i className="bx bx-check-circle"></i>
+                                    Đã trả
+                                  </>
+                                ) : isOverdue ? (
+                                  <>
+                                    <i className="bx bx-error-circle"></i>
+                                    Quá hạn
+                                  </>
+                                ) : (
+                                  <>
+                                    <i className="bx bx-time"></i>
+                                    Chờ trả
+                                  </>
+                                )}
                               </span>
                             </td>
                             <td style={{ padding: '12px', textAlign: 'center' }}>
                               {isPaid ? (
-                                <span style={{ fontSize: '12px', color: 'var(--color-success)' }}>
-                                  <i className="bx bx-check-circle"></i> Đã thanh toán
+                                <span style={{ fontSize: '12px', color: 'var(--color-success)', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '4px' }}>
+                                  <i className="bx bx-check-double"></i>
+                                  Hoàn thành
                                 </span>
                               ) : (
                                 <button
-                                  className="btn btn-outline"
+                                  className="btn btn-primary"
                                   style={{ fontSize: '12px' }}
                                   onClick={() => handlePayInstallment(transactionId)}
                                 >
@@ -1382,10 +1599,59 @@ const PaymentManagement = ({ user }) => {
               </div>
             ) : (
               <div style={{ textAlign: 'center', padding: '40px', color: 'var(--color-text-muted)' }}>
-                <i className="bx bx-calendar" style={{ fontSize: '48px', marginBottom: '16px', opacity: '0.5' }}></i>
-                <div>Chưa có lịch trả góp. Vui lòng tạo kế hoạch trả góp ở trên.</div>
+                <i className="bx bx-calendar-x" style={{ fontSize: '48px', marginBottom: '16px', opacity: '0.5' }}></i>
+                <div style={{ fontSize: '16px', fontWeight: '600', marginBottom: '8px' }}>Chưa có lịch trả góp</div>
+                <div style={{ fontSize: '14px' }}>Vui lòng tạo kế hoạch trả góp ở form bên trên</div>
               </div>
             )}
+          </div>
+        </div>
+      )}
+
+      {/* Delete Confirmation Modal */}
+      {showDeleteConfirm && (
+        <div style={{
+          position: 'fixed',
+          top: 0,
+          left: 0,
+          right: 0,
+          bottom: 0,
+          background: 'rgba(0, 0, 0, 0.7)',
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          zIndex: 1100
+        }}>
+          <div style={{
+            background: 'var(--color-surface)',
+            borderRadius: 'var(--radius)',
+            padding: '24px',
+            width: '90%',
+            maxWidth: '400px'
+          }}>
+            <div style={{ textAlign: 'center', marginBottom: '20px' }}>
+              <i className="bx bx-error-circle" style={{ fontSize: '48px', color: 'var(--color-error)' }}></i>
+            </div>
+            <h3 style={{ textAlign: 'center', marginBottom: '12px' }}>Xác nhận xóa</h3>
+            <p style={{ textAlign: 'center', color: 'var(--color-text-muted)', marginBottom: '24px' }}>
+              Bạn có chắc chắn muốn xóa kế hoạch trả góp này? Hành động này không thể hoàn tác.
+            </p>
+            <div style={{ display: 'flex', gap: '12px', justifyContent: 'center' }}>
+              <button
+                className="btn btn-outline"
+                onClick={() => setShowDeleteConfirm(false)}
+              >
+                Hủy
+              </button>
+              <button
+                className="btn btn-primary"
+                style={{ background: 'var(--color-error)' }}
+                onClick={handleDeleteInstallment}
+              >
+                <i className="bx bx-trash" style={{ marginRight: '6px' }}></i>
+                Xóa
+              </button>
+            </div>
           </div>
         </div>
       )}

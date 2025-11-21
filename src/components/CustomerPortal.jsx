@@ -1,6 +1,10 @@
 import React, { useState } from 'react';
 import Navbar from './Navbar';
 import Footer from './Footer';
+import { customersAPI } from '../utils/api/customersAPI';
+import { showErrorToast } from '../utils/toast';
+import { handleAPIError } from '../utils/apiConfig';
+import 'boxicons/css/boxicons.min.css';
 import './CustomerPortal.css';
 
 const CustomerPortal = ({ loggedInUser, onLogout }) => {
@@ -10,29 +14,63 @@ const CustomerPortal = ({ loggedInUser, onLogout }) => {
   });
   const [error, setError] = useState('');
   const [result, setResult] = useState(null);
+  const [loading, setLoading] = useState(false);
 
   const handleChange = (event) => {
     const { name, value } = event.target;
     setFormValues((prev) => ({ ...prev, [name]: value }));
   };
 
-  const handleSubmit = (event) => {
+  const handleSubmit = async (event) => {
     event.preventDefault();
     setError('');
+    setResult(null);
 
     if (!formValues.customerId || !formValues.citizenId.trim()) {
       setError('Please provide both customerId and citizenId.');
-      setResult(null);
       return;
     }
 
-    // Mock lookup. Replace with API call to GET /api/customer/portal
-    setResult({
-      customerId: formValues.customerId,
-      citizenId: formValues.citizenId,
-      name: 'Demo Customer',
-      note: 'Replace this with live data once API integration is ready.',
-    });
+    try {
+      setLoading(true);
+      const data = await customersAPI.getPortalInfo(
+        Number(formValues.customerId),
+        formValues.citizenId.trim()
+      );
+      setResult(data);
+    } catch (err) {
+      console.error('Error fetching portal info:', err);
+      const errorMsg = handleAPIError(err);
+      setError(errorMsg);
+      showErrorToast(errorMsg);
+      setResult(null);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const formatCurrency = (value) => {
+    const numeric = Number(value || 0);
+    if (Number.isNaN(numeric)) return '0 ₫';
+    return new Intl.NumberFormat('vi-VN', {
+      style: 'currency',
+      currency: 'VND',
+      currencyDisplay: 'code',
+      maximumFractionDigits: 0,
+    }).format(numeric).replace(/\u00A0/g, ' ');
+  };
+
+  const formatDate = (dateString) => {
+    if (!dateString) return 'N/A';
+    try {
+      return new Date(dateString).toLocaleDateString('vi-VN', {
+        year: 'numeric',
+        month: '2-digit',
+        day: '2-digit'
+      });
+    } catch {
+      return dateString;
+    }
   };
 
   return (
@@ -79,27 +117,177 @@ const CustomerPortal = ({ loggedInUser, onLogout }) => {
 
             {error && <div className="form-error">{error}</div>}
 
-            <button type="submit" className="lookup-button">
-              Submit Request
+            <button type="submit" className="lookup-button" disabled={loading}>
+              {loading ? (
+                <>
+                  <i className="bx bx-loader-alt bx-spin" style={{ marginRight: '8px' }}></i>
+                  Loading...
+                </>
+              ) : (
+                'Submit Request'
+              )}
             </button>
           </form>
 
-          {result ? (
-            <div className="result-card">
-              <p>
-                <strong>Name:</strong> {result.name}
-              </p>
-              <p>
-                <strong>customerId:</strong> {result.customerId}
-              </p>
-              <p>
-                <strong>citizenId:</strong> {result.citizenId}
-              </p>
-              <p className="result-note">{result.note}</p>
-            </div>
-          ) : (
+          {!result && !loading && (
             <div className="result-placeholder">
               Enter valid IDs to display customer information.
+            </div>
+          )}
+
+          {result && (
+            <div className="portal-results">
+              {/* Customer Information */}
+              {result.customerInfo && (
+                <div className="result-section">
+                  <h2 className="result-section-title">
+                    <i className="bx bx-user"></i>
+                    Thông tin cá nhân
+                  </h2>
+                  <div className="info-grid">
+                    {Object.entries(result.customerInfo).map(([key, value]) => (
+                      <div key={key} className="info-item">
+                        <span className="info-label">
+                          {key.replace(/([A-Z])/g, ' $1').trim()}:
+                        </span>
+                        <span className="info-value">{value || 'N/A'}</span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {/* Orders List */}
+              {result.orders && Array.isArray(result.orders) && result.orders.length > 0 && (
+                <div className="result-section table-section">
+                  <h2 className="result-section-title">
+                    <i className="bx bx-list-ul"></i>
+                    Danh sách đơn hàng ({result.orders.length})
+                  </h2>
+                  <div className="table-wrapper">
+                    <table className="data-table">
+                      <thead>
+                        <tr>
+                          <th>Order ID</th>
+                          <th>Order Date</th>
+                          <th>Total Amount</th>
+                          <th>Paid Amount</th>
+                          <th>Remaining</th>
+                          <th>Status</th>
+                          <th>Payment Status</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {result.orders.map((order, index) => (
+                          <tr key={order.id || order.orderId || index}>
+                            <td>#{order.id || order.orderId || 'N/A'}</td>
+                            <td>{formatDate(order.orderDate)}</td>
+                            <td className="amount">{formatCurrency(order.totalAmount || 0)}</td>
+                            <td className="amount">{formatCurrency(order.paidAmount || 0)}</td>
+                            <td className="amount remaining">
+                              {formatCurrency(order.remainingAmount || 0)}
+                            </td>
+                            <td>
+                              <span className={`status-badge status-${(order.status || '').toLowerCase()}`}>
+                                {order.status || 'N/A'}
+                              </span>
+                            </td>
+                            <td>
+                              <span className={`status-badge payment-${(order.paymentStatus || 'unpaid').toLowerCase()}`}>
+                                {order.paymentStatus || 'UNPAID'}
+                              </span>
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+              )}
+
+              {/* Payment History */}
+              {result.paymentHistory && Array.isArray(result.paymentHistory) && result.paymentHistory.length > 0 && (
+                <div className="result-section table-section">
+                  <h2 className="result-section-title">
+                    <i className="bx bx-history"></i>
+                    Lịch sử thanh toán ({result.paymentHistory.length})
+                  </h2>
+                  <div className="table-wrapper">
+                    <table className="data-table">
+                      <thead>
+                        <tr>
+                          <th>Payment Date</th>
+                          <th>Amount</th>
+                          <th>Payment Method</th>
+                          <th>Status</th>
+                          <th>Notes</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {result.paymentHistory.map((payment, index) => (
+                          <tr key={payment.id || payment.paymentId || index}>
+                            <td>{formatDate(payment.paymentDate || payment.createdAt)}</td>
+                            <td className="amount positive">{formatCurrency(payment.amount || 0)}</td>
+                            <td>{payment.paymentMethod || 'N/A'}</td>
+                            <td>
+                              <span className={`status-badge payment-${(payment.status || 'pending').toLowerCase()}`}>
+                                {payment.status || 'PENDING'}
+                              </span>
+                            </td>
+                            <td className="notes">{payment.notes || '-'}</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+              )}
+
+              {/* Installments */}
+              {result.installments && Array.isArray(result.installments) && result.installments.length > 0 && (
+                <div className="result-section table-section">
+                  <h2 className="result-section-title">
+                    <i className="bx bx-calendar-check"></i>
+                    Lịch trả góp ({result.installments.length})
+                  </h2>
+                  <div className="table-wrapper">
+                    <table className="data-table">
+                      <thead>
+                        <tr>
+                          <th>Due Date</th>
+                          <th>Amount</th>
+                          <th>Status</th>
+                          <th>Paid Date</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {result.installments.map((installment, index) => (
+                          <tr key={installment.id || index}>
+                            <td>{formatDate(installment.dueDate)}</td>
+                            <td className="amount">{formatCurrency(installment.amount || 0)}</td>
+                            <td>
+                              <span className={`status-badge installment-${(installment.status || 'pending').toLowerCase()}`}>
+                                {installment.status || 'PENDING'}
+                              </span>
+                            </td>
+                            <td>{installment.paidDate ? formatDate(installment.paidDate) : 'Chưa thanh toán'}</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+              )}
+
+              {/* Empty State */}
+              {(!result.orders || result.orders.length === 0) && 
+               (!result.paymentHistory || result.paymentHistory.length === 0) && 
+               (!result.installments || result.installments.length === 0) && (
+                <div className="result-placeholder">
+                  <i className="bx bx-info-circle" style={{ fontSize: '48px', marginBottom: '16px', display: 'block' }}></i>
+                  Không có dữ liệu để hiển thị
+                </div>
+              )}
             </div>
           )}
         </section>

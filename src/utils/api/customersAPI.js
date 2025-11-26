@@ -41,5 +41,16 @@ export const customersAPI = {
   bookTestDrive: async (testDriveData) => {
     const response = await apiClient.post('/api/test-drive/schedule', testDriveData);
     return response.data;
+  },
+
+  // Get customer portal information (debt lookup)
+  getPortalInfo: async (customerId, citizenId) => {
+    const response = await apiClient.get('/api/customer/portal', {
+      params: {
+        customerId: customerId,
+        citizenId: citizenId
+      }
+    });
+    return response.data;
   }
 };

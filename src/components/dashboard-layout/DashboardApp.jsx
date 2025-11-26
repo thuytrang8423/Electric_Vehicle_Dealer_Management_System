@@ -48,6 +48,7 @@ const DashboardApp = ({ user: propUser, onLogout }) => {
   const { isDarkMode } = useTheme();
   const [activeItem, setActiveItem] = useState('overview');
   const [showProfileModal, setShowProfileModal] = useState(false);
+  const [paymentTabState, setPaymentTabState] = useState(null);
 
   // Handle navigation state (e.g., from PaymentResult)
   useEffect(() => {
@@ -56,7 +57,24 @@ const DashboardApp = ({ user: propUser, onLogout }) => {
     }
     // Note: We don't clear location.state here anymore
     // PaymentManagement will handle clearing it after reading fromPaymentResult
+    // Note: We don't clear location.state here anymore
+    // PaymentManagement will handle clearing it after reading fromPaymentResult
   }, [location.state]);
+
+  // Listen for openPaymentsTab event
+  useEffect(() => {
+    const handleOpenPaymentsTab = (event) => {
+      setActiveItem('payments');
+      if (event.detail) {
+        setPaymentTabState(event.detail);
+      }
+    };
+
+    window.addEventListener('openPaymentsTab', handleOpenPaymentsTab);
+    return () => {
+      window.removeEventListener('openPaymentsTab', handleOpenPaymentsTab);
+    };
+  }, []);
 
   // Notification state management
   const [notifications, setNotifications] = useState([
@@ -164,8 +182,8 @@ const DashboardApp = ({ user: propUser, onLogout }) => {
   // Helper function to check role access
   const hasRoleAccess = (allowedRoles) => {
     const userRole = user?.role?.toUpperCase();
-    return allowedRoles.some(role => 
-      userRole === role.toUpperCase() || 
+    return allowedRoles.some(role =>
+      userRole === role.toUpperCase() ||
       userRole === role.replace('-', '_').toUpperCase()
     );
   };
@@ -177,14 +195,14 @@ const DashboardApp = ({ user: propUser, onLogout }) => {
     switch (activeItem) {
       case 'overview':
         return <Dashboard user={user} />;
-      
+
       case 'activity':
         return <ActivityHistory user={user} />;
-      
+
       case 'vehicles':
         // All roles can view vehicles (Product Catalog)
         return <ProductCatalog user={user} />;
-      
+
       case 'vehicle-management':
         // Only EVM_MANAGER and ADMIN can manage vehicles
         if (hasRoleAccess(['EVM_MANAGER', 'ADMIN', 'evm-manager', 'admin'])) {
@@ -198,7 +216,7 @@ const DashboardApp = ({ user: propUser, onLogout }) => {
             </div>
           </div>
         );
-      
+
       case 'vehicle-types':
         // Only EVM_MANAGER and ADMIN can manage vehicle types
         if (hasRoleAccess(['EVM_MANAGER', 'ADMIN', 'evm-manager', 'admin'])) {
@@ -212,7 +230,7 @@ const DashboardApp = ({ user: propUser, onLogout }) => {
             </div>
           </div>
         );
-      
+
       case 'quotes':
         // DEALER_STAFF: Create and manage quotes
         // DEALER_MANAGER: Create quotes và approve quotes from staff
@@ -237,13 +255,13 @@ const DashboardApp = ({ user: propUser, onLogout }) => {
             </div>
           </div>
         );
-      
+
       case 'orders':
         // DEALER_STAFF: Create orders from approved quotes
         // DEALER_MANAGER: View and approve orders
         // EVM_MANAGER/ADMIN: View and approve orders
-        if (hasRoleAccess(['DEALER_STAFF', 'DEALER_MANAGER', 'EVM_MANAGER', 'ADMIN', 
-                          'dealer-staff', 'dealer-manager', 'evm-manager', 'admin'])) {
+        if (hasRoleAccess(['DEALER_STAFF', 'DEALER_MANAGER', 'EVM_MANAGER', 'ADMIN',
+          'dealer-staff', 'dealer-manager', 'evm-manager', 'admin'])) {
           return <Orders user={user} />;
         }
         return (
@@ -254,12 +272,12 @@ const DashboardApp = ({ user: propUser, onLogout }) => {
             </div>
           </div>
         );
-      
+
       case 'sales-contracts':
         // DEALER_STAFF, DEALER_MANAGER can access
         // EVM_MANAGER, ADMIN can view
         if (hasRoleAccess(['DEALER_STAFF', 'DEALER_MANAGER', 'EVM_MANAGER', 'ADMIN',
-                          'dealer-staff', 'dealer-manager', 'evm-manager', 'admin'])) {
+          'dealer-staff', 'dealer-manager', 'evm-manager', 'admin'])) {
           return <SalesContracts user={user} />;
         }
         return (
@@ -270,7 +288,7 @@ const DashboardApp = ({ user: propUser, onLogout }) => {
             </div>
           </div>
         );
-      
+
       case 'vehicle-orders':
         // Only EVM_MANAGER and ADMIN
         if (hasRoleAccess(['EVM_MANAGER', 'ADMIN', 'evm-manager', 'admin'])) {
@@ -284,7 +302,7 @@ const DashboardApp = ({ user: propUser, onLogout }) => {
             </div>
           </div>
         );
-      
+
       case 'delivery-tracking':
         // Only EVM_MANAGER and ADMIN
         if (hasRoleAccess(['EVM_MANAGER', 'ADMIN', 'evm-manager', 'admin'])) {
@@ -298,7 +316,7 @@ const DashboardApp = ({ user: propUser, onLogout }) => {
             </div>
           </div>
         );
-      
+
       case 'vehicle-distribution':
         // Only EVM_MANAGER and ADMIN
         if (hasRoleAccess(['EVM_MANAGER', 'ADMIN', 'evm-manager', 'admin'])) {
@@ -312,7 +330,7 @@ const DashboardApp = ({ user: propUser, onLogout }) => {
             </div>
           </div>
         );
-      
+
       case 'inventory':
         if (hasRoleAccess([
           'DEALER_MANAGER',
@@ -332,7 +350,7 @@ const DashboardApp = ({ user: propUser, onLogout }) => {
             </div>
           </div>
         );
-      
+
       case 'customers':
         // DEALER_STAFF, DEALER_MANAGER can access
         // EVM_MANAGER, ADMIN cannot access (as per ROLE_FEATURES.md)
@@ -347,7 +365,7 @@ const DashboardApp = ({ user: propUser, onLogout }) => {
             </div>
           </div>
         );
-      
+
       case 'customer-feedback':
         // DEALER_STAFF, DEALER_MANAGER can access
         // EVM_MANAGER, ADMIN cannot access
@@ -362,7 +380,7 @@ const DashboardApp = ({ user: propUser, onLogout }) => {
             </div>
           </div>
         );
-      
+
       case 'test-drives':
         // DEALER_STAFF, DEALER_MANAGER can access
         // EVM_MANAGER, ADMIN cannot access
@@ -377,11 +395,11 @@ const DashboardApp = ({ user: propUser, onLogout }) => {
             </div>
           </div>
         );
-      
+
       case 'payments':
         // All roles can view payments (but with different permissions)
-        return <PaymentManagement user={user} />;
-      
+        return <PaymentManagement user={user} paymentTabState={paymentTabState} />;
+
       case 'installments':
         if (hasRoleAccess([
           'DEALER_STAFF',
@@ -403,11 +421,11 @@ const DashboardApp = ({ user: propUser, onLogout }) => {
             </div>
           </div>
         );
-      
+
       case 'debt-management':
         // DEALER_MANAGER, EVM_MANAGER, ADMIN can access
-        if (hasRoleAccess(['DEALER_MANAGER', 'EVM_MANAGER', 'ADMIN', 
-                         'dealer-manager', 'evm-manager', 'admin'])) {
+        if (hasRoleAccess(['DEALER_MANAGER', 'EVM_MANAGER', 'ADMIN',
+          'dealer-manager', 'evm-manager', 'admin'])) {
           return <DebtManagement user={user} />;
         }
         return (
@@ -418,12 +436,12 @@ const DashboardApp = ({ user: propUser, onLogout }) => {
             </div>
           </div>
         );
-      
+
       case 'promotions':
         // All roles can view promotions
         // EVM_MANAGER, ADMIN can manage promotions
         return <PromotionManagement user={user} />;
-      
+
       case 'dealers':
         // Only EVM_MANAGER and ADMIN
         if (hasRoleAccess(['EVM_MANAGER', 'ADMIN', 'evm-manager', 'admin'])) {
@@ -437,7 +455,7 @@ const DashboardApp = ({ user: propUser, onLogout }) => {
             </div>
           </div>
         );
-      
+
       case 'users':
         // Only EVM_MANAGER and ADMIN
         if (hasRoleAccess(['EVM_MANAGER', 'ADMIN', 'evm-manager', 'admin'])) {
@@ -451,11 +469,11 @@ const DashboardApp = ({ user: propUser, onLogout }) => {
             </div>
           </div>
         );
-      
+
       case 'reports':
         // DEALER_MANAGER, EVM_MANAGER, ADMIN can access
-        if (hasRoleAccess(['DEALER_MANAGER', 'EVM_MANAGER', 'ADMIN', 
-                         'dealer-manager', 'evm-manager', 'admin'])) {
+        if (hasRoleAccess(['DEALER_MANAGER', 'EVM_MANAGER', 'ADMIN',
+          'dealer-manager', 'evm-manager', 'admin'])) {
           return <Reports user={user} />;
         }
         return (
@@ -466,7 +484,7 @@ const DashboardApp = ({ user: propUser, onLogout }) => {
             </div>
           </div>
         );
-      
+
       case 'audit-logs':
         // Only ADMIN
         if (hasRoleAccess(['ADMIN', 'admin'])) {
@@ -480,10 +498,10 @@ const DashboardApp = ({ user: propUser, onLogout }) => {
             </div>
           </div>
         );
-      
+
       case 'settings':
         return <Profile user={user} onUpdateProfile={handleProfileUpdate} />;
-      
+
       default:
         return <Dashboard user={user} />;
     }
@@ -491,14 +509,14 @@ const DashboardApp = ({ user: propUser, onLogout }) => {
 
   return (
     <div className={`app ${isDarkMode ? 'dark-mode' : 'light-mode'}`}>
-      <Sidebar 
-        user={user} 
-        activeItem={activeItem} 
-        onItemClick={handleItemClick} 
+      <Sidebar
+        user={user}
+        activeItem={activeItem}
+        onItemClick={handleItemClick}
       />
-      <Header 
-        user={user} 
-        onLogout={handleLogout} 
+      <Header
+        user={user}
+        onLogout={handleLogout}
         onProfileClick={handleProfileClick}
         notifications={notifications}
         onMarkAsRead={handleMarkAsRead}

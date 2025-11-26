@@ -79,19 +79,45 @@ const VehicleManagement = () => {
 
   const handleImageChange = async (e) => {
     const file = e.target.files[0];
-    if (file) {
-      try {
-        setUploading(true);
-        const imageUrl = await uploadImage(file);
-        setFormData({ ...formData, image: imageUrl });
-        setImagePreview(imageUrl);
-        showSuccessToast('Image uploaded successfully');
-      } catch (error) {
-        console.error('Error uploading image:', error);
-        showErrorToast('Failed to upload image');
-      } finally {
-        setUploading(false);
+    if (!file) return;
+    
+    // Validate file type
+    if (!file.type.startsWith('image/')) {
+      showErrorToast('Please select an image file');
+      return;
+    }
+    
+    // Validate file size (max 10MB)
+    const maxSize = 10 * 1024 * 1024; // 10MB
+    if (file.size > maxSize) {
+      showErrorToast('Image size must be less than 10MB');
+      return;
+    }
+    
+    try {
+      setUploading(true);
+      console.log('Starting image upload:', file.name, file.size, file.type);
+      
+      const imageUrl = await uploadImage(file);
+      
+      if (!imageUrl) {
+        throw new Error('Upload succeeded but no URL returned');
       }
+      
+      console.log('Image uploaded successfully, URL:', imageUrl);
+      setFormData({ ...formData, image: imageUrl });
+      setImagePreview(imageUrl);
+      setImageFile(file);
+      showSuccessToast('Image uploaded successfully');
+    } catch (error) {
+      console.error('Error uploading image:', error);
+      const errorMessage = error.message || 'Failed to upload image. Please check your Cloudinary configuration.';
+      showErrorToast(errorMessage);
+      // Reset image preview on error
+      setImagePreview(null);
+      setImageFile(null);
+    } finally {
+      setUploading(false);
     }
   };
 
@@ -106,9 +132,17 @@ const VehicleManagement = () => {
     const colorsData = safeParse(vehicle.availableColorsJson, []);
     const colorsText = Array.isArray(colorsData) ? colorsData.join(', ') : '';
 
+    // Debug logging
+    console.log('Vehicle being edited:', vehicle);
+    console.log('Vehicle vehicleType:', vehicle.vehicleType);
+    console.log('Available vehicleTypes when editing:', vehicleTypes);
+
     const vehicleTypeValue = vehicle.vehicleType?.typeName || vehicle.vehicleType || '';
+    console.log('Setting vehicleType to:', vehicleTypeValue);
+    
     // If vehicleType is empty and we have vehicleTypes loaded, set a default
     const finalVehicleTypeValue = vehicleTypeValue || (vehicleTypes.length > 0 ? vehicleTypes[0].typeName : '');
+    console.log('Final vehicleType value:', finalVehicleTypeValue);
 
     setEditingVehicle(vehicle);
     setFormData({
@@ -150,30 +184,39 @@ const VehicleManagement = () => {
     // Find the selected vehicle type object
     const selectedVehicleType = vehicleTypes.find(type => type.typeName === formData.vehicleType);
     
+    // Backend expect vehicleTypeId (Integer), not vehicleType object
+    let vehicleTypeId = null;
+    if (selectedVehicleType && selectedVehicleType.id) {
+      vehicleTypeId = selectedVehicleType.id;
+    } else if (vehicleTypes.length > 0) {
+      // Fallback to first available type
+      vehicleTypeId = vehicleTypes[0].id;
+    }
+    
+    // Build specifications object (backend will convert Map to JSON string)
+    const specifications = {
+      images: formData.image ? [formData.image] : [],
+      battery: {
+        capacity_kWh: parseInt(formData.batteryCapacity) || 0,
+        range_km: 0
+      }
+    };
+    
+    // Build payload according to VehicleDTO structure
     const payload = {
       modelName: formData.modelName,
-      brand: formData.brand,
-      yearOfManufacture: parseInt(formData.yearOfManufacture) || new Date().getFullYear(),
-      vehicleTypeId: selectedVehicleType?.id || (vehicleTypes.length > 0 ? vehicleTypes[0].id : 1),
-      batteryCapacity: parseInt(formData.batteryCapacity) || 0,
-      listedPrice: parseInt(formData.listedPrice) || 0,
+      brand: formData.brand || '',
+      yearOfManufacture: formData.yearOfManufacture ? parseInt(formData.yearOfManufacture) : new Date().getFullYear(),
+      vehicleTypeId: vehicleTypeId, // Backend expect vehicleTypeId (Integer)
+      batteryCapacity: formData.batteryCapacity ? parseFloat(formData.batteryCapacity) : null,
+      listedPrice: formData.listedPrice ? parseFloat(formData.listedPrice) : null,
       status: formData.status || 'AVAILABLE',
       versionJson: JSON.stringify({ features: toArr(formData.versions) }),
       availableColorsJson: JSON.stringify(toArr(formData.colors)),
-      specifications: {
-        images: formData.image ? [formData.image] : [],
-        battery: {
-          capacity_kWh: parseInt(formData.batteryCapacity) || 0,
-          range_km: 318 // Default range or calculate based on battery capacity
-        },
-        dimensions: {
-          length_mm: 4300,
-          width_mm: 1793,
-          height_mm: 1613
-        }
-      }
+      specifications: specifications // Backend will convert Map<String, Object> to JSON string
     };
-
+    
+    console.log('Vehicle payload:', payload);
 
     try {
       if (editingVehicle) {

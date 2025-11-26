@@ -1,13 +1,16 @@
-    import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
+    import { useNavigate } from 'react-router-dom';
     import { quotesAPI } from '../../utils/api/quotesAPI';
     import { customersAPI } from '../../utils/api/customersAPI';
     import { vehiclesAPI } from '../../utils/api/vehiclesAPI';
+import { inventoryAPI } from '../../utils/api/inventoryAPI';
     import { ordersAPI } from '../../utils/api/ordersAPI';
     import { showSuccessToast, showErrorToast } from '../../utils/toast';
     import { handleAPIError } from '../../utils/apiConfig';
     import 'boxicons/css/boxicons.min.css';
 
     const Quotes = ({ user }) => {
+        const navigate = useNavigate();
         const [quotes, setQuotes] = useState([]); // Mảng quotes hiển thị trên table
         const [loading, setLoading] = useState(true);
         const [selectedStatus, setSelectedStatus] = useState('all');
@@ -23,6 +26,7 @@
         const [createLoading, setCreateLoading] = useState(false);
         const [availableCustomers, setAvailableCustomers] = useState([]);
         const [availableVehicles, setAvailableVehicles] = useState([]);
+        const [dealerInventoryDetails, setDealerInventoryDetails] = useState([]);
         const [customerLookup, setCustomerLookup] = useState({});
         const [vehicleLookup, setVehicleLookup] = useState({});
         const [selectedCustomer, setSelectedCustomer] = useState(null);
@@ -165,6 +169,24 @@
         }, [dealerId, userRole]); // eslint-disable-line react-hooks/exhaustive-deps
 
         useEffect(() => {
+            const loadDealerInventory = async () => {
+                if (!dealerId) {
+                    setDealerInventoryDetails([]);
+                    return;
+                }
+                try {
+                    const details = await inventoryAPI.getDealerInventoryDetails(dealerId);
+                    setDealerInventoryDetails(Array.isArray(details) ? details : []);
+                } catch (error) {
+                    console.error('Failed to load dealer inventory details:', error);
+                    setDealerInventoryDetails([]);
+                }
+            };
+
+            loadDealerInventory();
+        }, [dealerId]);
+
+        useEffect(() => {
             const map = {};
             availableCustomers.forEach((customer) => {
                 // Tạo lookup với nhiều key để dễ tìm
@@ -275,14 +297,75 @@
             };
         }, [quotes, customerLookup, availableCustomers]);
 
+        const dealerVehicleOptions = useMemo(() => {
+            if (!Array.isArray(dealerInventoryDetails) || dealerInventoryDetails.length === 0) {
+                return [];
+            }
+
+            return dealerInventoryDetails
+                .map((detail) => {
+                    const vehicleId = detail?.vehicle?.id ?? detail?.vehicleId;
+                    if (vehicleId === undefined || vehicleId === null) return null;
+
+                    const baseVehicle =
+                        detail.vehicle ||
+                        availableVehicles.find(
+                            (vehicle) => String(vehicle.id ?? vehicle.vehicleId) === String(vehicleId)
+                        ) ||
+                        {};
+
+                    const quantity = Number(
+                        detail.availableQuantity ?? detail.available ?? detail.quantity ?? 0
+                    );
+
+                    return {
+                        ...baseVehicle,
+                        id: baseVehicle.id ?? vehicleId,
+                        vehicleId: baseVehicle.vehicleId ?? vehicleId,
+                        availableQuantity: quantity,
+                        inventoryDetail: detail,
+                    };
+                })
+                .filter((item) => item && item.availableQuantity > 0);
+        }, [dealerInventoryDetails, availableVehicles]);
+
         useEffect(() => {
             const map = {};
-            availableVehicles.forEach((vehicle) => {
-                const key = String(vehicle.id ?? vehicle.vehicleId);
-                map[key] = vehicle;
-            });
+
+            const registerVehicle = (vehicle) => {
+                if (!vehicle) return;
+                const key = vehicle.id ?? vehicle.vehicleId;
+                if (key !== undefined && key !== null) {
+                    map[String(key)] = vehicle;
+                }
+            };
+
+            availableVehicles.forEach(registerVehicle);
+            dealerVehicleOptions.forEach(registerVehicle);
+
             setVehicleLookup(map);
-        }, [availableVehicles]);
+        }, [availableVehicles, dealerVehicleOptions]);
+
+        // 🔥 SORT VEHICLES: xe dealer còn hàng lên đầu, fallback list toàn bộ
+        const sortedVehicles = useMemo(() => {
+            const source =
+                dealerVehicleOptions.length > 0 ? dealerVehicleOptions : availableVehicles;
+
+            if (!Array.isArray(source) || source.length === 0) {
+                return [];
+            }
+
+            return [...source].sort((a, b) => {
+                const qtyA = Number(a.availableQuantity ?? a.quantity ?? a.stock ?? 0);
+                const qtyB = Number(b.availableQuantity ?? b.quantity ?? b.stock ?? 0);
+
+                if ((qtyA > 0 && qtyB > 0) || (qtyA === 0 && qtyB === 0)) {
+                    return qtyB - qtyA;
+                }
+
+                return qtyB > 0 ? 1 : -1;
+            });
+        }, [dealerVehicleOptions, availableVehicles]);
 
         const getStatusColor = (status, approvalStatus) => {
             if (approvalStatus === 'REJECTED') return 'var(--color-error)';
@@ -970,6 +1053,20 @@
                                                         </button>
                                                     )}
 
+                                                    {/* Action Create Order - Chỉ hiện khi quote đã approved và accepted */}
+                                                    {/* {canCreateOrder(quote) && (
+                                                        <button
+                                                            className="btn btn-primary"
+                                                            style={{ padding: '6px 12px', fontSize: '12px' }}
+                                                            onClick={() => handleCreateOrder(quote)}
+                                                            disabled={checkingQuoteId === (quote.quoteId || quote.id)}
+                                                            title="Tạo đơn hàng từ quote này"
+                                                        >
+                                                            <i className={`bx ${checkingQuoteId === (quote.quoteId || quote.id) ? 'bx-loader-alt bx-spin' : 'bx-shopping-bag'}`}></i>
+                                                            {checkingQuoteId === (quote.quoteId || quote.id) ? 'Checking...' : 'Tạo Đơn Hàng'}
+                                                        </button>
+                                                    )} */}
+
                                                     {/* Action View Details */}
                                                     <button 
                                                         className="btn btn-outline" 
@@ -1232,12 +1329,18 @@
                                 if (availableCustomers.length === 0 || availableVehicles.length === 0) {
                                     (async () => {
                                         try {
-                                            const [customers, vehicles] = await Promise.all([
+                                            const [customers, vehicles, inventoryDetails] = await Promise.all([
                                                 dealerId ? customersAPI.getByDealer(dealerId) : customersAPI.getAll(),
-                                                vehiclesAPI.getAll()
+                                                vehiclesAPI.getAll(),
+                                                dealerId
+                                                    ? inventoryAPI.getDealerInventoryDetails(dealerId).catch(() => [])
+                                                    : []
                                             ]);
                                             setAvailableCustomers(Array.isArray(customers) ? customers : []);
                                             setAvailableVehicles(Array.isArray(vehicles) ? vehicles : []);
+                                            setDealerInventoryDetails(
+                                                Array.isArray(inventoryDetails) ? inventoryDetails : []
+                                            );
                                         } catch (err) {
                                             console.error('Failed to load dropdown data:', err);
                                         }
@@ -1371,7 +1474,7 @@
                                             value={createForm.vehicleId}
                                             onChange={(e) => {
                                                 const vid = e.target.value;
-                                                const v = availableVehicles.find(x => String(x.id || x.vehicleId) === String(vid));
+                                                const v = sortedVehicles.find(x => String(x.id || x.vehicleId) === String(vid));
                                                 setSelectedVehicle(v || null);
                                                 setCreateForm({ 
                                                     ...createForm, 
@@ -1398,7 +1501,7 @@
                                             required
                                         >
                                             <option value="">Select vehicle</option>
-                                            {availableVehicles.map(v => {
+                                            {sortedVehicles.map(v => {
                                                 // Ưu tiên: brand + modelName > modelName > name > model > vehicleName
                                                 let vehicleDisplayName = '';
                                                 if (v.brand && v.modelName) {
@@ -1417,9 +1520,15 @@
                                                     vehicleDisplayName = 'Vehicle';
                                                 }
                                                 
+                                                // Lấy quantity từ factory inventory
+                                                const vehicleId = v.id || v.vehicleId;
+                                                const availableQty = Number(v.availableQuantity ?? v.quantity ?? v.stock ?? 0);
+                                                
                                                 return (
-                                                    <option key={v.id || v.vehicleId} value={v.id || v.vehicleId}>
-                                                        {vehicleDisplayName} {v.listedPrice ? `($${Number(v.listedPrice).toLocaleString()})` : ''}
+                                                    <option key={vehicleId} value={vehicleId}>
+                                                        {vehicleDisplayName} 
+                                                        {v.listedPrice ? ` ($${Number(v.listedPrice).toLocaleString()})` : ''}
+                                                        {availableQty > 0 ? ` - Còn ${availableQty} xe` : ' - Hết hàng'}
                                                     </option>
                                                 );
                                             })}
@@ -1635,7 +1744,7 @@
                     </div>
                 )}
 
-                {/* Create Order Modal - Giữ nguyên */}
+                {/* Create Order Modal */}
                 {showCreateOrderModal && selectedQuote && (
                     <div style={{
                         position: 'fixed',
@@ -1657,7 +1766,7 @@
                             maxWidth: '500px'
                         }}>
                             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '24px' }}>
-                                <h3>Create Order from Quote</h3>
+                                <h3>Tạo Đơn Hàng từ Báo Giá</h3>
                                 <button 
                                     onClick={() => {
                                         setShowCreateOrderModal(false);
@@ -1668,36 +1777,293 @@
                                     <i className="bx bx-x"></i>
                                 </button>
                             </div>
-                            <p style={{ marginBottom: '16px', color: 'var(--color-text-muted)' }}>
-                                Quote #{selectedQuote.quoteId || selectedQuote.id} - Total: ${(selectedQuote.finalTotal || selectedQuote.totalAmount || 0).toLocaleString()}
-                            </p>
-                            <p style={{ marginBottom: '24px', color: 'var(--color-text-muted)' }}>
-                                Redirecting to Orders page to create order...
-                            </p>
-                            <div style={{ display: 'flex', gap: '12px', justifyContent: 'flex-end' }}>
-                                <button 
-                                    className="btn btn-outline" 
-                                    onClick={() => {
-                                        setShowCreateOrderModal(false);
-                                        setSelectedQuote(null);
-                                    }}  
-                                >
-                                    Cancel
-                                </button>
-                                <button 
-                                    className="btn btn-primary"
-                                    onClick={() => {
-                                        // Store selected quote in localStorage or navigate to Orders with quoteId
-                                        localStorage.setItem('selectedQuoteForOrder', JSON.stringify(selectedQuote));
-                                        setShowCreateOrderModal(false);
-                                        setSelectedQuote(null);
-                                        // Trigger navigation to Orders - this will be handled by parent component
-                                        window.dispatchEvent(new CustomEvent('navigateToOrders', { detail: { quoteId: selectedQuote.quoteId || selectedQuote.id } }));
-                                    }}
-                                >
-                                    Go to Orders
-                                </button>
+                            
+                            <div style={{ marginBottom: '16px', padding: '12px', background: 'var(--color-bg)', borderRadius: 'var(--radius)' }}>
+                                <div style={{ fontSize: '14px', color: 'var(--color-text-muted)', marginBottom: '4px' }}>Báo Giá</div>
+                                <div style={{ fontWeight: '600', color: 'var(--color-text)' }}>
+                                    #{selectedQuote.quoteId || selectedQuote.id}
+                                </div>
+                                <div style={{ fontSize: '12px', color: 'var(--color-text-muted)', marginTop: '4px' }}>
+                                    Tổng tiền: ${(selectedQuote.finalTotal || selectedQuote.totalAmount || 0).toLocaleString()}
+                                </div>
                             </div>
+
+                            <form onSubmit={async (e) => {
+                                e.preventDefault();
+                                const quoteId = selectedQuote.quoteId || selectedQuote.id;
+                                const formData = new FormData(e.target);
+                                const paymentMethod = formData.get('paymentMethod');
+                                const paymentPercentage = Number(formData.get('paymentPercentage'));
+                                const notes = formData.get('notes') || '';
+
+                                // ✅ VALIDATE: Backend chỉ hỗ trợ CASH, TRANSFER, VNPAY
+                                const validPaymentMethods = ['CASH', 'TRANSFER', 'VNPAY'];
+                                if (!validPaymentMethods.includes(paymentMethod?.toUpperCase())) {
+                                    showErrorToast('Phương thức thanh toán không hợp lệ. Chỉ hỗ trợ: Tiền mặt, Chuyển khoản, VNPay');
+                                    return;
+                                }
+
+                                try {
+                                    // ✅ VALIDATE: Kiểm tra VIN và EngineNumber của vehicle trước khi tạo order
+                                    // Lấy vehicleId từ nhiều nguồn có thể
+                                    let vehicleId = selectedQuote.vehicleId || 
+                                                    selectedQuote.vehicle?.id || 
+                                                    selectedQuote.vehicle?.vehicleId ||
+                                                    selectedQuote.quoteDetails?.[0]?.vehicleId ||
+                                                    selectedQuote.quoteDetails?.[0]?.vehicle?.id ||
+                                                    selectedQuote.quoteDetails?.[0]?.vehicle?.vehicleId ||
+                                                    null;
+                                    
+                                    // Nếu vẫn không có, thử lấy từ quoteDetails array
+                                    if (!vehicleId && selectedQuote.quoteDetails && Array.isArray(selectedQuote.quoteDetails)) {
+                                        for (const detail of selectedQuote.quoteDetails) {
+                                            if (detail.vehicleId || detail.vehicle?.id || detail.vehicle?.vehicleId) {
+                                                vehicleId = detail.vehicleId || detail.vehicle?.id || detail.vehicle?.vehicleId;
+                                                break;
+                                            }
+                                        }
+                                    }
+                                    
+                                    if (vehicleId) {
+                                        try {
+                                            const vehicle = await vehiclesAPI.getById(vehicleId);
+                                            // Check VIN - phải có và không rỗng
+                                            if (!vehicle.vin || (typeof vehicle.vin === 'string' && vehicle.vin.trim() === '')) {
+                                                showErrorToast(`Xe với ID ${vehicleId} chưa có số khung (VIN). Vui lòng cập nhật VIN cho xe trước khi tạo đơn hàng.`);
+                                                return;
+                                            }
+                                            // Check EngineNumber - phải có và không rỗng
+                                            if (!vehicle.engineNumber || (typeof vehicle.engineNumber === 'string' && vehicle.engineNumber.trim() === '')) {
+                                                showErrorToast(`Xe với ID ${vehicleId} chưa có số máy (Engine Number). Vui lòng cập nhật số máy cho xe trước khi tạo đơn hàng.`);
+                                                return;
+                                            }
+                                        } catch (vehicleError) {
+                                            console.error('Error checking vehicle VIN/EngineNumber:', vehicleError);
+                                            // Nếu không lấy được vehicle info, KHÔNG tiếp tục - báo lỗi
+                                            showErrorToast(`Không thể kiểm tra thông tin xe (ID: ${vehicleId}). Vui lòng thử lại.`);
+                                            return;
+                                        }
+                                    } else {
+                                        // Nếu không lấy được vehicleId, báo lỗi
+                                        console.error('Cannot find vehicleId from quote:', selectedQuote);
+                                        showErrorToast('Không thể xác định thông tin xe từ báo giá. Vui lòng thử lại.');
+                                        return;
+                                    }
+
+                                    // Kiểm tra xem đã có order cho quote này chưa
+                                    try {
+                                        const existingOrders = await ordersAPI.getByQuote(quoteId);
+                                        if (existingOrders && existingOrders.length > 0) {
+                                            const existingOrder = Array.isArray(existingOrders) ? existingOrders[0] : existingOrders;
+                                            const existingOrderId = existingOrder.id || existingOrder.orderId;
+                                            const existingOrderStatus = existingOrder.status || existingOrder.orderStatus || '';
+                                            
+                                            // Nếu order chưa bị cancelled, báo lỗi
+                                            if (existingOrderStatus !== 'CANCELLED' && existingOrderStatus !== 'cancelled') {
+                                                const confirmMessage = `Đã có đơn hàng #${existingOrderId} cho báo giá này (Status: ${existingOrderStatus}).\n\nBạn có muốn xem đơn hàng đó không?`;
+                                                if (window.confirm(confirmMessage)) {
+                                                    navigate(`/orders?orderId=${existingOrderId}`);
+                                                    return;
+                                                } else {
+                                                    setShowCreateOrderModal(false);
+                                                    setSelectedQuote(null);
+                                                    return;
+                                                }
+                                            }
+                                        }
+                                    } catch (checkError) {
+                                        // Nếu không lấy được orders, tiếp tục tạo order mới
+                                        console.log('Could not check existing orders, proceeding with order creation:', checkError);
+                                    }
+
+                                    const orderData = {
+                                        quoteId: quoteId,
+                                        paymentMethod: paymentMethod,
+                                        paymentPercentage: paymentPercentage,
+                                        notes: notes,
+                                        // Thêm các field cần thiết
+                                        customerId: selectedQuote.customerId || null,
+                                        dealerId: selectedQuote.dealerId || dealerId,
+                                        userId: userId
+                                    };
+
+                                    // SỬA: DEALER_STAFF dùng dealer-workflow, DEALER_MANAGER dùng workflow
+                                    let createdOrder = null;
+                                    try {
+                                        if (userRole === 'DEALER_STAFF') {
+                                            createdOrder = await ordersAPI.createFromApprovedQuote(orderData, userId);
+                                            showSuccessToast('Tạo đơn hàng thành công. Chờ Dealer Manager duyệt.');
+                                        } else if (userRole === 'DEALER_MANAGER') {
+                                            // DEALER_MANAGER tạo order từ quote đã được EVM approve
+                                            // customerId phải là null cho DEALER_MANAGER
+                                            orderData.customerId = null;
+                                            createdOrder = await ordersAPI.createFromEVMApprovedQuote(orderData);
+                                            showSuccessToast('Tạo đơn hàng thành công. Chờ EVM Manager duyệt.');
+                                        } else {
+                                            showErrorToast('Role không được phép tạo order');
+                                            return;
+                                        }
+
+                                        setShowCreateOrderModal(false);
+                                        setSelectedQuote(null);
+                                        
+                                        // Nếu order có payment percentage, navigate đến payment page để xem payment
+                                        if (createdOrder && (paymentPercentage > 0 || createdOrder.paidAmount > 0)) {
+                                            const orderId = createdOrder.id || createdOrder.orderId;
+                                            if (orderId) {
+                                                // Navigate đến payment page với orderId
+                                                setTimeout(() => {
+                                                    navigate(`/payment-management?orderId=${orderId}`);
+                                                }, 1000);
+                                                return; // Không reload quotes nữa vì sẽ navigate
+                                            }
+                                        }
+                                        
+                                        // Reload quotes nếu không navigate
+                                        window.location.reload();
+                                    } catch (createError) {
+                                        console.error('Error creating order:', createError);
+                                        const errorMessage = handleAPIError(createError);
+                                        
+                                        // Kiểm tra xem có phải lỗi "Order already exists" không
+                                        if (errorMessage.includes('Order already exists') || 
+                                            errorMessage.includes('order already exists') ||
+                                            errorMessage.includes('already exists for this quote')) {
+                                            // Extract order ID từ error message (nếu có)
+                                            const orderIdMatch = errorMessage.match(/order: (\d+)/i) || 
+                                                               errorMessage.match(/quote: (\d+)/i) ||
+                                                               errorMessage.match(/: (\d+)/);
+                                            const existingOrderId = orderIdMatch ? orderIdMatch[1] : null;
+                                            
+                                            // Hiển thị thông báo rõ ràng hơn
+                                            const detailedMessage = existingOrderId 
+                                                ? `Đã có đơn hàng #${existingOrderId} cho báo giá này. Bạn có muốn xem đơn hàng đó không?`
+                                                : 'Đã có đơn hàng cho báo giá này. Vui lòng kiểm tra danh sách đơn hàng.';
+                                            
+                                            if (window.confirm(detailedMessage + '\n\nNhấn OK để xem đơn hàng, Cancel để đóng.')) {
+                                                // Navigate đến Orders page
+                                                if (existingOrderId) {
+                                                    navigate(`/orders?orderId=${existingOrderId}`);
+                                                } else {
+                                                    // Thử lấy order từ quoteId
+                                                    try {
+                                                        const orders = await ordersAPI.getByQuote(quoteId);
+                                                        if (orders && orders.length > 0) {
+                                                            const firstOrder = Array.isArray(orders) ? orders[0] : orders;
+                                                            const orderId = firstOrder.id || firstOrder.orderId;
+                                                            if (orderId) {
+                                                                navigate(`/orders?orderId=${orderId}`);
+                                                                return;
+                                                            }
+                                                        }
+                                                    } catch (fetchError) {
+                                                        console.error('Error fetching order by quote:', fetchError);
+                                                    }
+                                                    navigate('/orders');
+                                                }
+                                                return;
+                                            }
+                                        } else {
+                                            showErrorToast(errorMessage);
+                                        }
+                                    }
+                                } catch (error) {
+                                    console.error('Error in form submission:', error);
+                                    showErrorToast(handleAPIError(error));
+                                }
+                            }}>
+                                <div style={{ display: 'grid', gap: '16px', marginBottom: '24px' }}>
+                                    <div>
+                                        <label style={{ display: 'block', marginBottom: '8px', fontSize: '14px', fontWeight: '600', color: 'var(--color-text)' }}>
+                                            Phương thức thanh toán *
+                                        </label>
+                                        <select
+                                            name="paymentMethod"
+                                            required
+                                            style={{
+                                                width: '100%',
+                                                padding: '12px',
+                                                border: '1px solid var(--color-border)',
+                                                borderRadius: 'var(--radius)',
+                                                background: 'var(--color-bg)',
+                                                color: 'var(--color-text)',
+                                                fontSize: '14px'
+                                            }}
+                                        >
+                                            <option value="CASH">Tiền mặt</option>
+                                            <option value="TRANSFER">Chuyển khoản</option>
+                                            <option value="VNPAY">VNPay</option>
+                                            {/* ⚠️ LƯU Ý: Backend không hỗ trợ INSTALLMENT trong PaymentMethod enum */}
+                                            {/* Trả góp được xử lý riêng qua InstallmentSchedule, không phải paymentMethod */}
+                                        </select>
+                                    </div>
+
+                                    <div>
+                                        <label style={{ display: 'block', marginBottom: '8px', fontSize: '14px', fontWeight: '600', color: 'var(--color-text)' }}>
+                                            Phần trăm thanh toán *
+                                        </label>
+                                        <select
+                                            name="paymentPercentage"
+                                            required
+                                            style={{
+                                                width: '100%',
+                                                padding: '12px',
+                                                border: '1px solid var(--color-border)',
+                                                borderRadius: 'var(--radius)',
+                                                background: 'var(--color-bg)',
+                                                color: 'var(--color-text)',
+                                                fontSize: '14px'
+                                            }}
+                                        >
+                                            <option value="30">30%</option>
+                                            <option value="50">50%</option>
+                                            <option value="70">70%</option>
+                                            <option value="100">100%</option>
+                                        </select>
+                                    </div>
+
+                                    <div>
+                                        <label style={{ display: 'block', marginBottom: '8px', fontSize: '14px', fontWeight: '600', color: 'var(--color-text)' }}>
+                                            Ghi chú
+                                        </label>
+                                        <textarea
+                                            name="notes"
+                                            placeholder="Ghi chú (tùy chọn)"
+                                            style={{
+                                                width: '100%',
+                                                padding: '12px',
+                                                border: '1px solid var(--color-border)',
+                                                borderRadius: 'var(--radius)',
+                                                background: 'var(--color-bg)',
+                                                color: 'var(--color-text)',
+                                                fontSize: '14px',
+                                                minHeight: '80px',
+                                                resize: 'vertical'
+                                            }}
+                                        />
+                                    </div>
+                                </div>
+
+                                <div style={{ display: 'flex', gap: '12px', justifyContent: 'flex-end' }}>
+                                    <button 
+                                        type="button"
+                                        className="btn btn-outline" 
+                                        onClick={() => {
+                                            setShowCreateOrderModal(false);
+                                            setSelectedQuote(null);
+                                        }}  
+                                    >
+                                        Hủy
+                                    </button>
+                                    <button 
+                                        type="submit"
+                                        className="btn btn-primary"
+                                    >
+                                        <i className="bx bx-shopping-bag"></i>
+                                        Tạo Đơn Hàng
+                                    </button>
+                                </div>
+                            </form>
                         </div>
                     </div>
                 )}

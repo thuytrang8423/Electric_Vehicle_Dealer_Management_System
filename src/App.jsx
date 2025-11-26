@@ -11,6 +11,7 @@ import DetailDealer from './components/DetailDealer'
 import Details from './components/Details'
 import DashboardApp from './components/dashboard-layout/DashboardApp'
 import PaymentResult from './components/common/PaymentResult'
+import PaymentManagement from './components/common/PaymentManagement'
 import { ToastContainer } from 'react-toastify'
 import 'react-toastify/dist/ReactToastify.css'
 
@@ -92,6 +93,14 @@ function App() {
             : <Navigate to="/" replace />
         } />
         <Route path="/payment-result" element={<PaymentResult />} />
+        <Route
+          path="/payment-management"
+          element={
+            loggedInUser
+              ? <PaymentManagement user={loggedInUser} />
+              : <Navigate to="/" replace />
+          }
+        />
         <Route path="*" element={<Navigate to="/" replace />} />
       </Routes>
 

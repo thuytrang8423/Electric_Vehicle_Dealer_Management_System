@@ -25,10 +25,37 @@ const TestDriveManagement = ({ user }) => {
   const [selectedRequest, setSelectedRequest] = useState(null);
   const [confirmationData, setConfirmationData] = useState({
     date: '',
-    time: '', // Giờ xác nhận không còn được sử dụng trong modal nhưng vẫn giữ trong state cho các logic khác
+    time: '', // Confirmation time is no longer used in the modal but stays for other logic
     note: '',
   });
   const [actionLoading, setActionLoading] = useState(false);
+
+  const accentColor = '#ff4d4f';
+  const labelStyles = {
+    display: 'block',
+    marginBottom: '8px',
+    fontSize: '12px',
+    fontWeight: '700',
+    letterSpacing: '0.05em',
+    color: 'var(--color-text)',
+    textTransform: 'uppercase',
+  };
+  const labelContentStyles = {
+    display: 'flex',
+    alignItems: 'center',
+    gap: '8px',
+  };
+  const modalInputStyles = {
+    width: '100%',
+    padding: '12px 14px',
+    border: '1px solid rgba(255, 255, 255, 0.12)',
+    borderRadius: '12px',
+    background: 'var(--color-bg)',
+    color: 'var(--color-text)',
+    fontSize: '14px',
+    boxShadow: '0 8px 28px rgba(0, 0, 0, 0.35)',
+    transition: 'border 0.2s ease, box-shadow 0.2s ease',
+  };
 
   const dealerId =
     user?.dealerId ??
@@ -69,7 +96,7 @@ const TestDriveManagement = ({ user }) => {
   const mapScheduleToTestDrive = (schedule) => {
     const scheduleId = getRequestIdentifier(schedule);
 
-    // Xử lý date: ưu tiên date, nếu không có thì parse từ requestTime
+    // Handle date: prefer provided date, otherwise parse from requestTime
     let dateValue = schedule?.date ?? schedule?.confirmedDate ?? schedule?.preferredDate ?? schedule?.requestedDate ?? '';
     if (!dateValue && schedule?.requestTime) {
       try {
@@ -80,7 +107,7 @@ const TestDriveManagement = ({ user }) => {
       }
     }
 
-    // Xử lý time: ưu tiên requestTime, parse để lấy time
+    // Handle time: prefer requestTime, otherwise parse fallback fields
     let timeValue = '';
     if (schedule?.requestTime) {
       try {
@@ -101,8 +128,8 @@ const TestDriveManagement = ({ user }) => {
 
     return {
       id: scheduleId ?? `schedule-${Math.random().toString(36).slice(2)}`,
-      customer: schedule?.customerName ?? schedule?.name ?? 'Khách hàng',
-      vehicle: schedule?.carModel ?? schedule?.vehicle ?? schedule?.vehicleModel ?? 'Chưa cập nhật',
+      customer: schedule?.customerName ?? schedule?.name ?? 'Customer',
+      vehicle: schedule?.carModel ?? schedule?.vehicle ?? schedule?.vehicleModel ?? 'Not provided',
       date: dateValue,
       time: timeValue,
       phone: schedule?.phoneNumber ?? schedule?.phone ?? '',
@@ -131,7 +158,7 @@ const TestDriveManagement = ({ user }) => {
   const loadPendingRequests = useCallback(async () => {
     if (!dealerId) {
       setPendingRequests([]);
-      setRequestsError('Không xác định được đại lý hiện tại.');
+      setRequestsError('Unable to determine the current dealer.');
       return;
     }
 
@@ -152,8 +179,8 @@ const TestDriveManagement = ({ user }) => {
       );
     } catch (error) {
       console.error('Failed to load test drive requests:', error);
-      setRequestsError('Không thể tải danh sách yêu cầu thử xe.');
-      showErrorToast('Tải danh sách yêu cầu thử xe thất bại.');
+      setRequestsError('Unable to load test drive requests.');
+      showErrorToast('Failed to load test drive requests.');
     } finally {
       setLoadingRequests(false);
     }
@@ -182,12 +209,12 @@ const TestDriveManagement = ({ user }) => {
     console.log('Opening confirmation for request:', request);
     setSelectedRequest(request);
 
-    // Xử lý date: ưu tiên date, nếu không có thì parse từ requestTime
+    // Handle date: prefer provided value, otherwise parse from requestTime
     let dateValue = request?.date ?? request?.confirmedDate ?? request?.preferredDate ?? '';
     if (!dateValue && request?.requestTime) {
       try {
         const dateObj = new Date(request.requestTime);
-        // Lấy date theo local timezone để tránh timezone issues
+        // Get date in local timezone to avoid offsets
         const year = dateObj.getFullYear();
         const month = String(dateObj.getMonth() + 1).padStart(2, '0');
         const day = String(dateObj.getDate()).padStart(2, '0');
@@ -198,12 +225,12 @@ const TestDriveManagement = ({ user }) => {
       }
     }
 
-    // Xử lý time: ưu tiên requestTime, parse để lấy time (Giữ lại logic này cho việc set confirmationData.time)
+    // Handle time: prefer requestTime parsing to keep confirmationData.time in sync
     let timeValue = '';
     if (request?.requestTime) {
       try {
         const dateObj = new Date(request.requestTime);
-        // Lấy time theo local timezone
+        // Convert to local timezone for display
         const hours = String(dateObj.getHours()).padStart(2, '0');
         const minutes = String(dateObj.getMinutes()).padStart(2, '0');
         timeValue = `${hours}:${minutes}`;
@@ -217,7 +244,7 @@ const TestDriveManagement = ({ user }) => {
       const fallbackTime = request?.confirmedTime ?? request?.time ?? request?.preferredTime ?? '';
       if (fallbackTime) {
         timeValue = normaliseTimeInput(fallbackTime);
-        // Nếu time có format HH:MM:SS, chỉ lấy HH:MM
+        // If time is HH:MM:SS, keep only HH:MM
         if (timeValue.includes(':')) {
           const parts = timeValue.split(':');
           if (parts.length >= 2) {
@@ -231,7 +258,7 @@ const TestDriveManagement = ({ user }) => {
     console.log('Setting confirmation data:', { date: dateValue, time: timeValue });
     setConfirmationData({
       date: dateValue,
-      time: timeValue, // Vẫn set time để có thể dùng cho payload nếu cần
+      time: timeValue, // Still store time for payload usage when needed
       note: request?.note ?? '',
     });
     setShowConfirmationModal(true);
@@ -252,24 +279,24 @@ const TestDriveManagement = ({ user }) => {
 
     const scheduleId = getRequestIdentifier(selectedRequest);
     if (!scheduleId) {
-      showErrorToast('Thiếu mã định danh yêu cầu. Không thể xử lý.');
+      showErrorToast('Missing request identifier. Cannot process.');
       return;
     }
 
-    // Chỉ kiểm tra date, loại bỏ kiểm tra time theo yêu cầu
+    // Only validate the date; time is optional per requirements
     if (action === 'approve' && !confirmationData.date) {
-      showErrorToast('Vui lòng chọn ngày xác nhận.');
+      showErrorToast('Please select a confirmation date.');
       return;
     }
 
-    // Giả định: Khi CONFIRM, chỉ gửi date và note.
-    // Nếu API backend yêu cầu time, chúng ta có thể sử dụng confirmationData.time hoặc mặc định một giá trị (ví dụ: '09:00:00').
-    const timeValue = confirmationData.time; // Sử dụng time đã được parse/fallback hoặc để trống
+    // Assumption: confirm requests only require date and note.
+    // If the backend needs time, reuse confirmationData.time or a default (e.g., '09:00:00').
+    const timeValue = confirmationData.time; // Use parsed/fallback time if available
 
     const confirmPayload = {
       ...(confirmationData.date ? { date: confirmationData.date } : {}),
-      // KHÔNG BAO GỒM time vào payload nếu API cho phép xác nhận mà không cần giờ
-      ...(timeValue ? { time: timeValue + ':00' } : {}), // Thêm time vào payload nếu có giá trị và format lại
+      // Skip time unless available or explicitly required
+      ...(timeValue ? { time: timeValue + ':00' } : {}),
       ...(confirmationData.note ? { note: confirmationData.note } : {}),
     };
 
@@ -282,75 +309,54 @@ const TestDriveManagement = ({ user }) => {
           ? await testDriveAPI.confirmRequest(scheduleId, confirmPayload)
           : await testDriveAPI.rejectRequest(scheduleId, rejectPayload);
       const fallbackStatus = action === 'approve' ? 'CONFIRMED' : 'REJECTED';
-      setPendingRequests((prev) =>
-        prev.map((request) => {
-          const requestId = getRequestIdentifier(request);
-          if (requestId === scheduleId) {
-            const nextStatus = updatedRequest?.status ?? fallbackStatus;
-            const mergedRequest = {
-              ...request,
-              ...(updatedRequest ?? {}),
-              status: nextStatus,
-              id: scheduleId,
-            };
-            // Cập nhật date và requestTime nếu approve
-            if (action === 'approve' && confirmationData.date && timeValue) {
-              try {
-                // Giả định timeValue là HH:MM, cần thêm :00 để tạo ISO string nếu cần
-                const finalTime = timeValue.length === 5 ? `${timeValue}:00` : timeValue;
-                const [hours, minutes] = finalTime.split(':');
-                const dateTime = new Date(`${confirmationData.date}T${hours}:${minutes}:00`);
-                mergedRequest.date = confirmationData.date;
-                mergedRequest.requestTime = dateTime.toISOString();
-                mergedRequest.time = timeValue; // Cập nhật lại time cho hiển thị
-              } catch (e) {
-                console.warn('Failed to update requestTime:', e);
-              }
-            }
-            return mergedRequest;
+      const mergeWithApiResponse = (request) => {
+        const merged = {
+          ...request,
+          ...(updatedRequest ?? {}),
+          status: updatedRequest?.status ?? fallbackStatus,
+          id: scheduleId,
+        };
+        if (action === 'approve' && confirmationData.date && timeValue) {
+          try {
+            const finalTime = timeValue.length === 5 ? `${timeValue}:00` : timeValue;
+            const [hours, minutes] = finalTime.split(':');
+            const dateTime = new Date(`${confirmationData.date}T${hours}:${minutes}:00`);
+            merged.date = confirmationData.date;
+            merged.requestTime = dateTime.toISOString();
+            merged.time = timeValue;
+          } catch (e) {
+            console.warn('Failed to update requestTime:', e);
           }
-          return request;
-        })
-      );
-      const nextStatus = updatedRequest?.status ?? fallbackStatus;
-      const mergedRequest = {
-        ...selectedRequest,
-        ...(updatedRequest ?? {}),
-        status: nextStatus,
-        id: scheduleId,
-      };
-      // Cập nhật date và requestTime nếu approve
-      if (action === 'approve' && confirmationData.date && timeValue) {
-        try {
-          const finalTime = timeValue.length === 5 ? `${timeValue}:00` : timeValue;
-          const [hours, minutes] = finalTime.split(':');
-          const dateTime = new Date(`${confirmationData.date}T${hours}:${minutes}:00`);
-          mergedRequest.date = confirmationData.date;
-          mergedRequest.requestTime = dateTime.toISOString();
-          mergedRequest.time = timeValue; // Cập nhật lại time cho hiển thị
-        } catch (e) {
-          console.warn('Failed to update requestTime:', e);
         }
-      }
+        return merged;
+      };
+
+      setPendingRequests((prev) =>
+        prev.map((request) =>
+          getRequestIdentifier(request) === scheduleId ? mergeWithApiResponse(request) : request
+        )
+      );
+
+      const mergedRequest = mergeWithApiResponse(selectedRequest);
       const mappedDrive = mapScheduleToTestDrive(mergedRequest);
       setTestDrives((prev) => {
         const exists = prev.some((drive) => drive.id === mappedDrive.id);
         if (exists) {
           return prev.map((drive) => (drive.id === mappedDrive.id ? mappedDrive : drive));
         }
-        // Thêm vào danh sách nếu là confirm
+        // Append to list only when approval succeeds
         if (action === 'approve') {
           return [...prev, mappedDrive];
         }
         return prev;
       });
       showSuccessToast(
-        action === 'approve' ? 'Đã xác nhận lịch thử xe.' : 'Đã từ chối yêu cầu thử xe.'
+        action === 'approve' ? 'Test drive confirmed.' : 'Test drive request rejected.'
       );
       handleCloseConfirmation();
     } catch (error) {
       console.error('Failed to update test drive request:', error);
-      showErrorToast('Không thể cập nhật yêu cầu. Vui lòng thử lại.');
+      showErrorToast('Unable to update the request. Please try again.');
     } finally {
       setActionLoading(false);
     }
@@ -366,7 +372,6 @@ const TestDriveManagement = ({ user }) => {
 
   // Create calendar grid
   const calendarDays = [];
-  const dayNames = ['Sun', 'Sat', 'Fri', 'Thu', 'Wed', 'Tue', 'Mon'].reverse(); // Đảo ngược để khớp với hình ảnh (Wed, Thu, Fri, Sat, Sun, Mon, Tue)
   const monthNames = [
     'January',
     'February',
@@ -382,30 +387,13 @@ const TestDriveManagement = ({ user }) => {
     'December',
   ];
 
-  // Logic để căn chỉnh ngày trong tuần bắt đầu từ 'Wed' (Thứ Tư)
-  // Trong JS: 0=Sun, 1=Mon, 2=Tue, 3=Wed, 4=Thu, 5=Fri, 6=Sat
-  // Nếu muốn bắt đầu từ T2-CN (Mon-Sun): firstDayOfMonth là 1-7 (Mon=1, Sun=7)
-  // Nếu muốn bắt đầu từ W-S (Wed-Sat): cần tính lại offset
-  // Giả định lịch chuẩn: Mon-Sun (vì hình ảnh có Wed, Thu, Fri, Sat, Sun, Mon, Tue) => DayNames phải là Mon, Tue, Wed, Thu, Fri, Sat, Sun.
-  // Tuy nhiên, hình ảnh có vẻ là: Wed, Thu, Fri, Sat, 1 (Sun), 2 (Mon)...
-  // Dựa trên hình ảnh, thứ tự đầu tiên có vẻ là: Wed, Thu, Fri, Sat, Sun, Mon, Tue.
-  const customDayNames = ['Wed', 'Thu', 'Fri', 'Sat', 'Sun', 'Mon', 'Tue'];
+  // Align the week to run Sunday through Saturday
+  // JS getDay(): 0=Sun ... 6=Sat, so we can use the value directly
+  const customDayNames = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
 
-  // Tính toán offset để ngày 1 rơi vào cột 'Wed'
-  // JS getDay() trả về: 0=Sun, 1=Mon, 2=Tue, 3=Wed, 4=Thu, 5=Fri, 6=Sat
-  // Custom header order index: 0=Wed, 1=Thu, 2=Fri, 3=Sat, 4=Sun, 5=Mon, 6=Tue
-  const dayIndexMap = {
-    0: 4, // Sun -> Index 4
-    1: 5, // Mon -> Index 5
-    2: 6, // Tue -> Index 6
-    3: 0, // Wed -> Index 0
-    4: 1, // Thu -> Index 1
-    5: 2, // Fri -> Index 2
-    6: 3, // Sat -> Index 3
-  };
-  const startDayOffset = dayIndexMap[firstDayOfMonth];
+  const startDayOffset = firstDayOfMonth;
 
-  // Add empty cells for days before first day of month (dựa trên thứ tự Wed-Tue)
+  // Add empty cells so that the 1st lands under the correct weekday
   for (let i = 0; i < startDayOffset; i++) {
     calendarDays.push(null);
   }
@@ -492,7 +480,7 @@ const TestDriveManagement = ({ user }) => {
     setShowModal(true);
   };
 
-  // Giữ lại hàm này nhưng sẽ không được gọi từ UI (đã xóa nút Edit/Delete)
+  // Keep this handler even though the Edit/Delete buttons were removed from the UI
   const handleEditTestDrive = (testDrive) => {
     setEditingTestDrive(testDrive);
     setFormData({
@@ -508,7 +496,7 @@ const TestDriveManagement = ({ user }) => {
     setShowModal(true);
   };
 
-  // Giữ lại hàm này nhưng sẽ không được gọi từ UI (đã xóa nút Edit/Delete)
+  // Keep this handler even though the Edit/Delete buttons were removed from the UI
   const handleDeleteTestDrive = (testDriveId) => {
     if (window.confirm('Are you sure you want to delete this test drive?')) {
       setTestDrives(testDrives.filter((td) => td.id !== testDriveId));
@@ -831,25 +819,7 @@ const TestDriveManagement = ({ user }) => {
                         {drive.notes}
                       </div>
                     )}
-                    {/* XÓA NÚT EDIT VÀ DELETE THEO YÊU CẦU */}
-                    {/* <div style={{ display: 'flex', gap: '8px', marginTop: '12px' }}>
-                    <button
-                      className="btn btn-outline"
-                      style={{ flex: 1, fontSize: '12px' }}
-                      onClick={() => handleEditTestDrive(drive)}
-                    >
-                      <i className="bx bx-edit"></i>
-                      Edit
-                    </button>
-                    <button
-                      className="btn btn-outline"
-                      style={{ flex: 1, fontSize: '12px', color: 'var(--color-error)' }}
-                      onClick={() => handleDeleteTestDrive(drive.id)}
-                    >
-                      <i className="bx bx-trash"></i>
-                      Delete
-                    </button>
-                    </div> */}
+                    {/* Edit/Delete buttons intentionally removed */}
                   </div>
                 ))}
               </div>
@@ -890,7 +860,7 @@ const TestDriveManagement = ({ user }) => {
               }}
             >
               <h3 style={{ margin: 0, fontSize: '16px', fontWeight: '600' }}>
-                Yêu cầu chờ xác nhận
+              Requests awaiting confirmation
               </h3>
               <button
                 className="btn btn-outline"
@@ -909,7 +879,7 @@ const TestDriveManagement = ({ user }) => {
                     loadingRequests ? 'bx-loader-alt bx-spin' : 'bx-refresh'
                   }`}
                 ></i>
-                {loadingRequests ? 'Đang tải' : 'Làm mới'}
+                {loadingRequests ? 'Loading' : 'Refresh'}
               </button>
             </div>
 
@@ -931,7 +901,7 @@ const TestDriveManagement = ({ user }) => {
                       className="bx bx-loader-alt bx-spin"
                       style={{ fontSize: '36px', display: 'block', marginBottom: '12px' }}
                     ></i>
-                    Đang tải yêu cầu...
+                    Loading requests...
                   </>
                 ) : (
                   <>
@@ -944,7 +914,7 @@ const TestDriveManagement = ({ user }) => {
                         opacity: 0.6,
                       }}
                     ></i>
-                    Không có yêu cầu chờ xác nhận
+                    No pending requests awaiting confirmation
                   </>
                 )}
               </div>
@@ -953,7 +923,7 @@ const TestDriveManagement = ({ user }) => {
                 {pendingRequestsForDealer.map((request) => {
                   const requestId = getRequestIdentifier(request);
 
-                  // Xử lý date: ưu tiên date, nếu không có thì parse từ requestTime
+                  // Handle date: prefer the explicit date, otherwise parse requestTime
                   let preferredDate =
                     request?.date ??
                     request?.confirmedDate ??
@@ -969,7 +939,7 @@ const TestDriveManagement = ({ user }) => {
                     }
                   }
 
-                  // Xử lý time: ưu tiên requestTime, parse để lấy time
+                  // Handle time: prefer requestTime parsing
                   let preferredTime = '';
                   if (request?.requestTime) {
                     try {
@@ -1015,7 +985,7 @@ const TestDriveManagement = ({ user }) => {
                               marginBottom: '4px',
                             }}
                           >
-                            {request?.customerName ?? request?.name ?? 'Khách hàng'}
+                            {request?.customerName ?? request?.name ?? 'Customer'}
                           </div>
                           <div
                             style={{
@@ -1031,7 +1001,7 @@ const TestDriveManagement = ({ user }) => {
                             {request?.carModel ??
                               request?.vehicle ??
                               request?.vehicleModel ??
-                              'Chưa cập nhật'}
+                              'Not provided'}
                           </div>
                           <div
                             style={{
@@ -1065,7 +1035,7 @@ const TestDriveManagement = ({ user }) => {
                           onClick={() => handleOpenConfirmation(request)}
                         >
                           <i className="bx bx-check-circle"></i>
-                          Xử lý
+                          Review
                         </button>
                       </div>
                       <div
@@ -1080,8 +1050,8 @@ const TestDriveManagement = ({ user }) => {
                         }}
                       >
                         <i className="bx bx-time"></i>
-                        {preferredDate || 'Chưa chọn ngày'}
-                        {preferredTime && `• ${preferredTime}`}
+                        {preferredDate || 'No date selected'}
+                        {preferredTime && ` - ${preferredTime}`}
                       </div>
                       {request?.note && (
                         <div
@@ -1107,7 +1077,7 @@ const TestDriveManagement = ({ user }) => {
         </div>
       </div>
 
-      {/* Add/Edit Modal (Không thay đổi) */}
+      {/* Add/Edit Modal */}
       {showModal && (
         <div
           style={{
@@ -1126,12 +1096,14 @@ const TestDriveManagement = ({ user }) => {
           <div
             style={{
               background: 'var(--color-surface)',
-              borderRadius: 'var(--radius)',
-              padding: '24px',
-              width: '90%',
-              maxWidth: '500px',
-              maxHeight: '90vh',
+              borderRadius: '24px',
+              padding: '32px',
+              width: '96%',
+              maxWidth: '740px',
+              maxHeight: '92vh',
               overflowY: 'auto',
+              border: '1px solid rgba(255, 255, 255, 0.08)',
+              boxShadow: '0 35px 80px rgba(0, 0, 0, 0.55)',
             }}
           >
             <div
@@ -1140,9 +1112,40 @@ const TestDriveManagement = ({ user }) => {
                 justifyContent: 'space-between',
                 alignItems: 'center',
                 marginBottom: '24px',
+                gap: '18px',
               }}
             >
-              <h3>{editingTestDrive ? 'Edit Test Drive' : 'Schedule New Test Drive'}</h3>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+                <div
+                  style={{
+                    width: '48px',
+                    height: '48px',
+                    borderRadius: '16px',
+                    background: 'rgba(255, 77, 79, 0.12)',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    color: accentColor,
+                    fontSize: '24px',
+                  }}
+                >
+                  <i className="bx bx-calendar-event"></i>
+                </div>
+                <div>
+                  <h3 style={{ margin: 0, fontSize: '22px' }}>
+                    {editingTestDrive ? 'Edit Test Drive' : 'Schedule New Test Drive'}
+                  </h3>
+                  <p
+                    style={{
+                      margin: 0,
+                      fontSize: '13px',
+                      color: 'var(--color-text-muted)',
+                    }}
+                  >
+                    Fill out the information below to create a polished booking.
+                  </p>
+                </div>
+              </div>
               <button
                 onClick={() => setShowModal(false)}
                 style={{
@@ -1158,121 +1161,75 @@ const TestDriveManagement = ({ user }) => {
             </div>
 
             <form onSubmit={handleSubmit}>
-              <div style={{ display: 'grid', gap: '16px' }}>
+              <div style={{ display: 'grid', gap: '20px' }}>
                 <div>
-                  <label
-                    style={{
-                      display: 'block',
-                      marginBottom: '8px',
-                      fontSize: '14px',
-                      fontWeight: '600',
-                      color: 'var(--color-text)',
-                    }}
-                  >
-                    Customer Name *
+                  <label style={labelStyles}>
+                    <span style={labelContentStyles}>
+                      <i className="bx bx-user" style={{ color: accentColor, fontSize: '16px' }}></i>
+                      Customer Name *
+                    </span>
                   </label>
                   <input
                     type="text"
                     value={formData.customer}
                     onChange={(e) => setFormData({ ...formData, customer: e.target.value })}
-                    style={{
-                      width: '100%',
-                      padding: '12px',
-                      border: '1px solid var(--color-border)',
-                      borderRadius: 'var(--radius)',
-                      background: 'var(--color-bg)',
-                      color: 'var(--color-text)',
-                      fontSize: '14px',
-                    }}
+                    style={modalInputStyles}
                     placeholder="John Doe"
                     required
                   />
                 </div>
 
                 <div>
-                  <label
-                    style={{
-                      display: 'block',
-                      marginBottom: '8px',
-                      fontSize: '14px',
-                      fontWeight: '600',
-                      color: 'var(--color-text)',
-                    }}
-                  >
-                    Vehicle *
+                  <label style={labelStyles}>
+                    <span style={labelContentStyles}>
+                      <i className="bx bx-car" style={{ color: accentColor, fontSize: '16px' }}></i>
+                      Vehicle *
+                    </span>
                   </label>
                   <input
                     type="text"
                     value={formData.vehicle}
                     onChange={(e) => setFormData({ ...formData, vehicle: e.target.value })}
-                    style={{
-                      width: '100%',
-                      padding: '12px',
-                      border: '1px solid var(--color-border)',
-                      borderRadius: 'var(--radius)',
-                      background: 'var(--color-bg)',
-                      color: 'var(--color-text)',
-                      fontSize: '14px',
-                    }}
+                    style={modalInputStyles}
                     placeholder="Tesla Model 3"
                     required
                   />
                 </div>
 
-                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '16px' }}>
+                <div
+                  style={{
+                    display: 'grid',
+                    gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))',
+                    gap: '16px',
+                  }}
+                >
                   <div>
-                    <label
-                      style={{
-                        display: 'block',
-                        marginBottom: '8px',
-                        fontSize: '14px',
-                        fontWeight: '600',
-                        color: 'var(--color-text)',
-                      }}
-                    >
-                      Date *
+                    <label style={labelStyles}>
+                      <span style={labelContentStyles}>
+                        <i className="bx bx-calendar" style={{ color: accentColor, fontSize: '16px' }}></i>
+                        Date *
+                      </span>
                     </label>
                     <input
                       type="date"
                       value={formData.date}
                       onChange={(e) => setFormData({ ...formData, date: e.target.value })}
-                      style={{
-                        width: '100%',
-                        padding: '12px',
-                        border: '1px solid var(--color-border)',
-                        borderRadius: 'var(--radius)',
-                        background: 'var(--color-bg)',
-                        color: 'var(--color-text)',
-                        fontSize: '14px',
-                      }}
+                      style={modalInputStyles}
                       required
                     />
                   </div>
 
                   <div>
-                    <label
-                      style={{
-                        display: 'block',
-                        marginBottom: '8px',
-                        fontSize: '14px',
-                        fontWeight: '600',
-                        color: 'var(--color-text)',
-                      }}
-                    >
-                      Time *
+                    <label style={labelStyles}>
+                      <span style={labelContentStyles}>
+                        <i className="bx bx-time-five" style={{ color: accentColor, fontSize: '16px' }}></i>
+                        Time *
+                      </span>
                     </label>
                     <select
                       value={formData.time}
                       onChange={(e) => setFormData({ ...formData, time: e.target.value })}
-                      style={{
-                        width: '100%',
-                        padding: '12px',
-                        border: '1px solid var(--color-border)',
-                        borderRadius: 'var(--radius)',
-                        background: 'var(--color-bg)',
-                        color: 'var(--color-text)',
-                        fontSize: '14px',
-                      }}
+                      style={modalInputStyles}
                       required
                     >
                       <option value="">Select Time</option>
@@ -1289,90 +1246,57 @@ const TestDriveManagement = ({ user }) => {
                   </div>
                 </div>
 
-                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '16px' }}>
+                <div
+                  style={{
+                    display: 'grid',
+                    gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))',
+                    gap: '16px',
+                  }}
+                >
                   <div>
-                    <label
-                      style={{
-                        display: 'block',
-                        marginBottom: '8px',
-                        fontSize: '14px',
-                        fontWeight: '600',
-                        color: 'var(--color-text)',
-                      }}
-                    >
-                      Phone
+                    <label style={labelStyles}>
+                      <span style={labelContentStyles}>
+                        <i className="bx bx-phone" style={{ color: accentColor, fontSize: '16px' }}></i>
+                        Phone
+                      </span>
                     </label>
                     <input
                       type="tel"
                       value={formData.phone}
                       onChange={(e) => setFormData({ ...formData, phone: e.target.value })}
-                      style={{
-                        width: '100%',
-                        padding: '12px',
-                        border: '1px solid var(--color-border)',
-                        borderRadius: 'var(--radius)',
-                        background: 'var(--color-bg)',
-                        color: 'var(--color-text)',
-                        fontSize: '14px',
-                      }}
+                      style={modalInputStyles}
                       placeholder="+1-234-567-8901"
                     />
                   </div>
 
                   <div>
-                    <label
-                      style={{
-                        display: 'block',
-                        marginBottom: '8px',
-                        fontSize: '14px',
-                        fontWeight: '600',
-                        color: 'var(--color-text)',
-                      }}
-                    >
-                      Email
+                    <label style={labelStyles}>
+                      <span style={labelContentStyles}>
+                        <i className="bx bx-envelope" style={{ color: accentColor, fontSize: '16px' }}></i>
+                        Email
+                      </span>
                     </label>
                     <input
                       type="email"
                       value={formData.email}
                       onChange={(e) => setFormData({ ...formData, email: e.target.value })}
-                      style={{
-                        width: '100%',
-                        padding: '12px',
-                        border: '1px solid var(--color-border)',
-                        borderRadius: 'var(--radius)',
-                        background: 'var(--color-bg)',
-                        color: 'var(--color-text)',
-                        fontSize: '14px',
-                      }}
+                      style={modalInputStyles}
                       placeholder="john.doe@email.com"
                     />
                   </div>
                 </div>
 
                 <div>
-                  <label
-                    style={{
-                      display: 'block',
-                      marginBottom: '8px',
-                      fontSize: '14px',
-                      fontWeight: '600',
-                      color: 'var(--color-text)',
-                    }}
-                  >
-                    Status
+                  <label style={labelStyles}>
+                    <span style={labelContentStyles}>
+                      <i className="bx bx-flag" style={{ color: accentColor, fontSize: '16px' }}></i>
+                      Status
+                    </span>
                   </label>
                   <select
                     value={formData.status}
                     onChange={(e) => setFormData({ ...formData, status: e.target.value })}
-                    style={{
-                      width: '100%',
-                      padding: '12px',
-                      border: '1px solid var(--color-border)',
-                      borderRadius: 'var(--radius)',
-                      background: 'var(--color-bg)',
-                      color: 'var(--color-text)',
-                      fontSize: '14px',
-                    }}
+                    style={modalInputStyles}
                   >
                     <option value="scheduled">Scheduled</option>
                     <option value="completed">Completed</option>
@@ -1381,31 +1305,16 @@ const TestDriveManagement = ({ user }) => {
                 </div>
 
                 <div>
-                  <label
-                    style={{
-                      display: 'block',
-                      marginBottom: '8px',
-                      fontSize: '14px',
-                      fontWeight: '600',
-                      color: 'var(--color-text)',
-                    }}
-                  >
-                    Notes
+                  <label style={labelStyles}>
+                    <span style={labelContentStyles}>
+                      <i className="bx bx-note" style={{ color: accentColor, fontSize: '16px' }}></i>
+                      Notes
+                    </span>
                   </label>
                   <textarea
                     value={formData.notes}
                     onChange={(e) => setFormData({ ...formData, notes: e.target.value })}
-                    style={{
-                      width: '100%',
-                      padding: '12px',
-                      border: '1px solid var(--color-border)',
-                      borderRadius: 'var(--radius)',
-                      background: 'var(--color-bg)',
-                      color: 'var(--color-text)',
-                      fontSize: '14px',
-                      minHeight: '80px',
-                      resize: 'vertical',
-                    }}
+                    style={{ ...modalInputStyles, minHeight: '110px', resize: 'vertical' }}
                     placeholder="Additional notes about the test drive..."
                   />
                 </div>
@@ -1415,18 +1324,37 @@ const TestDriveManagement = ({ user }) => {
                 style={{
                   display: 'flex',
                   gap: '12px',
-                  marginTop: '24px',
+                  marginTop: '28px',
                   justifyContent: 'flex-end',
+                  flexWrap: 'wrap',
                 }}
               >
                 <button
                   type="button"
                   className="btn btn-outline"
                   onClick={() => setShowModal(false)}
+                  style={{
+                    borderColor: accentColor,
+                    color: accentColor,
+                    minWidth: '130px',
+                  }}
                 >
                   Cancel
                 </button>
-                <button type="submit" className="btn btn-primary">
+                <button
+                  type="submit"
+                  className="btn btn-primary"
+                  style={{
+                    background: accentColor,
+                    borderColor: accentColor,
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: '8px',
+                    minWidth: '180px',
+                    justifyContent: 'center',
+                  }}
+                >
+                  <i className="bx bx-send"></i>
                   {editingTestDrive ? 'Update Test Drive' : 'Schedule Test Drive'}
                 </button>
               </div>
@@ -1435,7 +1363,7 @@ const TestDriveManagement = ({ user }) => {
         </div>
       )}
 
-      {/* Confirmation Modal (ĐÃ CHỈNH SỬA) */}
+      {/* Confirmation Modal (updated) */}
       {showConfirmationModal && selectedRequest && (
         <div
           style={{
@@ -1470,7 +1398,7 @@ const TestDriveManagement = ({ user }) => {
                 marginBottom: '20px',
               }}
             >
-              <h3 style={{ margin: 0 }}>Xác nhận yêu cầu thử xe</h3>
+              <h3 style={{ margin: 0 }}>Confirm test drive request</h3>
               <button
                 onClick={handleCloseConfirmation}
                 style={{
@@ -1502,7 +1430,7 @@ const TestDriveManagement = ({ user }) => {
                     marginBottom: '8px',
                   }}
                 >
-                  {selectedRequest?.customerName ?? selectedRequest?.name ?? 'Khách hàng'}
+                  {selectedRequest?.customerName ?? selectedRequest?.name ?? 'Customer'}
                 </div>
                 <div
                   style={{
@@ -1518,7 +1446,7 @@ const TestDriveManagement = ({ user }) => {
                   {selectedRequest?.carModel ??
                     selectedRequest?.vehicle ??
                     selectedRequest?.vehicleModel ??
-                    'Chưa cập nhật'}
+                    'Not provided'}
                 </div>
                 <div
                   style={{
@@ -1555,7 +1483,7 @@ const TestDriveManagement = ({ user }) => {
                     }}
                   >
                     <strong style={{ color: 'var(--color-text)' }}>
-                      Ghi chú khách hàng:
+                      Customer note:
                     </strong>{' '}
                     {selectedRequest.note}
                   </div>
@@ -1572,7 +1500,7 @@ const TestDriveManagement = ({ user }) => {
                     color: 'var(--color-text)',
                   }}
                 >
-                  Ngày xác nhận *
+                  Confirmation date *
                 </label>
                 <input
                   type="date"
@@ -1594,40 +1522,12 @@ const TestDriveManagement = ({ user }) => {
                 />
                 {!confirmationData.date && (
                   <div style={{ fontSize: '11px', color: 'var(--color-warning)', marginTop: '4px' }}>
-                    Vui lòng chọn ngày xác nhận
+                    Please select a confirmation date
                   </div>
                 )}
               </div>
 
-              {/* ĐÃ LOẠI BỎ TRƯỜNG 'Giờ xác nhận *' THEO YÊU CẦU */}
-              {/* <div>
-                <label style={{ display: 'block', marginBottom: '8px', fontSize: '13px', fontWeight: '600', color: 'var(--color-text)' }}>
-                  Giờ xác nhận *
-                </label>
-                <input
-                  type="time"
-                  value={confirmationData.time || ''}
-                  onChange={(e) => {
-                    console.log('Time changed:', e.target.value);
-                    setConfirmationData((prev) => ({ ...prev, time: e.target.value }));
-                  }}
-                  style={{
-                    width: '100%',
-                    padding: '12px',
-                    border: '1px solid var(--color-border)',
-                    borderRadius: 'var(--radius)',
-                    background: 'var(--color-bg)',
-                    color: 'var(--color-text)',
-                    fontSize: '14px'
-                  }}
-                  required
-                />
-                {!confirmationData.time && (
-                  <div style={{ fontSize: '11px', color: 'var(--color-warning)', marginTop: '4px' }}>
-                    Vui lòng chọn giờ xác nhận
-                  </div>
-                )}
-              </div> */}
+              {/* Time input removed per requirement */}
 
               <div>
                 <label
@@ -1639,7 +1539,7 @@ const TestDriveManagement = ({ user }) => {
                     color: 'var(--color-text)',
                   }}
                 >
-                  Ghi chú nội bộ
+                  Internal note
                 </label>
                 <textarea
                   value={confirmationData.note}
@@ -1655,7 +1555,7 @@ const TestDriveManagement = ({ user }) => {
                     minHeight: '90px',
                     resize: 'vertical',
                   }}
-                  placeholder="Ghi chú cho đội ngũ hoặc khách hàng..."
+                  placeholder="Notes for the team or customer..."
                 />
               </div>
             </div>
@@ -1678,12 +1578,12 @@ const TestDriveManagement = ({ user }) => {
                 {actionLoading ? (
                   <>
                     <i className="bx bx-loader-alt bx-spin"></i>
-                    Đang xử lý
+                    Processing
                   </>
                 ) : (
                   <>
                     <i className="bx bx-x-circle"></i>
-                    Từ chối
+                    Reject
                   </>
                 )}
               </button>
@@ -1696,12 +1596,12 @@ const TestDriveManagement = ({ user }) => {
                 {actionLoading ? (
                   <>
                     <i className="bx bx-loader-alt bx-spin"></i>
-                    Đang xử lý
+                    Processing
                   </>
                 ) : (
                   <>
                     <i className="bx bx-check-circle"></i>
-                    Đồng ý
+                    Approve
                   </>
                 )}
               </button>
@@ -1713,4 +1613,4 @@ const TestDriveManagement = ({ user }) => {
   );
 };
 
-export default TestDriveManagement;
+export default TestDriveManagement;   

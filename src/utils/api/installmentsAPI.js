@@ -2,88 +2,75 @@ import { apiClient } from '../apiConfig';
 
 export const installmentsAPI = {
   /**
-   * Tạo gói trả góp cho một Payment
-   * API: POST /api/installments/create
-   * Body: { paymentId, totalAmount, months, annualInterestRate, firstDueDate }
-   */
-  create: async (payload) => {
-    const response = await apiClient.post('/api/installments/create', payload);
-    return response.data;
-  },
-
-  /**
-   * Xem danh sách các kỳ trả góp của một Payment
-   * API: GET /api/installments/{paymentId}
-   */
-  getByPayment: async (paymentId) => {
-    const response = await apiClient.get(`/api/installments/${paymentId}`);
-    return response.data;
-  },
-
-  /**
-   * Đánh dấu kỳ trả góp đã thanh toán
-   * API: POST /api/installments/{transactionId}/pay?method=INSTALLMENT
-   */
-  payInstallment: async (transactionId, method = 'INSTALLMENT') => {
-    const response = await apiClient.post(`/api/installments/${transactionId}/pay?method=${method}`);
-    return response.data;
-  },
-
-  // ========== CÁC API CŨ (Giữ lại để tương thích) ==========
-  
-  /**
-   * Xem trước kế hoạch trả góp (Preview)
+   * Preview installment plan (tính toán trước)
    * API: POST /api/installments/preview
+   * Body: { totalAmount, months, annualInterestRate, firstDueDate }
    */
-  preview: async (payload) => {
-    const response = await apiClient.post('/api/installments/preview', payload);
+  preview: async (request) => {
+    const response = await apiClient.post('/api/installments/preview', request);
     return response.data;
   },
 
   /**
-   * Tạo lịch trả góp cho đơn hàng
+   * Generate installment schedule for order
    * API: POST /api/installments/{orderId}/generate
+   * Body: { totalAmount, months, annualInterestRate, firstDueDate }
    */
-  generate: async (orderId, payload) => {
-    const response = await apiClient.post(`/api/installments/${orderId}/generate`, payload);
+  generate: async (orderId, request) => {
+    const response = await apiClient.post(
+      `/api/installments/${orderId}/generate`,
+      request
+    );
     return response.data;
   },
 
   /**
-   * Lấy lịch trả góp theo Order
+   * Get installment schedule by order
    * API: GET /api/installments/order/{orderId}
    */
-  getScheduleByOrder: async (orderId) => {
+  getByOrder: async (orderId) => {
     const response = await apiClient.get(`/api/installments/order/${orderId}`);
     return response.data;
   },
 
   /**
-   * Thanh toán một kỳ trả góp (sử dụng scheduleId)
+   * Mark installment as paid
    * API: PUT /api/installments/pay/{scheduleId}
    */
-  paySchedule: async (scheduleId) => {
+  payInstallment: async (scheduleId) => {
     const response = await apiClient.put(`/api/installments/pay/${scheduleId}`);
+    return response.data;
+  },
+
+  /**
+   * Legacy: Get by payment (deprecated - use getByOrder instead)
+   * @deprecated Use getByOrder instead
+   */
+  getByPayment: async (paymentId) => {
+    console.warn('getByPayment is deprecated. Use getByOrder with orderId instead.');
+    // This might not work, but keeping for backward compatibility
+    const response = await apiClient.get(`/api/installments/${paymentId}`);
+    return response.data;
+  },
+
+  /**
+   * Legacy: Create (deprecated - use generate instead)
+   * @deprecated Use generate instead
+   */
+  create: async (payload) => {
+    console.warn('create is deprecated. Use generate(orderId, request) instead.');
+    // This won't work correctly, but keeping for backward compatibility
+    const response = await apiClient.post('/api/installments/create', payload);
+    return response.data;
+  },
+
+  /**
+   * Legacy: Delete (might not be supported by backend)
+   * @deprecated Check if backend supports this
+   */
+  delete: async (paymentId) => {
+    console.warn('delete might not be supported by backend');
+    const response = await apiClient.delete(`/api/installments/${paymentId}`);
     return response.data;
   }
 };
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-

@@ -43,14 +43,12 @@ export const customersAPI = {
     return response.data;
   },
 
-  // Get customer portal information (debt lookup)
-  getPortalInfo: async (customerId, citizenId) => {
+   // Customer Portal - Tra cứu thông tin khách hàng
+   getPortalInfo: async (customerId, citizenId) => {
     const response = await apiClient.get('/api/customer/portal', {
-      params: {
-        customerId: customerId,
-        citizenId: citizenId
-      }
+      params: { customerId, citizenId }
     });
     return response.data;
   }
+
 };

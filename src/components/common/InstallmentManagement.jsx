@@ -35,8 +35,7 @@ const InstallmentManagement = ({ user }) => {
     }));
   };
 
-  const buildPayload = () => ({
-    paymentId: previewForm.paymentId ? Number(previewForm.paymentId) : null,
+  const buildRequest = () => ({
     totalAmount: previewForm.totalAmount ? Number(previewForm.totalAmount) : 0,
     months: previewForm.months ? Number(previewForm.months) : 0,
     annualInterestRate: previewForm.annualInterestRate ? Number(previewForm.annualInterestRate) : 0,
@@ -52,8 +51,9 @@ const InstallmentManagement = ({ user }) => {
 
     try {
       setPreviewLoading(true);
-      const payload = buildPayload();
-      const result = await installmentsAPI.preview(payload);
+      // SỬA: Dùng preview API với request object (không có paymentId)
+      const request = buildRequest();
+      const result = await installmentsAPI.preview(request);
       setPreviewResult(result);
       showSuccessToast('Installment preview created successfully.');
     } catch (error) {
@@ -77,8 +77,9 @@ const InstallmentManagement = ({ user }) => {
 
     try {
       setGenerateLoading(true);
-      const payload = buildPayload();
-      await installmentsAPI.generate(Number(generateOrderId), payload);
+      // SỬA: Dùng generate API với orderId và request object
+      const request = buildRequest();
+      await installmentsAPI.generate(Number(generateOrderId), request);
       showSuccessToast(`Installment schedule for Order #${generateOrderId} created successfully.`);
       if (scheduleOrderId === generateOrderId) {
         await handleFetchSchedule();
@@ -102,7 +103,8 @@ const InstallmentManagement = ({ user }) => {
 
     try {
       setScheduleLoading(true);
-      const data = await installmentsAPI.getScheduleByOrder(Number(scheduleOrderId));
+      // SỬA: Dùng getByOrder API
+      const data = await installmentsAPI.getByOrder(Number(scheduleOrderId));
       setSchedule(Array.isArray(data) ? data : []);
       showSuccessToast(`Loaded installment schedule for Order #${scheduleOrderId}.`);
     } catch (error) {
@@ -115,15 +117,16 @@ const InstallmentManagement = ({ user }) => {
   };
 
   const handlePaySchedule = async (item) => {
-    if (!item?.id && !item?.scheduleId) {
+    if (!item?.id) {
       showErrorToast('Unable to detect installment information.');
       return;
     }
 
-    const scheduleId = item.id || item.scheduleId;
+    const scheduleId = item.id;
     try {
       setPayingScheduleId(scheduleId);
-      await installmentsAPI.paySchedule(scheduleId);
+      // SỬA: Dùng payInstallment với scheduleId
+      await installmentsAPI.payInstallment(scheduleId);
       showSuccessToast(`Installment #${item.installmentNumber} marked as PAID.`);
       await handleFetchSchedule();
     } catch (error) {

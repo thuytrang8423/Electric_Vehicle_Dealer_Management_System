@@ -75,24 +75,21 @@ const normalizeContract = (contract) => {
 
   const documentMeta = parseContractDocumentMeta(contract.documentImage);
 
-  let documentImage = documentMeta?.cachedPdfUrl || documentMeta?.pdfUrl || contract.documentImage || '';
-
-  const resolvedOrderId =
-    contract.orderId ||
-    order.orderId ||
-    order.id ||
-    contract.order?.orderId ||
-    contract.order?.id ||
-    contract.orderCode ||
-    contract.orderNumber ||
-    null;
-
-  const resolvedOrderNumber =
-    contract.orderNumber ||
-    contract.orderCode ||
-    order.orderNumber ||
-    order.orderCode ||
-    (resolvedOrderId ? `ORD-${resolvedOrderId}` : 'N/A');
+  // Nếu documentImage là JSON meta (format cũ), parse để lấy URL
+  // Nếu là URL string (format mới), dùng trực tiếp
+  let documentImage = contract.documentImage || '';
+  if (documentImage && documentImage.startsWith('{')) {
+    // Format cũ: JSON meta
+    documentImage = documentMeta?.cachedPdfUrl || documentMeta?.pdfUrl || documentMeta?.signatureUrl || documentImage;
+  } else if (documentImage && !documentImage.startsWith('http') && !documentImage.startsWith('data:')) {
+    // Có thể là JSON string chưa parse
+    try {
+      const parsed = JSON.parse(documentImage);
+      documentImage = parsed.cachedPdfUrl || parsed.pdfUrl || parsed.signatureUrl || documentImage;
+    } catch (e) {
+      // Không phải JSON, dùng trực tiếp
+    }
+  }
 
   return {
     raw: contract,
@@ -103,13 +100,12 @@ const normalizeContract = (contract) => {
       customer.name ||
       `Customer #${contract.customerId || customer.id || 'N/A'}`,
     customerId: contract.customerId || customer.id || null,
-    orderId: resolvedOrderId,
-    orderNumber: resolvedOrderNumber,
+    orderId: contract.orderId || order.orderId || order.id || null,
+    orderNumber: order.orderNumber || `ORD-${order.orderId || order.id || 'N/A'}`,
     dealerId: contract.dealerId || order.dealerId || null,
     status,
-    documentImage,
+    documentImage, // URL string hoặc từ meta
     documentMeta,
-    signatureUrl: documentMeta?.signatureUrl || contract.signatureUrl || null,
     notes: documentMeta?.notes || contract.notes || '',
     signedDate: contract.signedDate || contract.createdDate || contract.createdAt || '',
     createdAt: contract.createdAt || contract.createdDate || '',
@@ -191,35 +187,6 @@ const enrichOrderWithVehicles = async (order) => {
     ...order,
     orderDetails: enrichedDetails,
   };
-};
-
-// 获取订单的客户名称（支持多种数据格式）
-const getOrderCustomerName = (order) => {
-  if (!order) return 'N/A';
-  
-  // 优先从 customer 对象获取
-  if (order.customer) {
-    return order.customer.fullName || 
-           order.customer.name || 
-           order.customer.customerName ||
-           (order.customer.firstName && order.customer.lastName 
-             ? `${order.customer.firstName} ${order.customer.lastName}`.trim()
-             : null) ||
-           order.customer.email ||
-           `Customer #${order.customer.id || order.customer.customerId || 'N/A'}`;
-  }
-  
-  // 其次从 customerName 字段获取
-  if (order.customerName) {
-    return order.customerName;
-  }
-  
-  // 最后从 customerId 构造
-  if (order.customerId) {
-    return `Customer #${order.customerId}`;
-  }
-  
-  return 'N/A';
 };
 
 const extractCustomerSnapshot = (customer) => {
@@ -635,9 +602,10 @@ const SalesContracts = ({ user }) => {
   const [showOrderModal, setShowOrderModal] = useState(false);
   const [orderModalLoading, setOrderModalLoading] = useState(false);
   const [viewingContract, setViewingContract] = useState(null);
-  const [uploadingSignature, setUploadingSignature] = useState(false);
-  const [signatureUrl, setSignatureUrl] = useState('');
-  const [signatureError, setSignatureError] = useState('');
+  const [uploadingImage, setUploadingImage] = useState(false);
+  const [contractImageUrl, setContractImageUrl] = useState('');
+  const [contractImageFile, setContractImageFile] = useState(null);
+  const [imageError, setImageError] = useState('');
   const [documentPreviewUrl, setDocumentPreviewUrl] = useState('');
   const [documentPreviewLoading, setDocumentPreviewLoading] = useState(false);
   const [documentPreviewMime, setDocumentPreviewMime] = useState('');
@@ -652,8 +620,6 @@ const SalesContracts = ({ user }) => {
     'Authorized Representative';
   const dealerDisplayName = user?.dealerName || user?.dealer?.name || (dealerId ? `Dealer #${dealerId}` : '');
 
-  const canvasRef = useRef(null);
-  const drawingStateRef = useRef({ isDrawing: false, lastX: 0, lastY: 0 });
   const previewObjectUrlRef = useRef(null);
 
   const releasePreviewObjectUrl = () => {
@@ -702,8 +668,9 @@ const SalesContracts = ({ user }) => {
 
   const resetForm = () => {
     setFormData({ ...defaultFormState, dealerId: dealerId ? String(dealerId) : '' });
-    setSignatureUrl('');
-    setSignatureError('');
+    setContractImageUrl('');
+    setContractImageFile(null);
+    setImageError('');
     releasePreviewObjectUrl();
     setDocumentPreviewUrl('');
     setDocumentPreviewMime('');
@@ -715,9 +682,6 @@ const SalesContracts = ({ user }) => {
     resetForm();
     setShowModal(true);
     setReferenceLoading(true);
-    setTimeout(() => {
-      initializeCanvas();
-    }, 50);
 
     try {
       const [orders, customers] = await Promise.all([
@@ -747,8 +711,8 @@ const SalesContracts = ({ user }) => {
       showErrorToast('Dealer information is required');
       return;
     }
-    if (!signatureUrl) {
-      showErrorToast('Please capture and upload the contract signature before saving.');
+    if (!contractImageUrl && !contractImageFile) {
+      showErrorToast('Vui lòng upload hình ảnh hợp đồng trước khi lưu.');
       return;
     }
 
@@ -757,71 +721,37 @@ const SalesContracts = ({ user }) => {
       const orderId = Number(formData.orderId);
       const customerId = Number(formData.customerId);
 
-      const [orderResponse, customerResponse] = await Promise.all([
-        ordersAPI.getById(orderId),
-        customersAPI.getById(customerId),
-      ]);
+      let imageUrl = contractImageUrl;
+      
+      // Nếu có file mới, upload lên Cloudinary
+      if (contractImageFile) {
+        setUploadingImage(true);
+        try {
+          const uploaded = await uploadFile(contractImageFile, 'image');
+          imageUrl = uploaded.secure_url;
+        } catch (uploadError) {
+          console.error('Error uploading contract image:', uploadError);
+          showErrorToast('Không thể upload hình ảnh hợp đồng. Vui lòng thử lại.');
+          return;
+        } finally {
+          setUploadingImage(false);
+        }
+      }
 
-      if (!orderResponse) throw new Error('Unable to load order details for contract PDF.');
-      if (!customerResponse) throw new Error('Unable to load customer details for contract PDF.');
-
-      const hydratedOrder = await enrichOrderWithVehicles(orderResponse);
-      const pdfDataUri = await generateContractPdf({
-        order: hydratedOrder,
-        customer: customerResponse,
-        dealer: Number(dealerId || formData.dealerId),
-        dealerName: dealerDisplayName,
-        staff: {
-          name: staffDisplayName,
-          email: user?.email,
-          phone: user?.phoneNumber || user?.phone,
-        },
-        notes: formData.notes || '',
-        signatureUrl,
-        contractDate: new Date().toISOString(),
-      });
-
-      const pdfFile = dataUriToFile(pdfDataUri, `sales-contract-${orderId}.pdf`);
-      if (!pdfFile) throw new Error('Failed to prepare contract PDF file.');
-
-      // Upload original PDF as raw (preserve original) and also upload image to generate thumbnail
-      const uploadRaw = await uploadFile(pdfFile, 'raw');    // original pdf
-      // Upload image to rasterize first page as thumbnail
-      const uploadThumb = await uploadFile(pdfFile, 'image'); // cloud will rasterize page 1
-
-      const pdfUrl = uploadRaw.secure_url;
-      const pdfPublicId = uploadRaw.public_id;
-      const thumbUrl = uploadThumb.secure_url;
-      const thumbPublicId = uploadThumb.public_id;
-
-      const documentMeta = {
-        type: 'CONTRACT_META_V1',
-        signatureUrl,
-        notes: formData.notes || '',
-        dealerId: Number(dealerId || formData.dealerId),
-        customerId,
-        orderId,
-        staffName: staffDisplayName,
-        generatedAt: new Date().toISOString(),
-        cachedPdfUrl: thumbUrl,
-        cachedPdfPublicId: thumbPublicId,
-        pdfUrl,
-        pdfPublicId,
-        customerSnapshot: extractCustomerSnapshot(customerResponse),
-        orderSnapshot: extractOrderSnapshot(hydratedOrder),
-      };
+      if (!imageUrl) {
+        showErrorToast('Vui lòng upload hình ảnh hợp đồng.');
+        return;
+      }
 
       const payload = {
-        documentImage: JSON.stringify(documentMeta),
+        documentImage: imageUrl, // Chỉ lưu URL string, không cần JSON meta
         customerId,
         orderId,
         dealerId: Number(dealerId || formData.dealerId),
-        signatureUrl: signatureUrl, // 单独保存签名 URL
-        notes: formData.notes || '', // 单独保存 notes
       };
 
       await contractsAPI.create(payload);
-      showSuccessToast('Contract created successfully');
+      showSuccessToast('Hợp đồng đã được tạo thành công');
       setShowModal(false);
       resetForm();
       loadContracts();
@@ -873,126 +803,22 @@ const SalesContracts = ({ user }) => {
     }
   };
 
-  // --------------- Canvas signature handlers (unchanged except upload usage) ---------------
-  const initializeCanvas = () => {
-    const canvas = canvasRef.current;
-    if (!canvas) return;
-    const context = canvas.getContext('2d');
-    const ratio = window.devicePixelRatio || 1;
-    const width = 480;
-    const height = 220;
-    canvas.width = width * ratio;
-    canvas.height = height * ratio;
-    canvas.style.width = `${width}px`;
-    canvas.style.height = `${height}px`;
-    context.scale(ratio, ratio);
-    context.lineJoin = 'round';
-    context.lineCap = 'round';
-    context.lineWidth = 2.5;
-    context.strokeStyle = '#111827';
-    context.fillStyle = '#ffffff';
-    context.fillRect(0, 0, width, height);
-  };
-
-  const getCanvasCoordinates = (event) => {
-    const canvas = canvasRef.current;
-    const rect = canvas.getBoundingClientRect();
-    if (event.touches && event.touches[0]) {
-      return { x: event.touches[0].clientX - rect.left, y: event.touches[0].clientY - rect.top };
-    }
-    return { x: event.clientX - rect.left, y: event.clientY - rect.top };
-  };
-
-  const handleDrawStart = (event) => {
-    const { x, y } = getCanvasCoordinates(event);
-    drawingStateRef.current.isDrawing = true;
-    drawingStateRef.current.lastX = x;
-    drawingStateRef.current.lastY = y;
-    event.preventDefault();
-    setSignatureError('');
-  };
-
-  const handleDrawMove = (event) => {
-    if (!drawingStateRef.current.isDrawing) return;
-    event.preventDefault();
-    const canvas = canvasRef.current;
-    const context = canvas.getContext('2d');
-    const { x, y } = getCanvasCoordinates(event);
-
-    context.beginPath();
-    context.moveTo(drawingStateRef.current.lastX, drawingStateRef.current.lastY);
-    context.lineTo(x, y);
-    context.stroke();
-
-    drawingStateRef.current.lastX = x;
-    drawingStateRef.current.lastY = y;
-  };
-
-  const handleDrawEnd = (event) => {
-    if (!drawingStateRef.current.isDrawing) return;
-    handleDrawMove(event);
-    drawingStateRef.current.isDrawing = false;
-    event.preventDefault();
-  };
-
-  const handleClearSignature = () => {
-    initializeCanvas();
-    setSignatureUrl('');
-  };
-
-  const handleUploadSignature = async () => {
-    try {
-      const canvas = canvasRef.current;
-      if (!canvas) {
-        setSignatureError('Canvas is not ready. Please try again.');
-        return;
-      }
-
-      const blank = document.createElement('canvas');
-      blank.width = canvas.width;
-      blank.height = canvas.height;
-      if (canvas.toDataURL() === blank.toDataURL()) {
-        setSignatureError('Please provide a signature before uploading.');
-        return;
-      }
-
-      setUploadingSignature(true);
-      setSignatureError('');
-      const dataUrl = canvas.toDataURL('image/png');
-      const blob = await (await fetch(dataUrl)).blob();
-      const file = new File([blob], `contract-signature-${Date.now()}.png`, { type: 'image/png' });
-
-      // Upload signature as image
-      const uploaded = await uploadFile(file, 'image');
-      setSignatureUrl(uploaded.secure_url);
-      showSuccessToast('Signature uploaded successfully');
-    } catch (error) {
-      console.error('Signature upload failed:', error);
-      setSignatureError(error.message || 'Failed to upload the signature');
-      showErrorToast(handleAPIError(error));
-    } finally {
-      setUploadingSignature(false);
-    }
-  };
 
   // --------------- prepareContractDocument & preview/download ---------------
   const prepareContractDocument = async (contract) => {
     if (!contract) throw new Error('Contract data is missing.');
     const existingMeta = contract.documentMeta || parseContractDocumentMeta(contract.documentImage);
 
-    let documentUrl = existingMeta?.pdfUrl || existingMeta?.cachedPdfUrl || null;
+    let documentUrl = existingMeta?.cachedPdfUrl || existingMeta?.pdfUrl || null;
 
     if (!documentUrl && contract.documentImage && typeof contract.documentImage === 'string' && !contract.documentImage.startsWith('{')) {
       documentUrl = contract.documentImage;
     }
 
-    // 如果是 Cloudinary URL，直接返回
     if (documentUrl && typeof documentUrl === 'string' && !isDataUri(documentUrl)) {
-      // 检查是否是 PDF（优先使用 pdfUrl）
-      const isPdf = existingMeta?.pdfUrl || documentUrl.toLowerCase().includes('.pdf') || documentUrl.includes('/raw/upload/');
       return {
         url: documentUrl,
-        mime: isPdf ? 'application/pdf' : (inferMimeFromUrl(documentUrl) || 'image/png'),
+        mime: inferMimeFromUrl(documentUrl) || 'image/png',
         meta: existingMeta || null,
       };
     }
@@ -1068,94 +894,37 @@ const SalesContracts = ({ user }) => {
       setDocumentPreviewMime('');
       releasePreviewObjectUrl();
 
-      const prepared = await prepareContractDocument(contract);
-      if (!prepared || !prepared.url) throw new Error('Contract document is not available.');
-
-      const url = prepared.url;
-      const mimeType = prepared.mime || inferMimeFromUrl(url) || 'application/pdf';
-
-      // 如果是 data URI，转换为 blob URL
-      if (isDataUri(url)) {
-        const blob = dataUriToBlob(url);
-        const objectUrl = createObjectUrl(blob);
-        previewObjectUrlRef.current = objectUrl;
-        setDocumentPreviewMime(mimeType);
-        setDocumentPreviewUrl(objectUrl);
-      } else {
-        // Cloudinary URL - 对于 PDF，直接使用 URL；对于图片，也直接使用
-        // 如果浏览器支持，可以直接在 iframe 中显示 PDF
-        setDocumentPreviewMime(mimeType);
-        setDocumentPreviewUrl(url);
+      // Lấy image URL từ contract
+      let imageUrl = contract.documentImage || '';
+      
+      // Nếu là JSON meta (format cũ), parse để lấy URL
+      if (imageUrl && imageUrl.startsWith('{')) {
+        try {
+          const meta = JSON.parse(imageUrl);
+          imageUrl = meta.cachedPdfUrl || meta.pdfUrl || meta.signatureUrl || imageUrl;
+        } catch (e) {
+          // Không phải JSON, dùng trực tiếp
+        }
       }
+
+      if (!imageUrl) {
+        throw new Error('Hợp đồng chưa có hình ảnh.');
+      }
+
+      // Xác định mime type
+      const mimeType = inferMimeFromUrl(imageUrl) || 'image/png';
+      setDocumentPreviewMime(mimeType);
+      setDocumentPreviewUrl(imageUrl);
     } catch (error) {
       releasePreviewObjectUrl();
-      console.error('Error preparing contract document for preview:', error);
-      showErrorToast(error.message || 'Unable to load contract document.');
+      console.error('Error loading contract image:', error);
+      showErrorToast(error.message || 'Không thể tải hình ảnh hợp đồng.');
       setShowDocumentModal(false);
     } finally {
       setDocumentPreviewLoading(false);
     }
   };
 
-  const handleDownloadContract = async (contract) => {
-    try {
-      const meta = contract.documentMeta || parseContractDocumentMeta(contract.documentImage);
-      const filename = buildContractFilename(contract, 'application/pdf');
-      
-
-      let downloadUrl = meta?.pdfUrl || null;
-      
-  
-      if (!downloadUrl) {
-        downloadUrl = meta?.cachedPdfUrl || null;
-      }
-      
-
-      if (!downloadUrl && contract.documentImage && typeof contract.documentImage === 'string' && !contract.documentImage.startsWith('{')) {
-        downloadUrl = contract.documentImage;
-      }
-
-      if (!downloadUrl) {
-        throw new Error('No downloadable document available. Contract may not have been generated yet.');
-      }
-
-  
-      try {
-        const response = await fetch(downloadUrl);
-        if (!response.ok) {
-          throw new Error(`Failed to fetch document: ${response.statusText}`);
-        }
-        
-        const blob = await response.blob();
-        const objectUrl = URL.createObjectURL(blob);
-        
-        const link = document.createElement('a');
-        link.href = objectUrl;
-        link.download = filename;
-        document.body.appendChild(link);
-        link.click();
-        document.body.removeChild(link);
-        
-        // 清理 object URL
-        setTimeout(() => URL.revokeObjectURL(objectUrl), 100);
-        
-        showSuccessToast('Contract downloaded successfully');
-      } catch (fetchError) {
-        console.warn('Fetch download failed, trying direct download:', fetchError);
-        // Fallback: 直接下载（可能因为 CORS 失败）
-        const link = document.createElement('a');
-        link.href = downloadUrl;
-        link.download = filename;
-        link.target = '_blank';
-        document.body.appendChild(link);
-        link.click();
-        document.body.removeChild(link);
-      }
-    } catch (err) {
-      console.error('Download error:', err);
-      showErrorToast(err.message || 'Unable to download contract document.');
-    }
-  };
 
   const handleCloseDocumentPreview = () => {
     releasePreviewObjectUrl();
@@ -1182,7 +951,6 @@ const SalesContracts = ({ user }) => {
     });
   }, [contracts, filterStatus]);
 
-  const totalContractValue = contracts.reduce((sum, contract) => sum + (contract.totalAmount || 0), 0);
   const totalContracts = contracts.length;
   const activeContracts = contracts.filter((contract) => contract.status === 'ACTIVE').length;
 
@@ -1206,11 +974,10 @@ const SalesContracts = ({ user }) => {
           </div>
         </div>
 
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '16px', marginBottom: '24px' }}>
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: '16px', marginBottom: '24px' }}>
           {[
             { label: 'Total Contracts', value: totalContracts, icon: 'bx-file', color: 'var(--color-primary)' },
             { label: 'Active Contracts', value: activeContracts, icon: 'bx-check-circle', color: 'var(--color-success)' },
-            { label: 'Total Value', value: `$${totalContractValue.toLocaleString()}`, icon: 'bx-dollar-circle', color: 'var(--color-info)' },
           ].map((stat, index) => (
             <div key={index} style={{ padding: '16px', background: 'var(--color-bg)', borderRadius: 'var(--radius)' }}>
               <div style={{ display: 'flex', alignItems: 'center', gap: '12px', marginBottom: '8px' }}>
@@ -1261,7 +1028,6 @@ const SalesContracts = ({ user }) => {
                   <tr style={{ borderBottom: '2px solid var(--color-border)' }}>
                     <th style={tableHeaderStyle}>Contract ID</th>
                     <th style={tableHeaderStyle}>Customer</th>
-                    <th style={tableHeaderStyle}>Order</th>
                     <th style={{ ...tableHeaderStyle, textAlign: 'center' }}>Status</th>
                     <th style={{ ...tableHeaderStyle, textAlign: 'center' }}>Actions</th>
                   </tr>
@@ -1271,7 +1037,6 @@ const SalesContracts = ({ user }) => {
                     <tr key={contract.id} style={{ borderBottom: '1px solid var(--color-border)' }}>
                       <td style={tableCellStyle}><strong>{contract.id}</strong></td>
                       <td style={tableCellStyle}>{contract.customerName}</td>
-                      <td style={tableCellStyle}>{contract.orderNumber || `Order #${contract.orderId || 'N/A'}`}</td>
                       <td style={{ ...tableCellStyle, textAlign: 'center' }}>
                         <span style={{ padding: '4px 12px', borderRadius: 'var(--radius)', background: 'var(--color-bg)', color: contract.status === 'ACTIVE' ? 'var(--color-success)' : contract.status === 'COMPLETED' ? 'var(--color-info)' : contract.status === 'CANCELLED' ? 'var(--color-error)' : 'var(--color-text-muted)', fontSize: '12px', fontWeight: '600' }}>
                           {contract.status}
@@ -1280,10 +1045,7 @@ const SalesContracts = ({ user }) => {
                       <td style={{ ...tableCellStyle, textAlign: 'center' }}>
                         <div style={{ display: 'flex', gap: '8px', justifyContent: 'center', flexWrap: 'wrap' }}>
                           <button className="btn btn-outline" style={{ padding: '6px 10px', fontSize: '12px' }} onClick={() => handlePreviewContractDocument(contract)}>
-                            <i className="bx bx-show"></i> Preview
-                          </button>
-                          <button className="btn btn-outline" style={{ padding: '6px 10px', fontSize: '12px' }} onClick={() => handleDownloadContract(contract)}>
-                            <i className="bx bx-download"></i> Download
+                            <i className="bx bx-show"></i> Xem
                           </button>
                           <button className="btn btn-outline" style={{ padding: '6px 10px', fontSize: '12px' }} onClick={() => handleViewOrder(contract)}>
                             <i className="bx bx-spreadsheet"></i> Order
@@ -1355,32 +1117,85 @@ const SalesContracts = ({ user }) => {
                   )}
 
                   <div>
-                    <label style={labelStyle}>Contract Signature *</label>
+                    <label style={labelStyle}>Hình ảnh hợp đồng *</label>
                     <div style={{ border: '1px solid var(--color-border)', borderRadius: 'var(--radius)', background: 'var(--color-bg)', padding: '12px', display: 'flex', flexDirection: 'column', gap: '12px' }}>
-                      <canvas
-                        ref={canvasRef}
-                        onMouseDown={handleDrawStart}
-                        onMouseMove={handleDrawMove}
-                        onMouseUp={handleDrawEnd}
-                        onMouseLeave={handleDrawEnd}
-                        onTouchStart={handleDrawStart}
-                        onTouchMove={handleDrawMove}
-                        onTouchEnd={handleDrawEnd}
-                        style={{ border: '1px dashed var(--color-border)', borderRadius: '8px', background: '#ffffff', touchAction: 'none' }}
+                      <input
+                        type="file"
+                        accept="image/*"
+                        onChange={(e) => {
+                          const file = e.target.files?.[0];
+                          if (file) {
+                            // Validate file type
+                            if (!file.type.startsWith('image/')) {
+                              setImageError('Vui lòng chọn file hình ảnh (PNG, JPG, JPEG, etc.)');
+                              return;
+                            }
+                            // Validate file size (max 10MB)
+                            if (file.size > 10 * 1024 * 1024) {
+                              setImageError('Kích thước file không được vượt quá 10MB');
+                              return;
+                            }
+                            setContractImageFile(file);
+                            setImageError('');
+                            // Create preview URL
+                            const reader = new FileReader();
+                            reader.onload = (event) => {
+                              setContractImageUrl(event.target.result);
+                            };
+                            reader.readAsDataURL(file);
+                          }
+                        }}
+                        style={{ display: 'none' }}
+                        id="contract-image-input"
                       />
-                      <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
-                        <button type="button" className="btn btn-outline" onClick={handleClearSignature} disabled={uploadingSignature}><i className="bx bx-eraser"></i> Clear</button>
-                        <button type="button" className="btn btn-primary" onClick={handleUploadSignature} disabled={uploadingSignature}>
-                          {uploadingSignature ? <><i className="bx bx-loader-alt bx-spin" style={{ marginRight: '6px' }}></i> Uploading...</> : <><i className="bx bx-cloud-upload" style={{ marginRight: '6px' }}></i> Upload Signature</>}
-                        </button>
-                      </div>
-                      {signatureError && <div style={{ color: 'var(--color-error)', fontSize: '12px' }}>{signatureError}</div>}
-                      {signatureUrl && (
-                        <div style={{ border: '1px solid var(--color-border)', borderRadius: '8px', padding: '12px', background: 'var(--color-surface)' }}>
-                          <div style={{ fontSize: '13px', color: 'var(--color-text-muted)' }}>Uploaded Signature URL</div>
-                          <a href={signatureUrl} target="_blank" rel="noopener noreferrer" style={{ fontSize: '14px', wordBreak: 'break-all' }}>{signatureUrl}</a>
+                      <label
+                        htmlFor="contract-image-input"
+                        style={{
+                          display: 'flex',
+                          flexDirection: 'column',
+                          alignItems: 'center',
+                          justifyContent: 'center',
+                          padding: '24px',
+                          border: '2px dashed var(--color-border)',
+                          borderRadius: 'var(--radius)',
+                          background: 'var(--color-surface)',
+                          cursor: 'pointer',
+                          transition: 'all 0.3s ease'
+                        }}
+                        onMouseEnter={(e) => {
+                          e.currentTarget.style.borderColor = 'var(--color-primary)';
+                          e.currentTarget.style.background = 'var(--color-bg)';
+                        }}
+                        onMouseLeave={(e) => {
+                          e.currentTarget.style.borderColor = 'var(--color-border)';
+                          e.currentTarget.style.background = 'var(--color-surface)';
+                        }}
+                      >
+                        <i className="bx bx-cloud-upload" style={{ fontSize: '48px', color: 'var(--color-primary)', marginBottom: '8px' }}></i>
+                        <div style={{ fontSize: '14px', color: 'var(--color-text)', marginBottom: '4px' }}>
+                          Click để chọn hình ảnh hợp đồng
+                        </div>
+                        <div style={{ fontSize: '12px', color: 'var(--color-text-muted)' }}>
+                          PNG, JPG, JPEG (Tối đa 10MB)
+                        </div>
+                      </label>
+                      {contractImageUrl && (
+                        <div style={{ marginTop: '12px' }}>
+                          <div style={{ fontSize: '13px', color: 'var(--color-text-muted)', marginBottom: '8px' }}>Preview:</div>
+                          <img
+                            src={contractImageUrl}
+                            alt="Contract preview"
+                            style={{
+                              maxWidth: '100%',
+                              maxHeight: '300px',
+                              borderRadius: 'var(--radius)',
+                              border: '1px solid var(--color-border)',
+                              objectFit: 'contain'
+                            }}
+                          />
                         </div>
                       )}
+                      {imageError && <div style={{ color: 'var(--color-error)', fontSize: '12px' }}>{imageError}</div>}
                     </div>
                   </div>
 
@@ -1466,44 +1281,25 @@ const SalesContracts = ({ user }) => {
             {documentPreviewLoading ? (
               <div style={{ textAlign: 'center', padding: '40px 0', color: 'var(--color-text-muted)' }}>
                 <i className="bx bx-loader-alt bx-spin" style={{ fontSize: '48px' }}></i>
-                <div style={{ marginTop: '12px' }}>Preparing document preview...</div>
+                <div style={{ marginTop: '12px' }}>Đang tải hình ảnh hợp đồng...</div>
               </div>
             ) : documentPreviewUrl ? (
-              isPdfDocument(documentPreviewUrl) ? (
-                <iframe 
-                  src={documentPreviewUrl} 
-                  title="Contract Document" 
-                  style={{ 
-                    width: '100%', 
-                    height: 'calc(80vh - 80px)', 
-                    border: 'none', 
-                    borderRadius: 'var(--radius)', 
-                    background: '#f5f5f5' 
-                  }}
-                  onError={(e) => {
-                    console.error('Iframe load error:', e);
-                    showErrorToast('Failed to load PDF preview. Please try downloading the document.');
-                  }}
-                />
-              ) : (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '16px', height: 'calc(80vh - 80px)', overflow: 'auto' }}>
                 <img 
                   src={documentPreviewUrl} 
-                  alt="Contract Document" 
+                  alt="Hình ảnh hợp đồng" 
                   style={{ 
                     width: '100%', 
-                    maxHeight: '70vh', 
+                    maxHeight: '100%', 
                     objectFit: 'contain', 
                     borderRadius: 'var(--radius)', 
-                    border: '1px solid var(--color-border)' 
-                  }}
-                  onError={(e) => {
-                    console.error('Image load error:', e);
-                    showErrorToast('Failed to load image preview.');
-                  }}
+                    border: '1px solid var(--color-border)',
+                    background: 'var(--color-bg)'
+                  }} 
                 />
-              )
+              </div>
             ) : (
-              <div style={{ textAlign: 'center', padding: '40px 0', color: 'var(--color-text-muted)' }}>Unable to load contract preview.</div>
+              <div style={{ textAlign: 'center', padding: '40px 0', color: 'var(--color-text-muted)' }}>Không thể tải hình ảnh hợp đồng.</div>
             )}
           </div>
         </div>

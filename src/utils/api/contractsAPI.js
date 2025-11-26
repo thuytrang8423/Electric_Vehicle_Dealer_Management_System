@@ -18,10 +18,12 @@ export const contractsAPI = {
     return response.data;
   },
 
-  getById: async (contractId) => {
-    const response = await apiClient.get(`/api/contracts/${contractId}`);
-    return response.data;
-  },
+  // ⚠️ LƯU Ý: Backend KHÔNG CÓ endpoint GET /api/contracts/{contractId}
+  // Sử dụng getOrderByContract() để lấy thông tin order của contract thay thế
+  // getById: async (contractId) => {
+  //   const response = await apiClient.get(`/api/contracts/${contractId}`);
+  //   return response.data;
+  // },
 
   getOrderByContract: async (contractId) => {
     const response = await apiClient.get(`/api/contracts/${contractId}/order`);
@@ -33,6 +35,14 @@ export const contractsAPI = {
     return response.data;
   },
 };
+
+
+
+
+
+
+
+
 
 
 

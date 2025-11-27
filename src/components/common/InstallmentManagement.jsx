@@ -1,9 +1,66 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import { installmentsAPI } from '../../utils/api/installmentsAPI';
 import { ordersAPI } from '../../utils/api/ordersAPI';
+import { customersAPI } from '../../utils/api/customersAPI';
+import { paymentsAPI } from '../../utils/api/paymentsAPI';
 import { showErrorToast, showSuccessToast } from '../../utils/toast';
 import { handleAPIError } from '../../utils/apiConfig';
 import 'boxicons/css/boxicons.min.css';
+
+const coalesceText = (...values) => {
+  for (const value of values) {
+    if (value === undefined || value === null) continue;
+    if (typeof value === 'string') {
+      const trimmed = value.trim();
+      if (trimmed.length > 0) return trimmed;
+    }
+    if (typeof value === 'number' && Number.isFinite(value)) {
+      return String(value);
+    }
+  }
+  return '';
+};
+
+const composeFullName = (data) => {
+  if (!data || typeof data !== 'object') return '';
+  const parts = [
+    data.fullName,
+    data.fullname,
+    data.full_name,
+    data.displayName,
+    data.display_name,
+    data.name,
+    data.customerName,
+    data.customerFullName,
+    data.customer_full_name,
+  ];
+
+  for (const part of parts) {
+    if (typeof part === 'string' && part.trim().length > 0) {
+      return part.trim();
+    }
+  }
+
+  const firstName =
+    data.firstName ||
+    data.firstname ||
+    data.first_name ||
+    data.givenName ||
+    data.given_name ||
+    '';
+  const lastName =
+    data.lastName ||
+    data.lastname ||
+    data.last_name ||
+    data.familyName ||
+    data.family_name ||
+    '';
+
+  const resolved = [firstName, lastName].map((val) => (typeof val === 'string' ? val.trim() : '')).filter(Boolean);
+  return resolved.join(' ');
+};
+
+const ensureObject = (value) => (value && typeof value === 'object' ? value : null);
 
 const InstallmentManagement = ({ user }) => {
   // State for Orders List
@@ -26,18 +83,153 @@ const InstallmentManagement = ({ user }) => {
   const [loadingPreview, setLoadingPreview] = useState(false);
   const [loadingCreate, setLoadingCreate] = useState(false);
 
+  // Customer Lookup
+  const [customerLookup, setCustomerLookup] = useState({});
+
+  // User info
+  const userRole = user?.role?.toUpperCase().replace(/-/g, '_');
+  const userDealerId = user?.dealerId || user?.user?.dealerId;
+
   // Permissions
   const canManage = useMemo(() => {
     const role = (user?.role || '').toUpperCase();
     return role === 'DEALER_MANAGER' || role === 'ADMIN';
   }, [user]);
 
+  // Load Customers for Lookup
+  useEffect(() => {
+    if (!canManage) return;
+    
+    let isMounted = true;
+
+    const loadCustomers = async () => {
+      try {
+        const customerPromise =
+          userDealerId && (userRole === 'DEALER_MANAGER' || userRole === 'DEALER_STAFF')
+            ? customersAPI.getByDealer(userDealerId)
+            : customersAPI.getAll();
+
+        const customersResult = await Promise.allSettled([customerPromise]);
+
+        if (!isMounted) return;
+
+        if (customersResult[0].status === 'fulfilled' && Array.isArray(customersResult[0].value)) {
+          const map = {};
+          customersResult[0].value.forEach((customer) => {
+            const candidateIds = [
+              customer.id,
+              customer.customerId,
+              customer.customerID,
+              customer.userId,
+              customer.user?.id,
+              customer.user?.userId
+            ];
+            candidateIds.forEach((candidate) => {
+              if (candidate !== undefined && candidate !== null && candidate !== '') {
+                map[String(candidate)] = customer;
+              }
+            });
+          });
+          setCustomerLookup(map);
+        } else if (customersResult[0].status === 'rejected') {
+          console.error('Failed to load customers for installment management:', customersResult[0].reason);
+        }
+      } catch (error) {
+        if (isMounted) {
+          console.error('Error loading customers for installment management:', error);
+        }
+      }
+    };
+
+    loadCustomers();
+
+    return () => {
+      isMounted = false;
+    };
+  }, [canManage, userRole, userDealerId]);
+
   // Fetch Orders on Mount
   useEffect(() => {
     if (canManage) {
       fetchOrders();
     }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [canManage]);
+
+  // Re-map customer names when customerLookup changes
+  useEffect(() => {
+    if (orders.length === 0) return;
+
+    setOrders(prevOrders => {
+      const updatedOrders = prevOrders.map(order => {
+        const orderCustomerId = order.customerId || 
+          order.customer?.id || 
+          order.customer?.customerId ||
+          order.resolvedCustomer?.id ||
+          order.resolvedCustomer?.customerId;
+        
+        const lookupCustomer = orderCustomerId && Object.keys(customerLookup).length > 0 
+          ? customerLookup[String(orderCustomerId)] 
+          : null;
+        
+        const resolvedCustomer =
+          lookupCustomer ||
+          ensureObject(order.customer) ||
+          ensureObject(order.customerInfo) ||
+          ensureObject(order.customerDetails) ||
+          ensureObject(order.customerData) ||
+          ensureObject(order.customerResponse) ||
+          ensureObject(order.customerDto) ||
+          ensureObject(order.quote?.customer);
+
+        const customerName =
+          coalesceText(
+            // Try lookup customer first (if available)
+            lookupCustomer ? composeFullName(lookupCustomer) : null,
+            // Then try order's own customer data
+            order.customerName,
+            order.customerFullname,
+            order.customerFullName,
+            order.customer_full_name,
+            composeFullName(resolvedCustomer),
+            composeFullName(order.customer),
+            composeFullName(order.customerInfo),
+            composeFullName(order.customerDetails),
+            composeFullName(order.customerData),
+            composeFullName(order.customerResponse),
+            composeFullName(order.customerDto),
+            composeFullName(order.customer?.user),
+            composeFullName(order.customerInfo?.user),
+            composeFullName(order.customerDetails?.user),
+            composeFullName(order.customerData?.user),
+            resolvedCustomer?.contactName,
+            resolvedCustomer?.customerName,
+            resolvedCustomer?.customerFullName,
+            lookupCustomer?.email,
+            lookupCustomer?.phone,
+            order.customerEmail
+          ) || (order.customerId ? `Customer #${order.customerId}` : 'Unknown Customer');
+
+        // Always update to ensure customer name is resolved correctly
+        if (order.customerName === customerName) {
+          return order;
+        }
+
+        return {
+          ...order,
+          customerName
+        };
+      });
+
+      // Only update state if there are actual changes
+      const hasChanges = updatedOrders.some((updated, index) => 
+        updated.customerName !== prevOrders[index]?.customerName
+      );
+
+      return hasChanges ? updatedOrders : prevOrders;
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [customerLookup]);
 
   const fetchOrders = async () => {
     try {
@@ -47,7 +239,148 @@ const InstallmentManagement = ({ user }) => {
       const data = await ordersAPI.getAll();
       // Filter for eligible orders (e.g., not cancelled)
       const eligibleOrders = Array.isArray(data) ? data.filter(o => o.status !== 'CANCELLED') : [];
-      setOrders(eligibleOrders);
+      
+      // Fetch payment status for each order to get accurate payment amounts
+      const ordersWithPaymentStatus = await Promise.allSettled(
+        eligibleOrders.map(async (order) => {
+          const orderId = order.orderId || order.id;
+          if (!orderId) return order;
+
+          try {
+            // Get payment status from API to get accurate totalPaid
+            const paymentStatus = await paymentsAPI.getDealerWorkflowPaymentStatus(orderId);
+            
+            // Use payment status data if available
+            const totalPaid = paymentStatus?.totalPaid 
+              ? Number(paymentStatus.totalPaid) 
+              : Number(order.paidAmount || order.paid_amount || order.totalPaid || 0);
+            
+            const totalAmount = Number(order.totalAmount || order.total_amount || order.amount || 0);
+            const remainingAmount = Math.max(totalAmount - totalPaid, 0);
+
+            // Try to get customer from lookup first
+            const orderCustomerId = order.customerId || 
+              order.customer?.id || 
+              order.customer?.customerId ||
+              order.resolvedCustomer?.id ||
+              order.resolvedCustomer?.customerId;
+            
+            const lookupCustomer = orderCustomerId ? customerLookup[String(orderCustomerId)] : null;
+            
+            const resolvedCustomer =
+              lookupCustomer ||
+              ensureObject(order.customer) ||
+              ensureObject(order.customerInfo) ||
+              ensureObject(order.customerDetails) ||
+              ensureObject(order.customerData) ||
+              ensureObject(order.customerResponse) ||
+              ensureObject(order.customerDto) ||
+              ensureObject(order.quote?.customer);
+
+            const customerName =
+              coalesceText(
+                // Try lookup customer first
+                composeFullName(lookupCustomer),
+                // Then try order's own customer data
+                order.customerName,
+                order.customerFullname,
+                order.customerFullName,
+                order.customer_full_name,
+                composeFullName(resolvedCustomer),
+                composeFullName(order.customer),
+                composeFullName(order.customerInfo),
+                composeFullName(order.customerDetails),
+                composeFullName(order.customerData),
+                composeFullName(order.customerResponse),
+                composeFullName(order.customerDto),
+                composeFullName(order.customer?.user),
+                composeFullName(order.customerInfo?.user),
+                composeFullName(order.customerDetails?.user),
+                composeFullName(order.customerData?.user),
+                resolvedCustomer?.contactName,
+                resolvedCustomer?.customerName,
+                resolvedCustomer?.customerFullName,
+                lookupCustomer?.email,
+                lookupCustomer?.phone,
+                order.customerEmail
+              ) || (order.customerId ? `Customer #${order.customerId}` : 'Unknown Customer');
+
+            return {
+              ...order,
+              customerName,
+              paidAmount: totalPaid,
+              remainingAmount: remainingAmount,
+              totalAmount: totalAmount
+            };
+          } catch (paymentError) {
+            // If payment status API fails, use order's own data
+            console.warn(`Failed to fetch payment status for order ${orderId}:`, paymentError);
+            
+            const orderCustomerId = order.customerId || 
+              order.customer?.id || 
+              order.customer?.customerId ||
+              order.resolvedCustomer?.id ||
+              order.resolvedCustomer?.customerId;
+            
+            const lookupCustomer = orderCustomerId ? customerLookup[String(orderCustomerId)] : null;
+            
+            const resolvedCustomer =
+              lookupCustomer ||
+              ensureObject(order.customer) ||
+              ensureObject(order.customerInfo) ||
+              ensureObject(order.customerDetails) ||
+              ensureObject(order.customerData) ||
+              ensureObject(order.customerResponse) ||
+              ensureObject(order.customerDto) ||
+              ensureObject(order.quote?.customer);
+
+            const customerName =
+              coalesceText(
+                composeFullName(lookupCustomer),
+                order.customerName,
+                order.customerFullname,
+                order.customerFullName,
+                order.customer_full_name,
+                composeFullName(resolvedCustomer),
+                composeFullName(order.customer),
+                composeFullName(order.customerInfo),
+                composeFullName(order.customerDetails),
+                composeFullName(order.customerData),
+                composeFullName(order.customerResponse),
+                composeFullName(order.customerDto),
+                composeFullName(order.customer?.user),
+                composeFullName(order.customerInfo?.user),
+                composeFullName(order.customerDetails?.user),
+                composeFullName(order.customerData?.user),
+                resolvedCustomer?.contactName,
+                resolvedCustomer?.customerName,
+                resolvedCustomer?.customerFullName,
+                lookupCustomer?.email,
+                lookupCustomer?.phone,
+                order.customerEmail
+              ) || (order.customerId ? `Customer #${order.customerId}` : 'Unknown Customer');
+
+            const totalAmount = Number(order.totalAmount || order.total_amount || order.amount || 0);
+            const paidAmount = Number(order.paidAmount || order.paid_amount || order.totalPaid || 0);
+            const remainingAmount = Math.max(totalAmount - paidAmount, 0);
+
+            return {
+              ...order,
+              customerName,
+              paidAmount,
+              remainingAmount,
+              totalAmount
+            };
+          }
+        })
+      );
+
+      // Extract successful results
+      const processedOrders = ordersWithPaymentStatus
+        .filter(result => result.status === 'fulfilled')
+        .map(result => result.value);
+
+      setOrders(processedOrders);
     } catch (error) {
       console.error('Error fetching orders:', error);
       showErrorToast('Failed to load orders.');

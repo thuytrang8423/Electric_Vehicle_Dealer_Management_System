@@ -3,16 +3,72 @@ import { useLocation } from 'react-router-dom';
 import { LineChart, Line, BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer } from 'recharts';
 import { paymentsAPI } from '../../utils/api/paymentsAPI';
 import { ordersAPI } from '../../utils/api/ordersAPI';
-
+import { customersAPI } from '../../utils/api/customersAPI';
 import { installmentsAPI } from '../../utils/api/installmentsAPI';
 import { showSuccessToast, showErrorToast } from '../../utils/toast';
 import { handleAPIError } from '../../utils/apiConfig';
 import 'boxicons/css/boxicons.min.css';
 
+const coalesceText = (...values) => {
+  for (const value of values) {
+    if (value === undefined || value === null) continue;
+    if (typeof value === 'string') {
+      const trimmed = value.trim();
+      if (trimmed.length > 0) return trimmed;
+    }
+    if (typeof value === 'number' && Number.isFinite(value)) {
+      return String(value);
+    }
+  }
+  return '';
+};
+
+const composeFullName = (data) => {
+  if (!data || typeof data !== 'object') return '';
+  const parts = [
+    data.fullName,
+    data.fullname,
+    data.full_name,
+    data.displayName,
+    data.display_name,
+    data.name,
+    data.customerName,
+    data.customerFullName,
+    data.customer_full_name,
+  ];
+
+  for (const part of parts) {
+    if (typeof part === 'string' && part.trim().length > 0) {
+      return part.trim();
+    }
+  }
+
+  const firstName =
+    data.firstName ||
+    data.firstname ||
+    data.first_name ||
+    data.givenName ||
+    data.given_name ||
+    '';
+  const lastName =
+    data.lastName ||
+    data.lastname ||
+    data.last_name ||
+    data.familyName ||
+    data.family_name ||
+    '';
+
+  const resolved = [firstName, lastName].map((val) => (typeof val === 'string' ? val.trim() : '')).filter(Boolean);
+  return resolved.join(' ');
+};
+
+const ensureObject = (value) => (value && typeof value === 'object' ? value : null);
+
 const PaymentManagement = ({ user, paymentTabState }) => {
   const location = useLocation();
   const [payments, setPayments] = useState([]);
   const [allOrders, setAllOrders] = useState([]); // Store all relevant orders for lookup
+  const [customerLookup, setCustomerLookup] = useState({});
 
   const [loading, setLoading] = useState(true);
   const [selectedType, setSelectedType] = useState('all');
@@ -43,34 +99,55 @@ const PaymentManagement = ({ user, paymentTabState }) => {
 
   const getCustomerName = (order) => {
     if (!order) return 'N/A';
-    const candidateIds = [
-      order.customerId,
-      order.customer?.id,
-      order.customer?.customerId,
-      order.customer?.customer?.id,
-    ].filter((value) => value !== undefined && value !== null);
+    
+    // Try to get customer from lookup first
+    const orderCustomerId = order.customerId || 
+      order.customer?.id || 
+      order.customer?.customerId ||
+      order.resolvedCustomer?.id ||
+      order.resolvedCustomer?.customerId;
+    
+    const lookupCustomer = orderCustomerId ? customerLookup[String(orderCustomerId)] : null;
+    
+    const resolvedCustomer =
+      lookupCustomer ||
+      ensureObject(order.customer) ||
+      ensureObject(order.customerInfo) ||
+      ensureObject(order.customerDetails) ||
+      ensureObject(order.customerData) ||
+      ensureObject(order.customerResponse) ||
+      ensureObject(order.customerDto) ||
+      ensureObject(order.quote?.customer);
 
-
-
-    const fallback =
-      order.customer ||
-      order.customerInfo ||
-      order.customerDetails ||
-      null;
-    if (fallback) {
-      return (
-        fallback.fullName ||
-        fallback.name ||
-        fallback.displayName ||
-        fallback.customerName ||
-        (fallback.id ? `Customer #${fallback.id}` : 'N/A')
-      );
-    }
-
-    if (candidateIds.length > 0) {
-      return `Customer #${candidateIds[0]}`;
-    }
-    return 'N/A';
+    const customerName =
+      coalesceText(
+        // Try lookup customer first
+        composeFullName(lookupCustomer),
+        // Then try order's own customer data
+        order.customerName,
+        order.customerFullname,
+        order.customerFullName,
+        order.customer_full_name,
+        composeFullName(resolvedCustomer),
+        composeFullName(order.customer),
+        composeFullName(order.customerInfo),
+        composeFullName(order.customerDetails),
+        composeFullName(order.customerData),
+        composeFullName(order.customerResponse),
+        composeFullName(order.customerDto),
+        composeFullName(order.customer?.user),
+        composeFullName(order.customerInfo?.user),
+        composeFullName(order.customerDetails?.user),
+        composeFullName(order.customerData?.user),
+        resolvedCustomer?.contactName,
+        resolvedCustomer?.customerName,
+        resolvedCustomer?.customerFullName,
+        lookupCustomer?.email,
+        lookupCustomer?.phone,
+        order.customerEmail
+      ) || (order.customerId ? `Customer #${order.customerId}` : 'N/A');
+    
+    return customerName;
   };
 
   const getVehicleName = (order) => {
@@ -190,6 +267,56 @@ const PaymentManagement = ({ user, paymentTabState }) => {
   };
 
 
+
+  // Load Customers for Lookup
+  useEffect(() => {
+    let isMounted = true;
+
+    const loadCustomers = async () => {
+      try {
+        const customerPromise =
+          userDealerId && (userRole === 'DEALER_MANAGER' || userRole === 'DEALER_STAFF')
+            ? customersAPI.getByDealer(userDealerId)
+            : customersAPI.getAll();
+
+        const customersResult = await Promise.allSettled([customerPromise]);
+
+        if (!isMounted) return;
+
+        if (customersResult[0].status === 'fulfilled' && Array.isArray(customersResult[0].value)) {
+          const map = {};
+          customersResult[0].value.forEach((customer) => {
+            const candidateIds = [
+              customer.id,
+              customer.customerId,
+              customer.customerID,
+              customer.userId,
+              customer.user?.id,
+              customer.user?.userId
+            ];
+            candidateIds.forEach((candidate) => {
+              if (candidate !== undefined && candidate !== null && candidate !== '') {
+                map[String(candidate)] = customer;
+              }
+            });
+          });
+          setCustomerLookup(map);
+        } else if (customersResult[0].status === 'rejected') {
+          console.error('Failed to load customers for payment management:', customersResult[0].reason);
+        }
+      } catch (error) {
+        if (isMounted) {
+          console.error('Error loading customers for payment management:', error);
+        }
+      }
+    };
+
+    loadCustomers();
+
+    return () => {
+      isMounted = false;
+    };
+  }, [userRole, userDealerId]);
 
   // Load payments and approved orders
   useEffect(() => {
@@ -498,7 +625,7 @@ const PaymentManagement = ({ user, paymentTabState }) => {
     };
 
     loadData();
-  }, [userRole, userId, userDealerId, refreshTrigger]);
+  }, [userRole, userId, userDealerId, refreshTrigger, customerLookup]);
 
   useEffect(() => {
     // Refresh khi có fromPaymentResult hoặc orderId trong query params

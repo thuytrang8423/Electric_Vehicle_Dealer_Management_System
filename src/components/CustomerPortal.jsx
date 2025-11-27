@@ -173,7 +173,6 @@ const CustomerPortal = ({ loggedInUser, onLogout }) => {
                           <th>Total Amount</th>
                           <th>Paid Amount</th>
                           <th>Remaining</th>
-                          <th>Status</th>
                           <th>Payment Status</th>
                         </tr>
                       </thead>
@@ -186,11 +185,6 @@ const CustomerPortal = ({ loggedInUser, onLogout }) => {
                             <td className="amount">{formatCurrency(order.paidAmount || 0)}</td>
                             <td className="amount remaining">
                               {formatCurrency(order.remainingAmount || 0)}
-                            </td>
-                            <td>
-                              <span className={`status-badge status-${(order.status || '').toLowerCase()}`}>
-                                {order.status || 'N/A'}
-                              </span>
                             </td>
                             <td>
                               <span className={`status-badge payment-${(order.paymentStatus || 'unpaid').toLowerCase()}`}>
@@ -280,14 +274,14 @@ const CustomerPortal = ({ loggedInUser, onLogout }) => {
               )}
 
               {/* Empty State */}
-              {(!result.orders || result.orders.length === 0) && 
-               (!result.paymentHistory || result.paymentHistory.length === 0) && 
-               (!result.installments || result.installments.length === 0) && (
-                <div className="result-placeholder">
-                  <i className="bx bx-info-circle" style={{ fontSize: '48px', marginBottom: '16px', display: 'block' }}></i>
-                  Không có dữ liệu để hiển thị
-                </div>
-              )}
+              {(!result.orders || result.orders.length === 0) &&
+                (!result.paymentHistory || result.paymentHistory.length === 0) &&
+                (!result.installments || result.installments.length === 0) && (
+                  <div className="result-placeholder">
+                    <i className="bx bx-info-circle" style={{ fontSize: '48px', marginBottom: '16px', display: 'block' }}></i>
+                    Không có dữ liệu để hiển thị
+                  </div>
+                )}
             </div>
           )}
         </section>

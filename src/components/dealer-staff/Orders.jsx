@@ -627,6 +627,7 @@ const Orders = ({ user }) => {
   });
   const [showApproveModal, setShowApproveModal] = useState(false);
   const [selectedOrder, setSelectedOrder] = useState(null);
+  const [approveNotes, setApproveNotes] = useState('');
   const [showPaymentModal, setShowPaymentModal] = useState(false);
   const [selectedOrderForPayment, setSelectedOrderForPayment] = useState(null);
   const [paymentFormData, setPaymentFormData] = useState({
@@ -1454,13 +1455,23 @@ const Orders = ({ user }) => {
       // Kiểm tra workflow type dựa trên customerId
       // customerId = null: Order từ DEALER_MANAGER gửi cho EVM (workflow API) - chỉ EVM_MANAGER có thể approve
       // customerId có giá trị: Order từ DEALER_STAFF gửi cho DEALER_MANAGER (dealer-workflow API) - chỉ DEALER_MANAGER có thể approve
-      const orderCustomerId = order.customerId || order.customer?.id || order.customer?.customerId;
+      const orderCustomerId =
+        order.customerId ||
+        order.customer?.id ||
+        order.customer?.customerId ||
+        order.resolvedCustomer?.id ||
+        order.resolvedCustomer?.customerId;
+
       const isEVMWorkflowOrder = orderCustomerId === null || orderCustomerId === undefined;
 
       if (normalizedRole === 'DEALER_MANAGER') {
         // DEALER_MANAGER chỉ có thể approve orders từ dealer-workflow (customerId có giá trị)
         // Không thể approve orders từ EVM workflow (customerId = null)
-        return !isEVMWorkflowOrder;
+        // Exception: If the order was created by a STAFF member, it's definitely a dealer workflow
+        const creatorRole = (order.creatorRole || order.createdBy?.role || '').toUpperCase();
+        const isStaffCreated = creatorRole.includes('STAFF');
+
+        return !isEVMWorkflowOrder || isStaffCreated;
       } else if (normalizedRole === 'EVM_MANAGER' || normalizedRole === 'ADMIN') {
         // EVM_MANAGER chỉ có thể approve orders từ EVM workflow (customerId = null)
         return isEVMWorkflowOrder;
@@ -1530,39 +1541,39 @@ const Orders = ({ user }) => {
   };
 
   // Load orders based on role
-  useEffect(() => {
-    const loadOrders = async () => {
-      try {
-        setLoading(true);
-        let data = [];
+  const loadOrders = useCallback(async () => {
+    try {
+      setLoading(true);
+      let data = [];
 
-        if (userRole === 'DEALER_STAFF' && userId) {
-          // DEALER_STAFF: Get their own orders
-          data = await ordersAPI.getByUser(userId);
-        } else if (userRole === 'DEALER_MANAGER' && userDealerId) {
-          // DEALER_MANAGER: Get ALL orders of their dealer (Manager's own and staff's)
-          data = await ordersAPI.getOrdersByDealerId(userDealerId);
-        } else if (userRole === 'EVM_MANAGER' || userRole === 'ADMIN') {
-          // EVM_MANAGER/ADMIN: Chỉ lấy orders từ workflow (pending EVM approval)
-          data = await ordersAPI.getPendingEVMApproval();
-        } else {
-          // Fallback cho các roles khác hoặc nếu không có dealerId
-          data = await ordersAPI.getAll();
-        }
-
-        const normalizedOrders = normalizeOrdersList(data);
-        setOrders(sortOrdersByNewest(normalizedOrders));
-      } catch (error) {
-        console.error('Error loading orders:', error);
-        showErrorToast(handleAPIError(error));
-        setOrders([]);
-      } finally {
-        setLoading(false);
+      if (userRole === 'DEALER_STAFF' && userId) {
+        // DEALER_STAFF: Get their own orders
+        data = await ordersAPI.getByUser(userId);
+      } else if (userRole === 'DEALER_MANAGER' && userDealerId) {
+        // DEALER_MANAGER: Get ALL orders of their dealer (Manager's own and staff's)
+        data = await ordersAPI.getOrdersByDealerId(userDealerId);
+      } else if (userRole === 'EVM_MANAGER' || userRole === 'ADMIN') {
+        // EVM_MANAGER/ADMIN: Chỉ lấy orders từ workflow (pending EVM approval)
+        data = await ordersAPI.getPendingEVMApproval();
+      } else {
+        // Fallback cho các roles khác hoặc nếu không có dealerId
+        data = await ordersAPI.getAll();
       }
-    };
 
-    loadOrders();
+      const normalizedOrders = normalizeOrdersList(data);
+      setOrders(sortOrdersByNewest(normalizedOrders));
+    } catch (error) {
+      console.error('Error loading orders:', error);
+      showErrorToast(handleAPIError(error));
+      setOrders([]);
+    } finally {
+      setLoading(false);
+    }
   }, [userRole, userId, userDealerId]);
+
+  useEffect(() => {
+    loadOrders();
+  }, [loadOrders]);
 
   // Load approved quotes when opening create from quote modal
   useEffect(() => {
@@ -2468,7 +2479,7 @@ const Orders = ({ user }) => {
           }] : []
         };
 
-        const createdOrder = await ordersAPI.createFromEVMApprovedQuote(orderData);
+        const createdOrder = await ordersAPI.createFromApprovedQuoteByManager(orderData);
 
         // 🔥 FIX: Process payment separately if percentage > 0
         if (actualPaymentPercentage > 0) {
@@ -2654,10 +2665,14 @@ const Orders = ({ user }) => {
       }
 
       // Tiếp tục approve
+      let approveResult;
       if (userRole === 'DEALER_MANAGER') {
-        await ordersAPI.approveByDealerManager(orderId, userId, approveNotes);
+        approveResult = await ordersAPI.approveByDealerManager(orderId, userId, approveNotes || '');
       } else if (userRole === 'EVM_MANAGER' || userRole === 'ADMIN') {
-        await ordersAPI.approveByEVM(orderId, userId, approveNotes);
+        approveResult = await ordersAPI.approveByEVM(orderId, userId, approveNotes || '');
+      } else {
+        showErrorToast('Your role does not have permission to approve orders.');
+        return;
       }
 
       // ✅ Approve thành công - đóng modal trước
@@ -2833,20 +2848,44 @@ const Orders = ({ user }) => {
     try {
       setPaymentSubmitting(true);
 
-      const paymentData = {
-        paymentMethod: paymentFormData.paymentMethod,
-        paymentPercentage: Number(paymentFormData.paymentPercentage),
-        paymentNotes: paymentFormData.notes
-      };
+      const paymentMethod = paymentFormData.paymentMethod;
 
-      await paymentsAPI.createDealerWorkflowPayment(
-        selectedOrderForPayment.orderId || selectedOrderForPayment.id,
-        paymentData
-      );
+      if (paymentMethod === 'VNPAY') {
+        // Handle VNPay payment
+        const payload = {
+          orderId: selectedOrderForPayment.orderId || selectedOrderForPayment.id
+        };
 
-      showSuccessToast('Payment created successfully');
-      handleClosePaymentModal();
-      loadOrders(); // Reload to update status
+        const response = await paymentsAPI.createVNPayPayment(payload);
+
+        if (response && response.paymentUrl) {
+          // Redirect to VNPay gateway
+          window.location.href = response.paymentUrl;
+          // Note: We don't close the modal or reload orders here because the user is navigating away
+        } else if (response && response.error) {
+          showErrorToast(`VNPay error: ${response.error}`);
+        } else {
+          showErrorToast('Unable to create VNPay payment link. Please try again.');
+        }
+
+      } else {
+        // Handle other payment methods (CASH, TRANSFER treated as manual)
+        const paymentData = {
+          paymentMethod: paymentFormData.paymentMethod,
+          paymentPercentage: Number(paymentFormData.paymentPercentage),
+          paymentNotes: paymentFormData.notes
+        };
+
+        await paymentsAPI.createDealerWorkflowPayment(
+          selectedOrderForPayment.orderId || selectedOrderForPayment.id,
+          paymentData
+        );
+
+        showSuccessToast('Payment created successfully');
+        handleClosePaymentModal();
+        loadOrders(); // Reload to update status
+      }
+
     } catch (error) {
       console.error('Error creating payment:', error);
       showErrorToast(error.response?.data?.message || 'Failed to create payment');
@@ -3210,18 +3249,20 @@ const Orders = ({ user }) => {
                         {confirmingDeliveryId === (order.orderId || order.id) ? 'Delivering...' : 'Shipping'}
                       </button>
                     )}
-                    {/* Create Payment Button for Dealer Staff */}
+                    {/* Create Payment Button - Only for DEALER_STAFF and not cancelled */}
                     {userRole === 'DEALER_STAFF' &&
-                      order.status !== 'CANCELLED' &&
-                      (order.paymentStatus || '').toUpperCase() !== 'PAID' && (
+                      !['CANCELLED', 'REJECTED'].includes(order.normalizedStatus) &&
+                      !order.isFullyPaid &&
+                      order.displayPaymentMethod === 'VNPAY' && (
                         <button
-                          className="btn btn-primary"
-                          style={{ fontSize: '12px', display: 'flex', alignItems: 'center', gap: '4px' }}
-                          onClick={() => handleOpenPaymentModal(order)}
-                          title="Create payment for this order"
+                          className="action-btn payment-btn"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            handleOpenPaymentModal(order);
+                          }}
+                          title="Create Payment"
                         >
-                          <i className="bx bx-dollar-circle"></i>
-                          Create Payment
+                          <i className="bx bx-dollar-circle"></i> Create Payment
                         </button>
                       )}
                   </div>
@@ -4362,8 +4403,7 @@ const Orders = ({ user }) => {
                     fontSize: '14px'
                   }}
                 >
-                  <option value="CASH">Cash</option>
-                  <option value="TRANSFER">Bank Transfer</option>
+                  <option value="VNPAY">VNPAY</option>
                 </select>
               </div>
 

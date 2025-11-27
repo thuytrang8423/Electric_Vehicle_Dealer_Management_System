@@ -58,6 +58,13 @@
   gap: 1.5rem;
 }
 
+.portal-results-wrapper {
+  width: 100%;
+  max-width: 1400px;
+  margin-top: 2.5rem;
+  padding: 0 1.5rem;
+}
+
 .single-lookup-form {
   background: rgba(15, 17, 26, 0.95);
   border-radius: 24px;
@@ -126,10 +133,11 @@
 .result-card,
 .result-placeholder {
   border-radius: 20px;
-  padding: 1.5rem;
+  padding: 2rem;
   border: 1px dashed rgba(255, 255, 255, 0.15);
   background: rgba(0, 0, 0, 0.45);
   text-align: left;
+  width: 100%;
 }
 
 .result-card p {
@@ -264,13 +272,48 @@
   text-overflow: ellipsis;
 }
 
-.data-table th:nth-child(1) { width: 8%; }  /* Order ID */
-.data-table th:nth-child(2) { width: 10%; } /* Order Date */
-.data-table th:nth-child(3) { width: 15%; } /* Total Amount */
-.data-table th:nth-child(4) { width: 15%; } /* Paid Amount */
-.data-table th:nth-child(5) { width: 15%; } /* Remaining */
-.data-table th:nth-child(6) { width: 12%; } /* Status */
-.data-table th:nth-child(7) { width: 15%; } /* Payment Status */
+.data-table th:nth-child(1) {
+  width: 10%;
+  text-align: center;
+}
+
+/* Order ID */
+.data-table th:nth-child(2) {
+  width: 15%;
+  text-align: center;
+}
+
+/* Order Date */
+.data-table th:nth-child(3) {
+  width: 20%;
+  text-align: right;
+}
+
+/* Total Amount */
+.data-table th:nth-child(4) {
+  width: 20%;
+  text-align: right;
+}
+
+/* Paid Amount */
+.data-table th:nth-child(5) {
+  width: 20%;
+  text-align: right;
+}
+
+/* Remaining */
+.data-table th:nth-child(6) {
+  width: 15%;
+  text-align: center;
+}
+
+/* Payment Status */
+
+.data-table td:nth-child(1),
+.data-table td:nth-child(2),
+.data-table td:nth-child(6) {
+  text-align: center;
+}
 
 .data-table td {
   padding: 0.75rem 0.5rem;
@@ -290,6 +333,7 @@
   font-weight: 600;
   color: #ffffff;
   font-size: 0.8rem;
+  text-align: right;
 }
 
 .data-table .amount.positive {
@@ -435,4 +479,3 @@
     font-size: 1.25rem;
   }
 }
-

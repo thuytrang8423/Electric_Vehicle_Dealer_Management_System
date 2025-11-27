@@ -15,7 +15,7 @@ const TestDriveManagement = ({ user }) => {
     phone: '',
     email: '',
     notes: '',
-    status: 'scheduled'
+    status: 'scheduled',
   });
   const [testDrives, setTestDrives] = useState([]);
   const [pendingRequests, setPendingRequests] = useState([]);
@@ -25,10 +25,37 @@ const TestDriveManagement = ({ user }) => {
   const [selectedRequest, setSelectedRequest] = useState(null);
   const [confirmationData, setConfirmationData] = useState({
     date: '',
-    time: '',
-    note: ''
+    time: '', // Confirmation time is no longer used in the modal but stays for other logic
+    note: '',
   });
   const [actionLoading, setActionLoading] = useState(false);
+
+  const accentColor = '#ff4d4f';
+  const labelStyles = {
+    display: 'block',
+    marginBottom: '8px',
+    fontSize: '12px',
+    fontWeight: '700',
+    letterSpacing: '0.05em',
+    color: 'var(--color-text)',
+    textTransform: 'uppercase',
+  };
+  const labelContentStyles = {
+    display: 'flex',
+    alignItems: 'center',
+    gap: '8px',
+  };
+  const modalInputStyles = {
+    width: '100%',
+    padding: '12px 14px',
+    border: '1px solid rgba(255, 255, 255, 0.12)',
+    borderRadius: '12px',
+    background: 'var(--color-bg)',
+    color: 'var(--color-text)',
+    fontSize: '14px',
+    boxShadow: '0 8px 28px rgba(0, 0, 0, 0.35)',
+    transition: 'border 0.2s ease, box-shadow 0.2s ease',
+  };
 
   const dealerId =
     user?.dealerId ??
@@ -68,25 +95,47 @@ const TestDriveManagement = ({ user }) => {
 
   const mapScheduleToTestDrive = (schedule) => {
     const scheduleId = getRequestIdentifier(schedule);
-    const dateValue =
-      schedule?.confirmedDate ??
-      schedule?.date ??
-      schedule?.preferredDate ??
-      schedule?.requestedDate ??
-      '';
-    const timeValue = normaliseTimeInput(
-      schedule?.confirmedTime ?? schedule?.time ?? schedule?.preferredTime ?? ''
-    );
+
+    // Handle date: prefer provided date, otherwise parse from requestTime
+    let dateValue = schedule?.date ?? schedule?.confirmedDate ?? schedule?.preferredDate ?? schedule?.requestedDate ?? '';
+    if (!dateValue && schedule?.requestTime) {
+      try {
+        const dateObj = new Date(schedule.requestTime);
+        dateValue = dateObj.toISOString().split('T')[0];
+      } catch (e) {
+        console.warn('Failed to parse requestTime:', e);
+      }
+    }
+
+    // Handle time: prefer requestTime, otherwise parse fallback fields
+    let timeValue = '';
+    if (schedule?.requestTime) {
+      try {
+        const dateObj = new Date(schedule.requestTime);
+        const hours = String(dateObj.getHours()).padStart(2, '0');
+        const minutes = String(dateObj.getMinutes()).padStart(2, '0');
+        timeValue = `${hours}:${minutes}`;
+      } catch (e) {
+        console.warn('Failed to parse requestTime:', e);
+      }
+    }
+    // Fallback to other time fields
+    if (!timeValue) {
+      timeValue = normaliseTimeInput(
+        schedule?.confirmedTime ?? schedule?.time ?? schedule?.preferredTime ?? ''
+      );
+    }
+
     return {
       id: scheduleId ?? `schedule-${Math.random().toString(36).slice(2)}`,
-      customer: schedule?.customerName ?? schedule?.name ?? 'Khách hàng',
-      vehicle: schedule?.carModel ?? schedule?.vehicle ?? schedule?.vehicleModel ?? 'Chưa cập nhật',
+      customer: schedule?.customerName ?? schedule?.name ?? 'Customer',
+      vehicle: schedule?.carModel ?? schedule?.vehicle ?? schedule?.vehicleModel ?? 'Not provided',
       date: dateValue,
       time: timeValue,
       phone: schedule?.phoneNumber ?? schedule?.phone ?? '',
       email: schedule?.customerEmail ?? schedule?.email ?? '',
       notes: schedule?.note ?? schedule?.customerNote ?? '',
-      status: normaliseStatusForCalendar(schedule?.status ?? schedule?.requestStatus)
+      status: normaliseStatusForCalendar(schedule?.status ?? schedule?.requestStatus),
     };
   };
 
@@ -109,7 +158,7 @@ const TestDriveManagement = ({ user }) => {
   const loadPendingRequests = useCallback(async () => {
     if (!dealerId) {
       setPendingRequests([]);
-      setRequestsError('Không xác định được đại lý hiện tại.');
+      setRequestsError('Unable to determine the current dealer.');
       return;
     }
 
@@ -130,8 +179,8 @@ const TestDriveManagement = ({ user }) => {
       );
     } catch (error) {
       console.error('Failed to load test drive requests:', error);
-      setRequestsError('Không thể tải danh sách yêu cầu thử xe.');
-      showErrorToast('Tải danh sách yêu cầu thử xe thất bại.');
+      setRequestsError('Unable to load test drive requests.');
+      showErrorToast('Failed to load test drive requests.');
     } finally {
       setLoadingRequests(false);
     }
@@ -157,11 +206,60 @@ const TestDriveManagement = ({ user }) => {
   }, [pendingRequests, dealerId]);
 
   const handleOpenConfirmation = (request) => {
+    console.log('Opening confirmation for request:', request);
     setSelectedRequest(request);
+
+    // Handle date: prefer provided value, otherwise parse from requestTime
+    let dateValue = request?.date ?? request?.confirmedDate ?? request?.preferredDate ?? '';
+    if (!dateValue && request?.requestTime) {
+      try {
+        const dateObj = new Date(request.requestTime);
+        // Get date in local timezone to avoid offsets
+        const year = dateObj.getFullYear();
+        const month = String(dateObj.getMonth() + 1).padStart(2, '0');
+        const day = String(dateObj.getDate()).padStart(2, '0');
+        dateValue = `${year}-${month}-${day}`;
+        console.log('Parsed date from requestTime:', dateValue);
+      } catch (e) {
+        console.warn('Failed to parse requestTime for date:', e, request.requestTime);
+      }
+    }
+
+    // Handle time: prefer requestTime parsing to keep confirmationData.time in sync
+    let timeValue = '';
+    if (request?.requestTime) {
+      try {
+        const dateObj = new Date(request.requestTime);
+        // Convert to local timezone for display
+        const hours = String(dateObj.getHours()).padStart(2, '0');
+        const minutes = String(dateObj.getMinutes()).padStart(2, '0');
+        timeValue = `${hours}:${minutes}`;
+        console.log('Parsed time from requestTime:', timeValue);
+      } catch (e) {
+        console.warn('Failed to parse requestTime for time:', e, request.requestTime);
+      }
+    }
+    // Fallback to other time fields
+    if (!timeValue) {
+      const fallbackTime = request?.confirmedTime ?? request?.time ?? request?.preferredTime ?? '';
+      if (fallbackTime) {
+        timeValue = normaliseTimeInput(fallbackTime);
+        // If time is HH:MM:SS, keep only HH:MM
+        if (timeValue.includes(':')) {
+          const parts = timeValue.split(':');
+          if (parts.length >= 2) {
+            timeValue = `${parts[0].padStart(2, '0')}:${parts[1].padStart(2, '0')}`;
+          }
+        }
+        console.log('Using fallback time:', timeValue);
+      }
+    }
+
+    console.log('Setting confirmation data:', { date: dateValue, time: timeValue });
     setConfirmationData({
-      date: request?.confirmedDate ?? request?.date ?? request?.preferredDate ?? '',
-      time: normaliseTimeInput(request?.confirmedTime ?? request?.time ?? request?.preferredTime ?? ''),
-      note: ''
+      date: dateValue,
+      time: timeValue, // Still store time for payload usage when needed
+      note: request?.note ?? '',
     });
     setShowConfirmationModal(true);
   };
@@ -172,7 +270,7 @@ const TestDriveManagement = ({ user }) => {
     setConfirmationData({
       date: '',
       time: '',
-      note: ''
+      note: '',
     });
   };
 
@@ -181,23 +279,25 @@ const TestDriveManagement = ({ user }) => {
 
     const scheduleId = getRequestIdentifier(selectedRequest);
     if (!scheduleId) {
-      showErrorToast('Thiếu mã định danh yêu cầu. Không thể xử lý.');
+      showErrorToast('Missing request identifier. Cannot process.');
       return;
     }
 
-    if (action === 'approve' && (!confirmationData.date || !confirmationData.time)) {
-      showErrorToast('Vui lòng chọn ngày và giờ xác nhận.');
+    // Only validate the date; time is optional per requirements
+    if (action === 'approve' && !confirmationData.date) {
+      showErrorToast('Please select a confirmation date.');
       return;
     }
 
-    const formattedTime = normaliseTimeInput(confirmationData.time);
-    const timeValue =
-      formattedTime && formattedTime.length === 5 ? `${formattedTime}:00` : formattedTime;
+    // Assumption: confirm requests only require date and note.
+    // If the backend needs time, reuse confirmationData.time or a default (e.g., '09:00:00').
+    const timeValue = confirmationData.time; // Use parsed/fallback time if available
 
     const confirmPayload = {
       ...(confirmationData.date ? { date: confirmationData.date } : {}),
-      ...(timeValue ? { time: timeValue } : {}),
-      ...(confirmationData.note ? { note: confirmationData.note } : {})
+      // Skip time unless available or explicitly required
+      ...(timeValue ? { time: timeValue + ':00' } : {}),
+      ...(confirmationData.note ? { note: confirmationData.note } : {}),
     };
 
     const rejectPayload = confirmationData.note ? { note: confirmationData.note } : {};
@@ -209,52 +309,54 @@ const TestDriveManagement = ({ user }) => {
           ? await testDriveAPI.confirmRequest(scheduleId, confirmPayload)
           : await testDriveAPI.rejectRequest(scheduleId, rejectPayload);
       const fallbackStatus = action === 'approve' ? 'CONFIRMED' : 'REJECTED';
-      setPendingRequests((prev) =>
-        prev.map((request) => {
-          const requestId = getRequestIdentifier(request);
-          if (requestId === scheduleId) {
-            const nextStatus = updatedRequest?.status ?? fallbackStatus;
-            const mergedRequest = {
-              ...request,
-              ...(updatedRequest ?? {}),
-              status: nextStatus,
-              id: scheduleId,
-              scheduleId
-            };
-            return {
-              ...mergedRequest
-            };
+      const mergeWithApiResponse = (request) => {
+        const merged = {
+          ...request,
+          ...(updatedRequest ?? {}),
+          status: updatedRequest?.status ?? fallbackStatus,
+          id: scheduleId,
+        };
+        if (action === 'approve' && confirmationData.date && timeValue) {
+          try {
+            const finalTime = timeValue.length === 5 ? `${timeValue}:00` : timeValue;
+            const [hours, minutes] = finalTime.split(':');
+            const dateTime = new Date(`${confirmationData.date}T${hours}:${minutes}:00`);
+            merged.date = confirmationData.date;
+            merged.requestTime = dateTime.toISOString();
+            merged.time = timeValue;
+          } catch (e) {
+            console.warn('Failed to update requestTime:', e);
           }
-          return request;
-        })
-      );
-      const nextStatus = updatedRequest?.status ?? fallbackStatus;
-      const mergedRequest = {
-        ...selectedRequest,
-        ...(updatedRequest ?? {}),
-        ...(action === 'approve'
-          ? {
-              confirmedDate: confirmationData.date,
-              confirmedTime: timeValue
-            }
-          : {}),
-        status: nextStatus,
-        id: scheduleId,
-        scheduleId
+        }
+        return merged;
       };
+
+      setPendingRequests((prev) =>
+        prev.map((request) =>
+          getRequestIdentifier(request) === scheduleId ? mergeWithApiResponse(request) : request
+        )
+      );
+
+      const mergedRequest = mergeWithApiResponse(selectedRequest);
       const mappedDrive = mapScheduleToTestDrive(mergedRequest);
       setTestDrives((prev) => {
         const exists = prev.some((drive) => drive.id === mappedDrive.id);
         if (exists) {
           return prev.map((drive) => (drive.id === mappedDrive.id ? mappedDrive : drive));
         }
-        return [...prev, mappedDrive];
+        // Append to list only when approval succeeds
+        if (action === 'approve') {
+          return [...prev, mappedDrive];
+        }
+        return prev;
       });
-      showSuccessToast(action === 'approve' ? 'Đã xác nhận lịch thử xe.' : 'Đã từ chối yêu cầu thử xe.');
+      showSuccessToast(
+        action === 'approve' ? 'Test drive confirmed.' : 'Test drive request rejected.'
+      );
       handleCloseConfirmation();
     } catch (error) {
       console.error('Failed to update test drive request:', error);
-      showErrorToast('Không thể cập nhật yêu cầu. Vui lòng thử lại.');
+      showErrorToast('Unable to update the request. Please try again.');
     } finally {
       setActionLoading(false);
     }
@@ -270,24 +372,43 @@ const TestDriveManagement = ({ user }) => {
 
   // Create calendar grid
   const calendarDays = [];
-  const dayNames = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
-  const monthNames = ['January', 'February', 'March', 'April', 'May', 'June', 
-                      'July', 'August', 'September', 'October', 'November', 'December'];
+  const monthNames = [
+    'January',
+    'February',
+    'March',
+    'April',
+    'May',
+    'June',
+    'July',
+    'August',
+    'September',
+    'October',
+    'November',
+    'December',
+  ];
 
-  // Add empty cells for days before first day of month
-  for (let i = 0; i < firstDayOfMonth; i++) {
+  // Align the week to run Sunday through Saturday
+  // JS getDay(): 0=Sun ... 6=Sat, so we can use the value directly
+  const customDayNames = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+
+  const startDayOffset = firstDayOfMonth;
+
+  // Add empty cells so that the 1st lands under the correct weekday
+  for (let i = 0; i < startDayOffset; i++) {
     calendarDays.push(null);
   }
 
   // Add actual days of month
   for (let i = 1; i <= daysInMonth; i++) {
-    const dateStr = `${currentYear}-${String(currentMonth + 1).padStart(2, '0')}-${String(i).padStart(2, '0')}`;
-    const drivesOnDay = testDrives.filter(drive => drive.date === dateStr);
+    const dateStr = `${currentYear}-${String(currentMonth + 1).padStart(2, '0')}-${String(
+      i
+    ).padStart(2, '0')}`;
+    const drivesOnDay = testDrives.filter((drive) => drive.date === dateStr);
     calendarDays.push({
       day: i,
       date: dateStr,
       count: drivesOnDay.length,
-      drives: drivesOnDay
+      drives: drivesOnDay,
     });
   }
 
@@ -305,33 +426,43 @@ const TestDriveManagement = ({ user }) => {
   };
 
   // Get drives for selected date
-  const selectedDayData = calendarDays.find(day => day && day.day === selectedDate.getDate());
+  const selectedDayData = calendarDays.find((day) => day && day.day === selectedDate.getDate());
   const drivesForSelectedDate = selectedDayData ? selectedDayData.drives : [];
 
   const getStatusColor = (status) => {
     switch (status) {
-      case 'scheduled': return 'var(--color-info)';
-      case 'completed': return 'var(--color-success)';
-      case 'cancelled': return 'var(--color-error)';
-      default: return 'var(--color-text-muted)';
+      case 'scheduled':
+        return 'var(--color-info)';
+      case 'completed':
+        return 'var(--color-success)';
+      case 'cancelled':
+        return 'var(--color-error)';
+      default:
+        return 'var(--color-text-muted)';
     }
   };
 
   const getStatusBg = (status) => {
     switch (status) {
-      case 'scheduled': return 'rgba(59, 130, 246, 0.1)';
-      case 'completed': return 'rgba(34, 197, 94, 0.1)';
-      case 'cancelled': return 'rgba(239, 68, 68, 0.1)';
-      default: return 'var(--color-bg)';
+      case 'scheduled':
+        return 'rgba(59, 130, 246, 0.1)';
+      case 'completed':
+        return 'rgba(34, 197, 94, 0.1)';
+      case 'cancelled':
+        return 'rgba(239, 68, 68, 0.1)';
+      default:
+        return 'var(--color-bg)';
     }
   };
 
   // Check if date is today
   const isToday = (day) => {
     const today = new Date();
-    return day === today.getDate() && 
-           currentMonth === today.getMonth() && 
-           currentYear === today.getFullYear();
+    return (
+      day === today.getDate() &&
+      currentMonth === today.getMonth() &&
+      currentYear === today.getFullYear()
+    );
   };
 
   const handleAddTestDrive = () => {
@@ -344,11 +475,12 @@ const TestDriveManagement = ({ user }) => {
       phone: '',
       email: '',
       notes: '',
-      status: 'scheduled'
+      status: 'scheduled',
     });
     setShowModal(true);
   };
 
+  // Keep this handler even though the Edit/Delete buttons were removed from the UI
   const handleEditTestDrive = (testDrive) => {
     setEditingTestDrive(testDrive);
     setFormData({
@@ -359,21 +491,22 @@ const TestDriveManagement = ({ user }) => {
       phone: testDrive.phone,
       email: testDrive.email,
       notes: testDrive.notes,
-      status: testDrive.status
+      status: testDrive.status,
     });
     setShowModal(true);
   };
 
+  // Keep this handler even though the Edit/Delete buttons were removed from the UI
   const handleDeleteTestDrive = (testDriveId) => {
     if (window.confirm('Are you sure you want to delete this test drive?')) {
-      setTestDrives(testDrives.filter(td => td.id !== testDriveId));
+      setTestDrives(testDrives.filter((td) => td.id !== testDriveId));
       showSuccessToast('Test drive deleted successfully');
     }
   };
 
   const handleSubmit = (e) => {
     e.preventDefault();
-    
+
     if (!formData.customer || !formData.vehicle || !formData.date || !formData.time) {
       showSuccessToast('Please fill in all required fields');
       return;
@@ -387,22 +520,24 @@ const TestDriveManagement = ({ user }) => {
       phone: formData.phone,
       email: formData.email,
       notes: formData.notes,
-      status: formData.status
+      status: formData.status,
     };
 
     if (editingTestDrive) {
       // Update existing test drive
-      setTestDrives(testDrives.map(td => 
-        td.id === editingTestDrive.id 
-          ? { ...td, ...testDriveData }
-          : td
-      ));
+      setTestDrives(
+        testDrives.map((td) =>
+          td.id === editingTestDrive.id
+            ? { ...td, ...testDriveData }
+            : td
+        )
+      );
       showSuccessToast('Test drive updated successfully');
     } else {
       // Add new test drive
       const newTestDrive = {
         id: `local-${Date.now()}`,
-        ...testDriveData
+        ...testDriveData,
       };
       setTestDrives([...testDrives, newTestDrive]);
       showSuccessToast('Test drive scheduled successfully');
@@ -417,7 +552,7 @@ const TestDriveManagement = ({ user }) => {
       phone: '',
       email: '',
       notes: '',
-      status: 'scheduled'
+      status: 'scheduled',
     });
   };
 
@@ -426,7 +561,14 @@ const TestDriveManagement = ({ user }) => {
       <div style={{ display: 'grid', gridTemplateColumns: '2fr 1fr', gap: '24px' }}>
         {/* Calendar Section */}
         <div className="card">
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '24px' }}>
+          <div
+            style={{
+              display: 'flex',
+              justifyContent: 'space-between',
+              alignItems: 'center',
+              marginBottom: '24px',
+            }}
+          >
             <h2>Test Drive Calendar</h2>
             <div style={{ display: 'flex', gap: '8px' }}>
               <button className="btn btn-outline" onClick={goToPreviousMonth}>
@@ -442,21 +584,32 @@ const TestDriveManagement = ({ user }) => {
           </div>
 
           {/* Month/Year Header */}
-          <div style={{ textAlign: 'center', marginBottom: '24px', fontSize: '20px', fontWeight: '700', color: 'var(--color-text)' }}>
+          <div
+            style={{
+              textAlign: 'center',
+              marginBottom: '24px',
+              fontSize: '20px',
+              fontWeight: '700',
+              color: 'var(--color-text)',
+            }}
+          >
             {monthNames[currentMonth]} {currentYear}
           </div>
 
           {/* Calendar Grid */}
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(7, 1fr)', gap: '8px' }}>
-            {/* Day names */}
-            {dayNames.map(day => (
-              <div key={day} style={{ 
-                textAlign: 'center', 
-                padding: '12px', 
-                fontWeight: '600', 
-                fontSize: '14px',
-                color: 'var(--color-text-muted)' 
-              }}>
+            {/* Day names (Custom order: Wed, Thu, Fri, Sat, Sun, Mon, Tue) */}
+            {customDayNames.map((day) => (
+              <div
+                key={day}
+                style={{
+                  textAlign: 'center',
+                  padding: '12px',
+                  fontWeight: '600',
+                  fontSize: '14px',
+                  color: 'var(--color-text-muted)',
+                }}
+              >
                 {day}
               </div>
             ))}
@@ -477,38 +630,48 @@ const TestDriveManagement = ({ user }) => {
                   style={{
                     minHeight: '80px',
                     padding: '8px',
-                    background: isSelected ? 'var(--color-primary)' : isCurrentDate ? 'var(--color-bg)' : 'var(--color-surface)',
-                    border: isCurrentDate ? '2px solid var(--color-primary)' : `1px solid var(--color-border)`,
+                    background: isSelected
+                      ? 'var(--color-primary)'
+                      : isCurrentDate
+                      ? 'var(--color-bg)'
+                      : 'var(--color-surface)',
+                    border: isCurrentDate
+                      ? '2px solid var(--color-primary)'
+                      : `1px solid var(--color-border)`,
                     borderRadius: 'var(--radius)',
                     cursor: 'pointer',
                     transition: 'all 0.2s ease',
-                    position: 'relative'
+                    position: 'relative',
                   }}
                 >
-                  <div style={{ 
-                    fontSize: '14px', 
-                    fontWeight: '600', 
-                    color: isSelected ? 'white' : 'var(--color-text)',
-                    marginBottom: '4px'
-                  }}>
+                  <div
+                    style={{
+                      fontSize: '14px',
+                      fontWeight: '600',
+                      color: isSelected ? 'white' : 'var(--color-text)',
+                      marginBottom: '4px',
+                    }}
+                  >
                     {day.day}
                   </div>
                   {day.count > 0 && (
-                    <div style={{
-                      position: 'absolute',
-                      top: '8px',
-                      right: '8px',
-                      width: '24px',
-                      height: '24px',
-                      borderRadius: '50%',
-                      background: isSelected ? 'white' : 'var(--color-primary)',
-                      color: isSelected ? 'var(--color-primary)' : 'white',
-                      display: 'flex',
-                      alignItems: 'center',
-                      justifyContent: 'center',
-                      fontSize: '12px',
-                      fontWeight: '700'
-                    }}>
+                    <div
+                      style={{
+                        position: 'absolute',
+                        top: '8px',
+                        right: '8px',
+                        width: '24px',
+                        height: '24px',
+                        borderRadius: '50%',
+                        background: isSelected ? 'white' : 'var(--color-primary)',
+                        color: isSelected ? 'var(--color-primary)' : 'white',
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                        fontSize: '12px',
+                        fontWeight: '700',
+                      }}
+                    >
                       {day.count}
                     </div>
                   )}
@@ -525,7 +688,7 @@ const TestDriveManagement = ({ user }) => {
                         overflow: 'hidden',
                         textOverflow: 'ellipsis',
                         whiteSpace: 'nowrap',
-                        fontWeight: '500'
+                        fontWeight: '500',
                       }}
                       title={drive.customer}
                     >
@@ -541,7 +704,14 @@ const TestDriveManagement = ({ user }) => {
         {/* Selected Date Details */}
         <div>
           <div className="card" style={{ marginBottom: '24px' }}>
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px' }}>
+            <div
+              style={{
+                display: 'flex',
+                justifyContent: 'space-between',
+                alignItems: 'center',
+                marginBottom: '16px',
+              }}
+            >
               <h3>Test Drives on {selectedDate.toLocaleDateString()}</h3>
               <button className="btn btn-primary" onClick={handleAddTestDrive}>
                 <i className="bx bx-plus"></i>
@@ -558,91 +728,119 @@ const TestDriveManagement = ({ user }) => {
                       padding: '16px',
                       background: 'var(--color-bg)',
                       borderRadius: 'var(--radius)',
-                      border: '1px solid var(--color-border)'
+                      border: '1px solid var(--color-border)',
                     }}
                   >
-                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '12px' }}>
+                    <div
+                      style={{
+                        display: 'flex',
+                        justifyContent: 'space-between',
+                        alignItems: 'flex-start',
+                        marginBottom: '12px',
+                      }}
+                    >
                       <div style={{ flex: 1 }}>
-                        <div style={{ fontSize: '16px', fontWeight: '600', color: 'var(--color-text)', marginBottom: '4px' }}>{drive.customer}</div>
-                        <div style={{ fontSize: '14px', color: 'var(--color-text-muted)', marginBottom: '6px' }}>
+                        <div
+                          style={{
+                            fontSize: '16px',
+                            fontWeight: '600',
+                            color: 'var(--color-text)',
+                            marginBottom: '4px',
+                          }}
+                        >
+                          {drive.customer}
+                        </div>
+                        <div
+                          style={{
+                            fontSize: '14px',
+                            color: 'var(--color-text-muted)',
+                            marginBottom: '6px',
+                          }}
+                        >
                           <i className="bx bx-car" style={{ marginRight: '4px' }}></i>
                           {drive.vehicle}
                         </div>
-                        <div style={{ fontSize: '13px', color: 'var(--color-text-muted)' }}>
+                        <div
+                          style={{ fontSize: '13px', color: 'var(--color-text-muted)' }}
+                        >
                           <i className="bx bx-phone" style={{ marginRight: '4px' }}></i>
                           {drive.phone}
                         </div>
-                        <div style={{ fontSize: '13px', color: 'var(--color-text-muted)' }}>
+                        <div
+                          style={{ fontSize: '13px', color: 'var(--color-text-muted)' }}
+                        >
                           <i className="bx bx-envelope" style={{ marginRight: '4px' }}></i>
                           {drive.email}
                         </div>
                       </div>
-                      <span style={{
-                        padding: '6px 12px',
-                        borderRadius: 'var(--radius)',
-                        background: getStatusBg(drive.status),
-                        color: getStatusColor(drive.status),
-                        fontSize: '11px',
-                        fontWeight: '600',
-                        textTransform: 'capitalize',
-                        whiteSpace: 'nowrap'
-                      }}>
+                      <span
+                        style={{
+                          padding: '6px 12px',
+                          borderRadius: 'var(--radius)',
+                          background: getStatusBg(drive.status),
+                          color: getStatusColor(drive.status),
+                          fontSize: '11px',
+                          fontWeight: '600',
+                          textTransform: 'capitalize',
+                          whiteSpace: 'nowrap',
+                        }}
+                      >
                         {drive.status}
                       </span>
                     </div>
-                    <div style={{ 
-                      fontSize: '14px', 
-                      color: 'var(--color-primary)', 
-                      fontWeight: '600', 
-                      marginBottom: '8px',
-                      display: 'flex',
-                      alignItems: 'center',
-                      gap: '6px'
-                    }}>
-                      <i className="bx bx-time"></i> 
+                    <div
+                      style={{
+                        fontSize: '14px',
+                        color: 'var(--color-primary)',
+                        fontWeight: '600',
+                        marginBottom: '8px',
+                        display: 'flex',
+                        alignItems: 'center',
+                        gap: '6px',
+                      }}
+                    >
+                      <i className="bx bx-time"></i>
                       {drive.time}
                     </div>
                     {drive.notes && (
-                      <div style={{ 
-                        fontSize: '13px', 
-                        color: 'var(--color-text-muted)', 
-                        fontStyle: 'italic', 
-                        marginTop: '8px', 
-                        padding: '8px',
-                        background: 'var(--color-surface)',
-                        borderRadius: 'var(--radius)',
-                        borderLeft: '3px solid var(--color-primary)'
-                      }}>
+                      <div
+                        style={{
+                          fontSize: '13px',
+                          color: 'var(--color-text-muted)',
+                          fontStyle: 'italic',
+                          marginTop: '8px',
+                          padding: '8px',
+                          background: 'var(--color-surface)',
+                          borderRadius: 'var(--radius)',
+                          borderLeft: '3px solid var(--color-primary)',
+                        }}
+                      >
                         <i className="bx bx-note" style={{ marginRight: '4px' }}></i>
                         {drive.notes}
                       </div>
                     )}
-                    <div style={{ display: 'flex', gap: '8px', marginTop: '12px' }}>
-                    <button 
-                      className="btn btn-outline" 
-                      style={{ flex: 1, fontSize: '12px' }}
-                      onClick={() => handleEditTestDrive(drive)}
-                    >
-                      <i className="bx bx-edit"></i>
-                      Edit
-                    </button>
-                    <button 
-                      className="btn btn-outline" 
-                      style={{ flex: 1, fontSize: '12px', color: 'var(--color-error)' }}
-                      onClick={() => handleDeleteTestDrive(drive.id)}
-                    >
-                      <i className="bx bx-trash"></i>
-                      Delete
-                    </button>
-                    </div>
+                    {/* Edit/Delete buttons intentionally removed */}
                   </div>
                 ))}
               </div>
             ) : (
-              <div style={{ textAlign: 'center', padding: '40px', color: 'var(--color-text-muted)' }}>
-                <i className="bx bx-calendar-x" style={{ fontSize: '48px', marginBottom: '16px', opacity: '0.5' }}></i>
+              <div
+                style={{
+                  textAlign: 'center',
+                  padding: '40px',
+                  color: 'var(--color-text-muted)',
+                }}
+              >
+                <i
+                  className="bx bx-calendar-x"
+                  style={{ fontSize: '48px', marginBottom: '16px', opacity: '0.5' }}
+                ></i>
                 <div>No test drives scheduled for this date</div>
-                <button className="btn btn-primary" style={{ marginTop: '16px' }} onClick={handleAddTestDrive}>
+                <button
+                  className="btn btn-primary"
+                  style={{ marginTop: '16px' }}
+                  onClick={handleAddTestDrive}
+                >
                   <i className="bx bx-plus"></i>
                   Schedule Now
                 </button>
@@ -652,32 +850,71 @@ const TestDriveManagement = ({ user }) => {
 
           {/* Pending Requests */}
           <div className="card">
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px', gap: '12px' }}>
-              <h3 style={{ margin: 0, fontSize: '16px', fontWeight: '600' }}>Yêu cầu chờ xác nhận</h3>
+            <div
+              style={{
+                display: 'flex',
+                justifyContent: 'space-between',
+                alignItems: 'center',
+                marginBottom: '16px',
+                gap: '12px',
+              }}
+            >
+              <h3 style={{ margin: 0, fontSize: '16px', fontWeight: '600' }}>
+              Requests awaiting confirmation
+              </h3>
               <button
                 className="btn btn-outline"
-                style={{ fontSize: '12px', padding: '8px 12px', display: 'flex', alignItems: 'center', gap: '6px' }}
+                style={{
+                  fontSize: '12px',
+                  padding: '8px 12px',
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '6px',
+                }}
                 onClick={loadPendingRequests}
                 disabled={loadingRequests}
               >
-                <i className={`bx ${loadingRequests ? 'bx-loader-alt bx-spin' : 'bx-refresh'}`}></i>
-                {loadingRequests ? 'Đang tải' : 'Làm mới'}
+                <i
+                  className={`bx ${
+                    loadingRequests ? 'bx-loader-alt bx-spin' : 'bx-refresh'
+                  }`}
+                ></i>
+                {loadingRequests ? 'Loading' : 'Refresh'}
               </button>
             </div>
 
             {requestsError ? (
-              <div style={{ color: 'var(--color-error)', fontSize: '13px' }}>{requestsError}</div>
+              <div style={{ color: 'var(--color-error)', fontSize: '13px' }}>
+                {requestsError}
+              </div>
             ) : pendingRequestsForDealer.length === 0 ? (
-              <div style={{ textAlign: 'center', padding: '32px 16px', color: 'var(--color-text-muted)' }}>
+              <div
+                style={{
+                  textAlign: 'center',
+                  padding: '32px 16px',
+                  color: 'var(--color-text-muted)',
+                }}
+              >
                 {loadingRequests ? (
                   <>
-                    <i className="bx bx-loader-alt bx-spin" style={{ fontSize: '36px', display: 'block', marginBottom: '12px' }}></i>
-                    Đang tải yêu cầu...
+                    <i
+                      className="bx bx-loader-alt bx-spin"
+                      style={{ fontSize: '36px', display: 'block', marginBottom: '12px' }}
+                    ></i>
+                    Loading requests...
                   </>
                 ) : (
                   <>
-                    <i className="bx bx-inbox" style={{ fontSize: '36px', display: 'block', marginBottom: '12px', opacity: 0.6 }}></i>
-                    Không có yêu cầu chờ xác nhận
+                    <i
+                      className="bx bx-inbox"
+                      style={{
+                        fontSize: '36px',
+                        display: 'block',
+                        marginBottom: '12px',
+                        opacity: 0.6,
+                      }}
+                    ></i>
+                    No pending requests awaiting confirmation
                   </>
                 )}
               </div>
@@ -685,8 +922,42 @@ const TestDriveManagement = ({ user }) => {
               <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
                 {pendingRequestsForDealer.map((request) => {
                   const requestId = getRequestIdentifier(request);
-                  const preferredDate = request?.confirmedDate ?? request?.date ?? request?.preferredDate ?? request?.requestedDate ?? '';
-                  const preferredTime = normaliseTimeInput(request?.confirmedTime ?? request?.time ?? request?.preferredTime ?? '');
+
+                  // Handle date: prefer the explicit date, otherwise parse requestTime
+                  let preferredDate =
+                    request?.date ??
+                    request?.confirmedDate ??
+                    request?.preferredDate ??
+                    request?.requestedDate ??
+                    '';
+                  if (!preferredDate && request?.requestTime) {
+                    try {
+                      const dateObj = new Date(request.requestTime);
+                      preferredDate = dateObj.toISOString().split('T')[0];
+                    } catch (e) {
+                      console.warn('Failed to parse requestTime:', e);
+                    }
+                  }
+
+                  // Handle time: prefer requestTime parsing
+                  let preferredTime = '';
+                  if (request?.requestTime) {
+                    try {
+                      const dateObj = new Date(request.requestTime);
+                      const hours = String(dateObj.getHours()).padStart(2, '0');
+                      const minutes = String(dateObj.getMinutes()).padStart(2, '0');
+                      preferredTime = `${hours}:${minutes}`;
+                    } catch (e) {
+                      console.warn('Failed to parse requestTime:', e);
+                    }
+                  }
+                  // Fallback to other time fields
+                  if (!preferredTime) {
+                    preferredTime = normaliseTimeInput(
+                      request?.confirmedTime ?? request?.time ?? request?.preferredTime ?? ''
+                    );
+                  }
+
                   return (
                     <div
                       key={requestId || JSON.stringify(request)}
@@ -694,23 +965,66 @@ const TestDriveManagement = ({ user }) => {
                         padding: '16px',
                         background: 'var(--color-bg)',
                         borderRadius: 'var(--radius)',
-                        border: '1px solid var(--color-border)'
+                        border: '1px solid var(--color-border)',
                       }}
                     >
-                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: '12px' }}>
+                      <div
+                        style={{
+                          display: 'flex',
+                          justifyContent: 'space-between',
+                          alignItems: 'flex-start',
+                          gap: '12px',
+                        }}
+                      >
                         <div>
-                          <div style={{ fontSize: '15px', fontWeight: '600', color: 'var(--color-text)', marginBottom: '4px' }}>
-                            {request?.customerName ?? request?.name ?? 'Khách hàng'}
+                          <div
+                            style={{
+                              fontSize: '15px',
+                              fontWeight: '600',
+                              color: 'var(--color-text)',
+                              marginBottom: '4px',
+                            }}
+                          >
+                            {request?.customerName ?? request?.name ?? 'Customer'}
                           </div>
-                          <div style={{ fontSize: '13px', color: 'var(--color-text-muted)', marginBottom: '4px', display: 'flex', alignItems: 'center', gap: '6px' }}>
+                          <div
+                            style={{
+                              fontSize: '13px',
+                              color: 'var(--color-text-muted)',
+                              marginBottom: '4px',
+                              display: 'flex',
+                              alignItems: 'center',
+                              gap: '6px',
+                            }}
+                          >
                             <i className="bx bx-car"></i>
-                            {request?.carModel ?? request?.vehicle ?? request?.vehicleModel ?? 'Chưa cập nhật'}
+                            {request?.carModel ??
+                              request?.vehicle ??
+                              request?.vehicleModel ??
+                              'Not provided'}
                           </div>
-                          <div style={{ fontSize: '13px', color: 'var(--color-text-muted)', display: 'flex', alignItems: 'center', gap: '6px' }}>
+                          <div
+                            style={{
+                              fontSize: '13px',
+                              color: 'var(--color-text-muted)',
+                              display: 'flex',
+                              alignItems: 'center',
+                              gap: '6px',
+                            }}
+                          >
                             <i className="bx bx-envelope"></i>
                             {request?.customerEmail ?? request?.email ?? 'N/A'}
                           </div>
-                          <div style={{ fontSize: '13px', color: 'var(--color-text-muted)', display: 'flex', alignItems: 'center', gap: '6px', marginTop: '2px' }}>
+                          <div
+                            style={{
+                              fontSize: '13px',
+                              color: 'var(--color-text-muted)',
+                              display: 'flex',
+                              alignItems: 'center',
+                              gap: '6px',
+                              marginTop: '2px',
+                            }}
+                          >
                             <i className="bx bx-phone"></i>
                             {request?.phoneNumber ?? request?.phone ?? 'N/A'}
                           </div>
@@ -721,15 +1035,25 @@ const TestDriveManagement = ({ user }) => {
                           onClick={() => handleOpenConfirmation(request)}
                         >
                           <i className="bx bx-check-circle"></i>
-                          Xử lý
+                          Review
                         </button>
                       </div>
-                      <div style={{ marginTop: '12px', display: 'flex', alignItems: 'center', gap: '8px', color: 'var(--color-primary)', fontSize: '13px', fontWeight: '600' }}>
+                      <div
+                        style={{
+                          marginTop: '12px',
+                          display: 'flex',
+                          alignItems: 'center',
+                          gap: '8px',
+                          color: 'var(--color-primary)',
+                          fontSize: '13px',
+                          fontWeight: '600',
+                        }}
+                      >
                         <i className="bx bx-time"></i>
-                        {preferredDate || 'Chưa chọn ngày'}
-                        {preferredTime && `• ${preferredTime}`}
+                        {preferredDate || 'No date selected'}
+                        {preferredTime && ` - ${preferredTime}`}
                       </div>
-                      {(request?.note || request?.customerNote) && (
+                      {request?.note && (
                         <div
                           style={{
                             marginTop: '8px',
@@ -738,10 +1062,10 @@ const TestDriveManagement = ({ user }) => {
                             background: 'var(--color-surface)',
                             borderRadius: 'var(--radius)',
                             padding: '8px',
-                            borderLeft: '3px solid var(--color-primary)'
+                            borderLeft: '3px solid var(--color-primary)',
                           }}
                         >
-                          {request?.note ?? request?.customerNote}
+                          {request.note}
                         </div>
                       )}
                     </div>
@@ -755,121 +1079,157 @@ const TestDriveManagement = ({ user }) => {
 
       {/* Add/Edit Modal */}
       {showModal && (
-        <div style={{
-          position: 'fixed',
-          top: 0,
-          left: 0,
-          right: 0,
-          bottom: 0,
-          background: 'rgba(0, 0, 0, 0.5)',
-          display: 'flex',
-          alignItems: 'center',
-          justifyContent: 'center',
-          zIndex: 1000
-        }}>
-          <div style={{
-            background: 'var(--color-surface)',
-            borderRadius: 'var(--radius)',
-            padding: '24px',
-            width: '90%',
-            maxWidth: '500px',
-            maxHeight: '90vh',
-            overflowY: 'auto'
-          }}>
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '24px' }}>
-              <h3>{editingTestDrive ? 'Edit Test Drive' : 'Schedule New Test Drive'}</h3>
-              <button 
+        <div
+          style={{
+            position: 'fixed',
+            top: 0,
+            left: 0,
+            right: 0,
+            bottom: 0,
+            background: 'rgba(0, 0, 0, 0.5)',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            zIndex: 1000,
+          }}
+        >
+          <div
+            style={{
+              background: 'var(--color-surface)',
+              borderRadius: '24px',
+              padding: '32px',
+              width: '96%',
+              maxWidth: '740px',
+              maxHeight: '92vh',
+              overflowY: 'auto',
+              border: '1px solid rgba(255, 255, 255, 0.08)',
+              boxShadow: '0 35px 80px rgba(0, 0, 0, 0.55)',
+            }}
+          >
+            <div
+              style={{
+                display: 'flex',
+                justifyContent: 'space-between',
+                alignItems: 'center',
+                marginBottom: '24px',
+                gap: '18px',
+              }}
+            >
+              <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+                <div
+                  style={{
+                    width: '48px',
+                    height: '48px',
+                    borderRadius: '16px',
+                    background: 'rgba(255, 77, 79, 0.12)',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    color: accentColor,
+                    fontSize: '24px',
+                  }}
+                >
+                  <i className="bx bx-calendar-event"></i>
+                </div>
+                <div>
+                  <h3 style={{ margin: 0, fontSize: '22px' }}>
+                    {editingTestDrive ? 'Edit Test Drive' : 'Schedule New Test Drive'}
+                  </h3>
+                  <p
+                    style={{
+                      margin: 0,
+                      fontSize: '13px',
+                      color: 'var(--color-text-muted)',
+                    }}
+                  >
+                    Fill out the information below to create a polished booking.
+                  </p>
+                </div>
+              </div>
+              <button
                 onClick={() => setShowModal(false)}
-                style={{ background: 'none', border: 'none', fontSize: '24px', cursor: 'pointer', color: 'var(--color-text-muted)' }}
+                style={{
+                  background: 'none',
+                  border: 'none',
+                  fontSize: '24px',
+                  cursor: 'pointer',
+                  color: 'var(--color-text-muted)',
+                }}
               >
                 <i className="bx bx-x"></i>
               </button>
             </div>
 
             <form onSubmit={handleSubmit}>
-              <div style={{ display: 'grid', gap: '16px' }}>
+              <div style={{ display: 'grid', gap: '20px' }}>
                 <div>
-                  <label style={{ display: 'block', marginBottom: '8px', fontSize: '14px', fontWeight: '600', color: 'var(--color-text)' }}>
-                    Customer Name *
+                  <label style={labelStyles}>
+                    <span style={labelContentStyles}>
+                      <i className="bx bx-user" style={{ color: accentColor, fontSize: '16px' }}></i>
+                      Customer Name *
+                    </span>
                   </label>
                   <input
                     type="text"
                     value={formData.customer}
-                    onChange={(e) => setFormData({...formData, customer: e.target.value})}
-                    style={{
-                      width: '100%',
-                      padding: '12px',
-                      border: '1px solid var(--color-border)',
-                      borderRadius: 'var(--radius)',
-                      background: 'var(--color-bg)',
-                      color: 'var(--color-text)',
-                      fontSize: '14px'
-                    }}
+                    onChange={(e) => setFormData({ ...formData, customer: e.target.value })}
+                    style={modalInputStyles}
                     placeholder="John Doe"
                     required
                   />
                 </div>
 
                 <div>
-                  <label style={{ display: 'block', marginBottom: '8px', fontSize: '14px', fontWeight: '600', color: 'var(--color-text)' }}>
-                    Vehicle *
+                  <label style={labelStyles}>
+                    <span style={labelContentStyles}>
+                      <i className="bx bx-car" style={{ color: accentColor, fontSize: '16px' }}></i>
+                      Vehicle *
+                    </span>
                   </label>
                   <input
                     type="text"
                     value={formData.vehicle}
-                    onChange={(e) => setFormData({...formData, vehicle: e.target.value})}
-                    style={{
-                      width: '100%',
-                      padding: '12px',
-                      border: '1px solid var(--color-border)',
-                      borderRadius: 'var(--radius)',
-                      background: 'var(--color-bg)',
-                      color: 'var(--color-text)',
-                      fontSize: '14px'
-                    }}
+                    onChange={(e) => setFormData({ ...formData, vehicle: e.target.value })}
+                    style={modalInputStyles}
                     placeholder="Tesla Model 3"
                     required
                   />
                 </div>
 
-                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '16px' }}>
+                <div
+                  style={{
+                    display: 'grid',
+                    gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))',
+                    gap: '16px',
+                  }}
+                >
                   <div>
-                    <label style={{ display: 'block', marginBottom: '8px', fontSize: '14px', fontWeight: '600', color: 'var(--color-text)' }}>
-                      Date *
+                    <label style={labelStyles}>
+                      <span style={labelContentStyles}>
+                        <i className="bx bx-calendar" style={{ color: accentColor, fontSize: '16px' }}></i>
+                        Date *
+                      </span>
                     </label>
                     <input
                       type="date"
                       value={formData.date}
-                      onChange={(e) => setFormData({...formData, date: e.target.value})}
-                      style={{
-                        width: '100%',
-                        padding: '12px',
-                        border: '1px solid var(--color-border)',
-                        borderRadius: 'var(--radius)',
-                        background: 'var(--color-bg)',
-                        color: 'var(--color-text)',
-                        fontSize: '14px'
-                      }}
+                      onChange={(e) => setFormData({ ...formData, date: e.target.value })}
+                      style={modalInputStyles}
                       required
                     />
                   </div>
 
                   <div>
-                    <label style={{ display: 'block', marginBottom: '8px', fontSize: '14px', fontWeight: '600', color: 'var(--color-text)' }}>
-                      Time *
+                    <label style={labelStyles}>
+                      <span style={labelContentStyles}>
+                        <i className="bx bx-time-five" style={{ color: accentColor, fontSize: '16px' }}></i>
+                        Time *
+                      </span>
                     </label>
                     <select
                       value={formData.time}
-                      onChange={(e) => setFormData({...formData, time: e.target.value})}
-                      style={{
-                        width: '100%',
-                        padding: '12px',
-                        border: '1px solid var(--color-border)',
-                        borderRadius: 'var(--radius)',
-                        background: 'var(--color-bg)',
-                        color: 'var(--color-text)',
-                        fontSize: '14px'
-                      }}
+                      onChange={(e) => setFormData({ ...formData, time: e.target.value })}
+                      style={modalInputStyles}
                       required
                     >
                       <option value="">Select Time</option>
@@ -886,66 +1246,57 @@ const TestDriveManagement = ({ user }) => {
                   </div>
                 </div>
 
-                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '16px' }}>
+                <div
+                  style={{
+                    display: 'grid',
+                    gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))',
+                    gap: '16px',
+                  }}
+                >
                   <div>
-                    <label style={{ display: 'block', marginBottom: '8px', fontSize: '14px', fontWeight: '600', color: 'var(--color-text)' }}>
-                      Phone
+                    <label style={labelStyles}>
+                      <span style={labelContentStyles}>
+                        <i className="bx bx-phone" style={{ color: accentColor, fontSize: '16px' }}></i>
+                        Phone
+                      </span>
                     </label>
                     <input
                       type="tel"
                       value={formData.phone}
-                      onChange={(e) => setFormData({...formData, phone: e.target.value})}
-                      style={{
-                        width: '100%',
-                        padding: '12px',
-                        border: '1px solid var(--color-border)',
-                        borderRadius: 'var(--radius)',
-                        background: 'var(--color-bg)',
-                        color: 'var(--color-text)',
-                        fontSize: '14px'
-                      }}
+                      onChange={(e) => setFormData({ ...formData, phone: e.target.value })}
+                      style={modalInputStyles}
                       placeholder="+1-234-567-8901"
                     />
                   </div>
 
                   <div>
-                    <label style={{ display: 'block', marginBottom: '8px', fontSize: '14px', fontWeight: '600', color: 'var(--color-text)' }}>
-                      Email
+                    <label style={labelStyles}>
+                      <span style={labelContentStyles}>
+                        <i className="bx bx-envelope" style={{ color: accentColor, fontSize: '16px' }}></i>
+                        Email
+                      </span>
                     </label>
                     <input
                       type="email"
                       value={formData.email}
-                      onChange={(e) => setFormData({...formData, email: e.target.value})}
-                      style={{
-                        width: '100%',
-                        padding: '12px',
-                        border: '1px solid var(--color-border)',
-                        borderRadius: 'var(--radius)',
-                        background: 'var(--color-bg)',
-                        color: 'var(--color-text)',
-                        fontSize: '14px'
-                      }}
+                      onChange={(e) => setFormData({ ...formData, email: e.target.value })}
+                      style={modalInputStyles}
                       placeholder="john.doe@email.com"
                     />
                   </div>
                 </div>
 
                 <div>
-                  <label style={{ display: 'block', marginBottom: '8px', fontSize: '14px', fontWeight: '600', color: 'var(--color-text)' }}>
-                    Status
+                  <label style={labelStyles}>
+                    <span style={labelContentStyles}>
+                      <i className="bx bx-flag" style={{ color: accentColor, fontSize: '16px' }}></i>
+                      Status
+                    </span>
                   </label>
                   <select
                     value={formData.status}
-                    onChange={(e) => setFormData({...formData, status: e.target.value})}
-                    style={{
-                      width: '100%',
-                      padding: '12px',
-                      border: '1px solid var(--color-border)',
-                      borderRadius: 'var(--radius)',
-                      background: 'var(--color-bg)',
-                      color: 'var(--color-text)',
-                      fontSize: '14px'
-                    }}
+                    onChange={(e) => setFormData({ ...formData, status: e.target.value })}
+                    style={modalInputStyles}
                   >
                     <option value="scheduled">Scheduled</option>
                     <option value="completed">Completed</option>
@@ -954,37 +1305,56 @@ const TestDriveManagement = ({ user }) => {
                 </div>
 
                 <div>
-                  <label style={{ display: 'block', marginBottom: '8px', fontSize: '14px', fontWeight: '600', color: 'var(--color-text)' }}>
-                    Notes
+                  <label style={labelStyles}>
+                    <span style={labelContentStyles}>
+                      <i className="bx bx-note" style={{ color: accentColor, fontSize: '16px' }}></i>
+                      Notes
+                    </span>
                   </label>
                   <textarea
                     value={formData.notes}
-                    onChange={(e) => setFormData({...formData, notes: e.target.value})}
-                    style={{
-                      width: '100%',
-                      padding: '12px',
-                      border: '1px solid var(--color-border)',
-                      borderRadius: 'var(--radius)',
-                      background: 'var(--color-bg)',
-                      color: 'var(--color-text)',
-                      fontSize: '14px',
-                      minHeight: '80px',
-                      resize: 'vertical'
-                    }}
+                    onChange={(e) => setFormData({ ...formData, notes: e.target.value })}
+                    style={{ ...modalInputStyles, minHeight: '110px', resize: 'vertical' }}
                     placeholder="Additional notes about the test drive..."
                   />
                 </div>
               </div>
 
-              <div style={{ display: 'flex', gap: '12px', marginTop: '24px', justifyContent: 'flex-end' }}>
-                <button 
-                  type="button" 
-                  className="btn btn-outline" 
+              <div
+                style={{
+                  display: 'flex',
+                  gap: '12px',
+                  marginTop: '28px',
+                  justifyContent: 'flex-end',
+                  flexWrap: 'wrap',
+                }}
+              >
+                <button
+                  type="button"
+                  className="btn btn-outline"
                   onClick={() => setShowModal(false)}
+                  style={{
+                    borderColor: accentColor,
+                    color: accentColor,
+                    minWidth: '130px',
+                  }}
                 >
                   Cancel
                 </button>
-                <button type="submit" className="btn btn-primary">
+                <button
+                  type="submit"
+                  className="btn btn-primary"
+                  style={{
+                    background: accentColor,
+                    borderColor: accentColor,
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: '8px',
+                    minWidth: '180px',
+                    justifyContent: 'center',
+                  }}
+                >
+                  <i className="bx bx-send"></i>
                   {editingTestDrive ? 'Update Test Drive' : 'Schedule Test Drive'}
                 </button>
               </div>
@@ -993,7 +1363,7 @@ const TestDriveManagement = ({ user }) => {
         </div>
       )}
 
-      {/* Confirmation Modal */}
+      {/* Confirmation Modal (updated) */}
       {showConfirmationModal && selectedRequest && (
         <div
           style={{
@@ -1006,7 +1376,7 @@ const TestDriveManagement = ({ user }) => {
             display: 'flex',
             alignItems: 'center',
             justifyContent: 'center',
-            zIndex: 1100
+            zIndex: 1100,
           }}
         >
           <div
@@ -1017,51 +1387,128 @@ const TestDriveManagement = ({ user }) => {
               width: '90%',
               maxWidth: '520px',
               maxHeight: '90vh',
-              overflowY: 'auto'
+              overflowY: 'auto',
             }}
           >
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '20px' }}>
-              <h3 style={{ margin: 0 }}>Xác nhận yêu cầu thử xe</h3>
+            <div
+              style={{
+                display: 'flex',
+                justifyContent: 'space-between',
+                alignItems: 'center',
+                marginBottom: '20px',
+              }}
+            >
+              <h3 style={{ margin: 0 }}>Confirm test drive request</h3>
               <button
                 onClick={handleCloseConfirmation}
-                style={{ background: 'none', border: 'none', fontSize: '24px', cursor: 'pointer', color: 'var(--color-text-muted)' }}
+                style={{
+                  background: 'none',
+                  border: 'none',
+                  fontSize: '24px',
+                  cursor: 'pointer',
+                  color: 'var(--color-text-muted)',
+                }}
               >
                 <i className="bx bx-x"></i>
               </button>
             </div>
 
             <div style={{ display: 'grid', gap: '16px' }}>
-              <div style={{ background: 'var(--color-bg)', padding: '16px', borderRadius: 'var(--radius)', border: '1px solid var(--color-border)' }}>
-                <div style={{ fontSize: '15px', fontWeight: '600', color: 'var(--color-text)', marginBottom: '8px' }}>
-                  {selectedRequest?.customerName ?? selectedRequest?.name ?? 'Khách hàng'}
+              <div
+                style={{
+                  background: 'var(--color-bg)',
+                  padding: '16px',
+                  borderRadius: 'var(--radius)',
+                  border: '1px solid var(--color-border)',
+                }}
+              >
+                <div
+                  style={{
+                    fontSize: '15px',
+                    fontWeight: '600',
+                    color: 'var(--color-text)',
+                    marginBottom: '8px',
+                  }}
+                >
+                  {selectedRequest?.customerName ?? selectedRequest?.name ?? 'Customer'}
                 </div>
-                <div style={{ fontSize: '13px', color: 'var(--color-text-muted)', marginBottom: '6px', display: 'flex', alignItems: 'center', gap: '6px' }}>
+                <div
+                  style={{
+                    fontSize: '13px',
+                    color: 'var(--color-text-muted)',
+                    marginBottom: '6px',
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: '6px',
+                  }}
+                >
                   <i className="bx bx-car"></i>
-                  {selectedRequest?.carModel ?? selectedRequest?.vehicle ?? selectedRequest?.vehicleModel ?? 'Chưa cập nhật'}
+                  {selectedRequest?.carModel ??
+                    selectedRequest?.vehicle ??
+                    selectedRequest?.vehicleModel ??
+                    'Not provided'}
                 </div>
-                <div style={{ fontSize: '13px', color: 'var(--color-text-muted)', display: 'flex', alignItems: 'center', gap: '6px' }}>
+                <div
+                  style={{
+                    fontSize: '13px',
+                    color: 'var(--color-text-muted)',
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: '6px',
+                  }}
+                >
                   <i className="bx bx-envelope"></i>
                   {selectedRequest?.customerEmail ?? selectedRequest?.email ?? 'N/A'}
                 </div>
-                <div style={{ fontSize: '13px', color: 'var(--color-text-muted)', display: 'flex', alignItems: 'center', gap: '6px', marginTop: '4px' }}>
+                <div
+                  style={{
+                    fontSize: '13px',
+                    color: 'var(--color-text-muted)',
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: '6px',
+                    marginTop: '4px',
+                  }}
+                >
                   <i className="bx bx-phone"></i>
                   {selectedRequest?.phoneNumber ?? selectedRequest?.phone ?? 'N/A'}
                 </div>
-                {(selectedRequest?.note || selectedRequest?.customerNote) && (
-                  <div style={{ fontSize: '12px', color: 'var(--color-text-muted)', marginTop: '12px', lineHeight: 1.5 }}>
-                    <strong style={{ color: 'var(--color-text)' }}>Ghi chú khách hàng:</strong> {selectedRequest?.note ?? selectedRequest?.customerNote}
+                {selectedRequest?.note && (
+                  <div
+                    style={{
+                      fontSize: '12px',
+                      color: 'var(--color-text-muted)',
+                      marginTop: '12px',
+                      lineHeight: 1.5,
+                    }}
+                  >
+                    <strong style={{ color: 'var(--color-text)' }}>
+                      Customer note:
+                    </strong>{' '}
+                    {selectedRequest.note}
                   </div>
                 )}
               </div>
 
               <div>
-                <label style={{ display: 'block', marginBottom: '8px', fontSize: '13px', fontWeight: '600', color: 'var(--color-text)' }}>
-                  Ngày xác nhận *
+                <label
+                  style={{
+                    display: 'block',
+                    marginBottom: '8px',
+                    fontSize: '13px',
+                    fontWeight: '600',
+                    color: 'var(--color-text)',
+                  }}
+                >
+                  Confirmation date *
                 </label>
                 <input
                   type="date"
-                  value={confirmationData.date}
-                  onChange={(e) => setConfirmationData((prev) => ({ ...prev, date: e.target.value }))}
+                  value={confirmationData.date || ''}
+                  onChange={(e) => {
+                    console.log('Date changed:', e.target.value);
+                    setConfirmationData((prev) => ({ ...prev, date: e.target.value }));
+                  }}
                   style={{
                     width: '100%',
                     padding: '12px',
@@ -1069,34 +1516,30 @@ const TestDriveManagement = ({ user }) => {
                     borderRadius: 'var(--radius)',
                     background: 'var(--color-bg)',
                     color: 'var(--color-text)',
-                    fontSize: '14px'
+                    fontSize: '14px',
                   }}
+                  required
                 />
+                {!confirmationData.date && (
+                  <div style={{ fontSize: '11px', color: 'var(--color-warning)', marginTop: '4px' }}>
+                    Please select a confirmation date
+                  </div>
+                )}
               </div>
 
+              {/* Time input removed per requirement */}
+
               <div>
-                <label style={{ display: 'block', marginBottom: '8px', fontSize: '13px', fontWeight: '600', color: 'var(--color-text)' }}>
-                  Giờ xác nhận *
-                </label>
-                <input
-                  type="time"
-                  value={confirmationData.time}
-                  onChange={(e) => setConfirmationData((prev) => ({ ...prev, time: e.target.value }))}
+                <label
                   style={{
-                    width: '100%',
-                    padding: '12px',
-                    border: '1px solid var(--color-border)',
-                    borderRadius: 'var(--radius)',
-                    background: 'var(--color-bg)',
+                    display: 'block',
+                    marginBottom: '8px',
+                    fontSize: '13px',
+                    fontWeight: '600',
                     color: 'var(--color-text)',
-                    fontSize: '14px'
                   }}
-                />
-              </div>
-
-              <div>
-                <label style={{ display: 'block', marginBottom: '8px', fontSize: '13px', fontWeight: '600', color: 'var(--color-text)' }}>
-                  Ghi chú nội bộ
+                >
+                  Internal note
                 </label>
                 <textarea
                   value={confirmationData.note}
@@ -1110,14 +1553,21 @@ const TestDriveManagement = ({ user }) => {
                     color: 'var(--color-text)',
                     fontSize: '14px',
                     minHeight: '90px',
-                    resize: 'vertical'
+                    resize: 'vertical',
                   }}
-                  placeholder="Ghi chú cho đội ngũ hoặc khách hàng..."
+                  placeholder="Notes for the team or customer..."
                 />
               </div>
             </div>
 
-            <div style={{ display: 'flex', gap: '12px', marginTop: '24px', justifyContent: 'flex-end' }}>
+            <div
+              style={{
+                display: 'flex',
+                gap: '12px',
+                marginTop: '24px',
+                justifyContent: 'flex-end',
+              }}
+            >
               <button
                 type="button"
                 className="btn btn-outline"
@@ -1128,12 +1578,12 @@ const TestDriveManagement = ({ user }) => {
                 {actionLoading ? (
                   <>
                     <i className="bx bx-loader-alt bx-spin"></i>
-                    Đang xử lý
+                    Processing
                   </>
                 ) : (
                   <>
                     <i className="bx bx-x-circle"></i>
-                    Từ chối
+                    Reject
                   </>
                 )}
               </button>
@@ -1146,12 +1596,12 @@ const TestDriveManagement = ({ user }) => {
                 {actionLoading ? (
                   <>
                     <i className="bx bx-loader-alt bx-spin"></i>
-                    Đang xử lý
+                    Processing
                   </>
                 ) : (
                   <>
                     <i className="bx bx-check-circle"></i>
-                    Đồng ý
+                    Approve
                   </>
                 )}
               </button>
@@ -1163,4 +1613,4 @@ const TestDriveManagement = ({ user }) => {
   );
 };
 
-export default TestDriveManagement;
+export default TestDriveManagement;   

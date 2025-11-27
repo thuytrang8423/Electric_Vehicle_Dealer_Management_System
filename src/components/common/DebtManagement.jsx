@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { BarChart, Bar, PieChart, Pie, Cell, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer } from 'recharts';
+import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer } from 'recharts';
 import { debtsAPI } from '../../utils/api/debtsAPI';
 import { showErrorToast } from '../../utils/toast';
 import { handleAPIError } from '../../utils/apiConfig';
@@ -11,6 +11,11 @@ const DebtManagement = ({ user }) => {
   const [loading, setLoading] = useState(true);
   const [selectedType, setSelectedType] = useState('all'); // all, customer, dealer
 
+  // Determine user role
+  const userRole = user?.role?.toUpperCase().replace(/-/g, '_');
+  const isAdminOrEVM = userRole === 'ADMIN' || userRole === 'EVM_MANAGER';
+  const isDealerManager = userRole === 'DEALER_MANAGER';
+
   // Load debts from customers and dealers
   useEffect(() => {
     loadDebts();
@@ -20,45 +25,91 @@ const DebtManagement = ({ user }) => {
     try {
       setLoading(true);
 
-      const [customerDebtsData, dealerDebtsData] = await Promise.all([
-        debtsAPI.getCustomerDebts(),
-        debtsAPI.getDealerDebts()
-      ]);
+      if (isAdminOrEVM) {
+        // For ADMIN and EVM_MANAGER: only load dealer debts (not customer debts)
+        const dealerDebtsData = await debtsAPI.getDealerDebts();
 
-      // Normalize customer debts data
-      const customersWithDebt = Array.isArray(customerDebtsData)
-        ? customerDebtsData
-            .filter(c => c.totalDebt && c.totalDebt > 0)
-            .map(c => ({
-              id: c.customerId || c.id,
-              name: c.customerName || c.fullName || c.name || 'N/A',
-              type: 'customer',
-              totalDebt: c.totalDebt || c.outstandingDebt || 0,
-              phone: c.phone || c.phoneNumber,
-              email: c.email,
-              dealerName: c.dealerName,
-              isVip: c.isVip
-            }))
-        : [];
+        // Normalize dealer debts data according to API format: { dealerId, name, phone, region, outstandingDebt, status }
+        const dealersWithDebt = Array.isArray(dealerDebtsData)
+          ? dealerDebtsData
+              .filter(d => d.outstandingDebt && d.outstandingDebt > 0)
+              .map(d => ({
+                id: d.dealerId,
+                dealerId: d.dealerId,
+                name: d.name || 'N/A',
+                type: 'dealer',
+                totalDebt: d.outstandingDebt || 0,
+                phone: d.phone || 'N/A',
+                region: d.region || 'N/A',
+                status: d.status || 'N/A'
+              }))
+          : [];
 
-      // Normalize dealer debts data
-      const dealersWithDebt = Array.isArray(dealerDebtsData)
-        ? dealerDebtsData
-            .filter(d => (d.totalDebt && d.totalDebt > 0) || (d.outstandingDebt && d.outstandingDebt > 0))
-            .map(d => ({
-              id: d.dealerId || d.id,
-              name: d.dealerName || d.name || 'N/A',
-              type: 'dealer',
-              totalDebt: d.totalDebt || d.outstandingDebt || 0,
-              phone: d.phone || d.phoneNumber,
-              address: d.address,
-              region: d.region,
-              status: d.status
-            }))
-        : [];
+        setCustomerDebts([]); // ADMIN and EVM_MANAGER don't see customer debts
+        setDealerDebts(dealersWithDebt);
+      } else if (isDealerManager) {
+        // For DEALER_MANAGER: only load customer debts
+        const customerDebtsData = await debtsAPI.getCustomerDebts();
+        
+        const customersWithDebt = Array.isArray(customerDebtsData)
+          ? customerDebtsData
+              .filter(c => c.totalDebt && c.totalDebt > 0)
+              .map(c => ({
+                id: c.customerId || c.id,
+                name: c.customerName || c.fullName || c.name || 'N/A',
+                type: 'customer',
+                totalDebt: c.totalDebt || c.outstandingDebt || 0,
+                phone: c.phone || c.phoneNumber,
+                email: c.email,
+                dealerName: c.dealerName,
+                isVip: c.isVip
+              }))
+          : [];
 
-      setCustomerDebts(customersWithDebt);
-      setDealerDebts(dealersWithDebt);
+        setCustomerDebts(customersWithDebt);
+        setDealerDebts([]);
+      } else {
+        // For other roles: use existing logic
+        const [customerDebtsData, dealerDebtsData] = await Promise.all([
+          debtsAPI.getCustomerDebts(),
+          debtsAPI.getDealerDebts()
+        ]);
+
+        // Normalize customer debts data
+        const customersWithDebt = Array.isArray(customerDebtsData)
+          ? customerDebtsData
+              .filter(c => c.totalDebt && c.totalDebt > 0)
+              .map(c => ({
+                id: c.customerId || c.id,
+                name: c.customerName || c.fullName || c.name || 'N/A',
+                type: 'customer',
+                totalDebt: c.totalDebt || c.outstandingDebt || 0,
+                phone: c.phone || c.phoneNumber,
+                email: c.email,
+                dealerName: c.dealerName,
+                isVip: c.isVip
+              }))
+          : [];
+
+        // Normalize dealer debts data
+        const dealersWithDebt = Array.isArray(dealerDebtsData)
+          ? dealerDebtsData
+              .filter(d => (d.totalDebt && d.totalDebt > 0) || (d.outstandingDebt && d.outstandingDebt > 0))
+              .map(d => ({
+                id: d.dealerId || d.id,
+                name: d.dealerName || d.name || 'N/A',
+                type: 'dealer',
+                totalDebt: d.totalDebt || d.outstandingDebt || 0,
+                phone: d.phone || d.phoneNumber,
+                address: d.address,
+                region: d.region,
+                status: d.status
+              }))
+          : [];
+
+        setCustomerDebts(customersWithDebt);
+        setDealerDebts(dealersWithDebt);
+      }
     } catch (error) {
       console.error('Error loading debts:', error);
       showErrorToast(handleAPIError(error));
@@ -68,8 +119,15 @@ const DebtManagement = ({ user }) => {
   };
 
   // Combine and filter debts
-  const allDebts = [...customerDebts, ...dealerDebts];
+  // For ADMIN/EVM_MANAGER: only show dealer debts
+  // For DEALER_MANAGER: only show customer debts
+  const allDebts = isAdminOrEVM 
+    ? dealerDebts 
+    : isDealerManager 
+      ? customerDebts 
+      : [...customerDebts, ...dealerDebts];
   const filteredDebts = allDebts.filter(debt => {
+    if (isAdminOrEVM || isDealerManager) return true; // Show all for these roles (already filtered)
     if (selectedType === 'all') return true;
     return debt.type === selectedType;
   });
@@ -77,13 +135,14 @@ const DebtManagement = ({ user }) => {
   // Calculate totals
   const totalCustomerDebt = customerDebts.reduce((sum, d) => sum + d.totalDebt, 0);
   const totalDealerDebt = dealerDebts.reduce((sum, d) => sum + d.totalDebt, 0);
-  const totalDebt = totalCustomerDebt + totalDealerDebt;
-
-  // Pie chart data
-  const pieData = [
-    { name: 'Customer Debts', value: totalCustomerDebt, color: '#FF6B6B' },
-    { name: 'Dealer Debts', value: totalDealerDebt, color: '#4ECDC4' }
-  ];
+  // For ADMIN/EVM_MANAGER: only count dealer debts
+  // For DEALER_MANAGER: only count customer debts
+  // For others: count both
+  const totalDebt = isAdminOrEVM 
+    ? totalDealerDebt 
+    : isDealerManager 
+      ? totalCustomerDebt 
+      : totalCustomerDebt + totalDealerDebt;
 
   if (loading) {
     return (
@@ -114,62 +173,41 @@ const DebtManagement = ({ user }) => {
           </div>
         </div>
 
-        <div className="card">
-          <div className="card__header">
-            <h3 className="card__title">Customer Debts</h3>
-            <div className="card__icon card__icon--warning">
-              <i className="bx bx-user"></i>
+        {!isAdminOrEVM && (
+          <div className="card">
+            <div className="card__header">
+              <h3 className="card__title">Customer Debts</h3>
+              <div className="card__icon card__icon--warning">
+                <i className="bx bx-user"></i>
+              </div>
+            </div>
+            <div className="card__value">${totalCustomerDebt.toLocaleString()}</div>
+            <div className="card__change card__change--negative">
+              <i className="bx bx-group"></i>
+              {customerDebts.length} customers
             </div>
           </div>
-          <div className="card__value">${totalCustomerDebt.toLocaleString()}</div>
-          <div className="card__change card__change--negative">
-            <i className="bx bx-group"></i>
-            {customerDebts.length} customers
-          </div>
-        </div>
+        )}
 
-        <div className="card">
-          <div className="card__header">
-            <h3 className="card__title">Dealer Debts</h3>
-            <div className="card__icon card__icon--primary">
-              <i className="bx bx-store"></i>
+        {!isDealerManager && (
+          <div className="card">
+            <div className="card__header">
+              <h3 className="card__title">Dealer Debts</h3>
+              <div className="card__icon card__icon--primary">
+                <i className="bx bx-store"></i>
+              </div>
+            </div>
+            <div className="card__value">${totalDealerDebt.toLocaleString()}</div>
+            <div className="card__change card__change--negative">
+              <i className="bx bx-building"></i>
+              {dealerDebts.length} dealers
             </div>
           </div>
-          <div className="card__value">${totalDealerDebt.toLocaleString()}</div>
-          <div className="card__change card__change--negative">
-            <i className="bx bx-building"></i>
-            {dealerDebts.length} dealers
-          </div>
-        </div>
+        )}
       </div>
 
       {/* Charts */}
-      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '24px', marginTop: '24px' }}>
-        {/* Pie Chart */}
-        <div className="card">
-          <h3 style={{ marginBottom: '20px' }}>Debt Distribution</h3>
-          <ResponsiveContainer width="100%" height={300}>
-            <PieChart>
-              <Pie
-                data={pieData}
-                cx="50%"
-                cy="50%"
-                labelLine={false}
-                label={({ name, percent }) => `${name}: ${(percent * 100).toFixed(0)}%`}
-                outerRadius={80}
-                fill="#8884d8"
-                dataKey="value"
-              >
-                {pieData.map((entry, index) => (
-                  <Cell key={`cell-${index}`} fill={entry.color} />
-                ))}
-              </Pie>
-              <Tooltip formatter={(value) => `$${value.toLocaleString()}`} />
-              <Legend />
-            </PieChart>
-          </ResponsiveContainer>
-        </div>
-
+      <div style={{ marginTop: '24px' }}>
         {/* Bar Chart */}
         <div className="card">
           <h3 style={{ marginBottom: '20px' }}>Top Debtors</h3>
@@ -191,16 +229,34 @@ const DebtManagement = ({ user }) => {
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '24px' }}>
           <h2>Outstanding Debts</h2>
           <div style={{ display: 'flex', gap: '8px' }}>
-            {['all', 'customer', 'dealer'].map(type => (
+            {isAdminOrEVM ? (
               <button
-                key={type}
-                onClick={() => setSelectedType(type)}
-                className={`btn ${selectedType === type ? 'btn-primary' : 'btn-outline'}`}
+                className="btn btn-primary"
                 style={{ textTransform: 'capitalize' }}
+                disabled
               >
-                {type}
+                Dealer
               </button>
-            ))}
+            ) : isDealerManager ? (
+              <button
+                className="btn btn-primary"
+                style={{ textTransform: 'capitalize' }}
+                disabled
+              >
+                Customer
+              </button>
+            ) : (
+              ['all', 'customer', 'dealer'].map(type => (
+                <button
+                  key={type}
+                  onClick={() => setSelectedType(type)}
+                  className={`btn ${selectedType === type ? 'btn-primary' : 'btn-outline'}`}
+                  style={{ textTransform: 'capitalize' }}
+                >
+                  {type}
+                </button>
+              ))
+            )}
           </div>
         </div>
 
@@ -211,6 +267,12 @@ const DebtManagement = ({ user }) => {
                 <th style={{ padding: '12px', textAlign: 'left', fontSize: '14px', fontWeight: '600', color: 'var(--color-text-muted)' }}>Type</th>
                 <th style={{ padding: '12px', textAlign: 'left', fontSize: '14px', fontWeight: '600', color: 'var(--color-text-muted)' }}>Name</th>
                 <th style={{ padding: '12px', textAlign: 'left', fontSize: '14px', fontWeight: '600', color: 'var(--color-text-muted)' }}>Contact</th>
+                {isAdminOrEVM && (
+                  <th style={{ padding: '12px', textAlign: 'left', fontSize: '14px', fontWeight: '600', color: 'var(--color-text-muted)' }}>Region</th>
+                )}
+                {isAdminOrEVM && (
+                  <th style={{ padding: '12px', textAlign: 'left', fontSize: '14px', fontWeight: '600', color: 'var(--color-text-muted)' }}>Status</th>
+                )}
                 <th style={{ padding: '12px', textAlign: 'right', fontSize: '14px', fontWeight: '600', color: 'var(--color-text-muted)' }}>Outstanding Debt</th>
               </tr>
             </thead>
@@ -243,6 +305,28 @@ const DebtManagement = ({ user }) => {
                     {debt.email && <div style={{ fontSize: '12px' }}>{debt.email}</div>}
                     {debt.address && <div style={{ fontSize: '12px' }}>{debt.address}</div>}
                   </td>
+                  {isAdminOrEVM && (
+                    <td style={{ padding: '12px', fontSize: '14px', color: 'var(--color-text-muted)' }}>
+                      {debt.type === 'dealer' ? (debt.region || 'N/A') : '-'}
+                    </td>
+                  )}
+                  {isAdminOrEVM && (
+                    <td style={{ padding: '12px', fontSize: '14px', color: 'var(--color-text-muted)' }}>
+                      {debt.type === 'dealer' ? (
+                        <span style={{
+                          padding: '4px 8px',
+                          borderRadius: 'var(--radius)',
+                          background: debt.status === 'ACTIVE' ? 'rgba(34, 197, 94, 0.1)' : 'rgba(239, 68, 68, 0.1)',
+                          color: debt.status === 'ACTIVE' ? '#22c55e' : '#ef4444',
+                          fontSize: '12px',
+                          fontWeight: '600',
+                          textTransform: 'uppercase'
+                        }}>
+                          {debt.status || 'N/A'}
+                        </span>
+                      ) : '-'}
+                    </td>
+                  )}
                   <td style={{ padding: '12px', textAlign: 'right', fontSize: '16px', fontWeight: '700', color: 'var(--color-error)' }}>
                     ${debt.totalDebt.toLocaleString()}
                   </td>

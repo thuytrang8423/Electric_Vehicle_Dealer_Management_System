@@ -27,13 +27,31 @@ export const inventoryAPI = {
     return response.data;
   },
 
-  createDealerInventory: async ({ dealerId, vehicleId, quantity }) => {
+  createDealerInventory: async ({ dealerId, vehicleId }) => {
     const response = await apiClient.post('/api/inventory/dealer', null, {
-      params: { dealerId, vehicleId, quantity }
+      params: { dealerId, vehicleId }
     });
     return response.data;
   },
+
+  getDealerInventorySummary: async (dealerId) => {
+    const response = await apiClient.get(`/api/inventory/dealer/${dealerId}/summary`);
+    return response.data;
+  },
+
+  getDealerInventoryDetails: async (dealerId) => {
+    const response = await apiClient.get(`/api/inventory/dealer/${dealerId}/details`);
+    return response.data;
+  },
 };
+
+
+
+
+
+
+
+
 
 
 

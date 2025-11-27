@@ -13,6 +13,10 @@ const ProductCatalog = ({ user }) => {
   const [loading, setLoading] = useState(true);
   const [vehicleTypes, setVehicleTypes] = useState([]);
 
+  // Vehicle Detail Modal State
+  const [showDetailModal, setShowDetailModal] = useState(false);
+  const [selectedVehicleDetail, setSelectedVehicleDetail] = useState(null);
+
   // Fetch vehicles from API
   const fetchVehicles = useCallback(async () => {
     try {
@@ -62,14 +66,14 @@ const ProductCatalog = ({ user }) => {
       event.stopPropagation();
       event.preventDefault();
     }
-    
+
     // Prevent duplicate calls
     if (processingClick.has(vehicleId)) {
       return;
     }
-    
+
     setProcessingClick(prev => new Set(prev).add(vehicleId));
-    
+
     const vehicle = vehicles.find(v => v.id === vehicleId);
     setSelectedModels(prev => {
       const isSelected = prev.includes(vehicleId);
@@ -81,7 +85,7 @@ const ProductCatalog = ({ user }) => {
         return [...prev, vehicleId];
       }
     });
-    
+
     // Clear the processing flag after a short delay
     setTimeout(() => {
       setProcessingClick(prev => {
@@ -99,12 +103,35 @@ const ProductCatalog = ({ user }) => {
     }
   };
 
+  const handleVehicleClick = (vehicle) => {
+    // Find the original vehicle object to get full details including specifications
+    const originalVehicle = vehicles.find(v => v.id === vehicle.id);
+
+    // Merge the transformed display data with the original full data
+    const fullDetail = {
+      ...vehicle,
+      ...originalVehicle,
+      // Ensure we keep the display formatting where preferred
+      price: vehicle.price,
+      image: vehicle.image,
+      name: vehicle.name,
+      brand: vehicle.brand,
+      year: vehicle.year,
+      vehicleType: vehicle.vehicleType,
+      versions: vehicle.versions,
+      colors: vehicle.colors
+    };
+
+    setSelectedVehicleDetail(fullDetail);
+    setShowDetailModal(true);
+  };
+
   // Transform API data to match VehicleManagement fields
   const transformedVehicles = vehicles.map(vehicle => {
     // Parse versions and colors from JSON (same as VehicleManagement)
     let versions = ['Standard'];
     let colors = ['White', 'Black'];
-    
+
     try {
       if (vehicle.versionJson) {
         const versionData = JSON.parse(vehicle.versionJson);
@@ -113,7 +140,7 @@ const ProductCatalog = ({ user }) => {
     } catch (e) {
       console.warn('Error parsing versionJson:', e);
     }
-    
+
     try {
       if (vehicle.availableColorsJson) {
         colors = JSON.parse(vehicle.availableColorsJson);
@@ -123,10 +150,10 @@ const ProductCatalog = ({ user }) => {
     }
 
     // Find vehicle type name from vehicleTypes array
-    const vehicleTypeName = vehicleTypes.find(type => type.id === vehicle.vehicleType?.id)?.typeName || 
-                           vehicle.vehicleType?.typeName || 
-                           vehicle.vehicleType || 
-                           'Unknown Type';
+    const vehicleTypeName = vehicleTypes.find(type => type.id === vehicle.vehicleType?.id)?.typeName ||
+      vehicle.vehicleType?.typeName ||
+      vehicle.vehicleType ||
+      'Unknown Type';
 
     return {
       id: vehicle.id,
@@ -206,8 +233,8 @@ const ProductCatalog = ({ user }) => {
                 />
               </div>
               {selectedModels.length >= 2 && (
-                <button 
-                  className="btn btn-primary" 
+                <button
+                  className="btn btn-primary"
                   style={{ display: 'flex', alignItems: 'center', gap: '8px' }}
                   onClick={handleCompareClick}
                 >
@@ -217,277 +244,250 @@ const ProductCatalog = ({ user }) => {
               )}
             </div>
 
-        {/* Vehicle Grid */}
-        {viewMode === 'grid' ? (
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: '20px' }}>
-            {filteredVehicles.map(vehicle => {
-              const promo = getPromotion(vehicle.id);
-              return (
-                <div key={vehicle.id} style={{
-                  background: 'var(--color-surface)',
-                  border: '1px solid var(--color-border)',
-                  borderRadius: 'var(--radius)',
-                  overflow: 'hidden',
-                  transition: 'all 0.2s ease',
-                  cursor: 'pointer'
-                }}
-                onClick={(e) => {
-                  // Prevent any default card click behavior
-                  e.preventDefault();
-                  e.stopPropagation();
-                }}
-                onMouseEnter={(e) => {
-                  e.currentTarget.style.transform = 'translateY(-4px)';
-                  e.currentTarget.style.boxShadow = '0 8px 25px rgba(0,0,0,0.15)';
-                }}
-                onMouseLeave={(e) => {
-                  e.currentTarget.style.transform = 'translateY(0)';
-                  e.currentTarget.style.boxShadow = 'none';
-                }}>
-                  {/* Vehicle Image */}
-                  <div style={{ 
-                    height: '180px', 
-                    background: 'linear-gradient(135deg, var(--color-bg) 0%, var(--color-surface) 100%)',
-                    position: 'relative',
-                    overflow: 'hidden'
-                  }}>
-                    <img 
-                      src={vehicle.image} 
-                      alt={vehicle.name}
+            {/* Vehicle Grid */}
+            {viewMode === 'grid' ? (
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: '20px' }}>
+                {filteredVehicles.map(vehicle => {
+                  const promo = getPromotion(vehicle.id);
+                  return (
+                    <div key={vehicle.id} style={{
+                      background: 'var(--color-surface)',
+                      border: '1px solid var(--color-border)',
+                      borderRadius: 'var(--radius)',
+                      overflow: 'hidden',
+                      transition: 'all 0.2s ease',
+                      cursor: 'pointer'
+                    }}
                       onClick={(e) => {
-                        e.stopPropagation();
                         e.preventDefault();
+                        handleVehicleClick(vehicle);
                       }}
-                      style={{
-                        width: '100%',
-                        height: '100%',
-                        objectFit: 'cover',
-                        transition: 'transform 0.3s ease'
+                      onMouseEnter={(e) => {
+                        e.currentTarget.style.transform = 'translateY(-4px)';
+                        e.currentTarget.style.boxShadow = '0 8px 25px rgba(0,0,0,0.15)';
                       }}
-                      onError={(e) => {
-                        e.target.style.display = 'none';
-                        e.target.nextSibling.style.display = 'flex';
-                      }}
-                    />
-                    <div style={{
-                      position: 'absolute',
-                      top: '50%',
-                      left: '50%',
-                      transform: 'translate(-50%, -50%)',
-                      display: 'none',
-                      alignItems: 'center',
-                      justifyContent: 'center',
-                      width: '100%',
-                      height: '100%',
-                      background: 'var(--color-bg)'
-                    }}>
-                      <i className="bx bx-car" style={{ fontSize: '48px', color: 'var(--color-text-muted)' }}></i>
-                    </div>
-                    
-                    {/* Compare Button */}
-                    <button
-                      onClick={(e) => toggleCompare(vehicle.id, e)}
-                      disabled={processingClick.has(vehicle.id)}
-                      style={{
-                        position: 'absolute',
-                        top: '12px',
-                        right: '12px',
-                        width: '32px',
-                        height: '32px',
-                        borderRadius: '50%',
-                        border: selectedModels.includes(vehicle.id) ? '2px solid var(--color-primary)' : '1px solid rgba(255,255,255,0.3)',
-                        background: selectedModels.includes(vehicle.id) ? 'var(--color-primary)' : 'rgba(0,0,0,0.5)',
-                        color: 'white',
-                        cursor: processingClick.has(vehicle.id) ? 'not-allowed' : 'pointer',
-                        display: 'flex',
-                        alignItems: 'center',
-                        justifyContent: 'center',
-                        fontSize: '16px',
-                        transition: 'all 0.2s ease',
-                        opacity: processingClick.has(vehicle.id) ? 0.6 : 1
-                      }}
-                    >
-                      <i className="bx bx-check"></i>
-                    </button>
-
-                    {/* Promotion Badge */}
-                    {promo && (
-                      <div style={{
-                        position: 'absolute',
-                        top: '12px',
-                        left: '12px',
-                        padding: '6px 12px',
-                        background: 'var(--color-warning)',
-                        borderRadius: 'var(--radius)',
-                        color: 'white',
-                        fontSize: '12px',
-                        fontWeight: '600',
-                        boxShadow: '0 2px 8px rgba(0,0,0,0.2)'
+                      onMouseLeave={(e) => {
+                        e.currentTarget.style.transform = 'translateY(0)';
+                        e.currentTarget.style.boxShadow = 'none';
                       }}>
-                        {promo.discount} OFF
-                      </div>
-                    )}
-                  </div>
+                      {/* Vehicle Image */}
+                      <div style={{
+                        height: '180px',
+                        background: 'linear-gradient(135deg, var(--color-bg) 0%, var(--color-surface) 100%)',
+                        position: 'relative',
+                        overflow: 'hidden'
+                      }}>
+                        <img
+                          src={vehicle.image}
+                          alt={vehicle.name}
 
-                  {/* Card Content */}
-                  <div style={{ padding: '16px' }} onClick={(e) => {
-                    e.stopPropagation();
-                    e.preventDefault();
-                  }}>
-                    <h3 style={{ margin: '0 0 8px 0', fontSize: '16px', fontWeight: '600', color: 'var(--color-text)' }}>
-                      {vehicle.name}
-                    </h3>
-                    
-                    <div style={{ marginBottom: '12px', fontSize: '20px', fontWeight: '700', color: 'var(--color-primary)' }}>
-                      {vehicle.price.toLocaleString('vi-VN')} VND
+                          style={{
+                            width: '100%',
+                            height: '100%',
+                            objectFit: 'cover',
+                            transition: 'transform 0.3s ease'
+                          }}
+                          onError={(e) => {
+                            e.target.style.display = 'none';
+                            e.target.nextSibling.style.display = 'flex';
+                          }}
+                        />
+                        <div style={{
+                          position: 'absolute',
+                          top: '50%',
+                          left: '50%',
+                          transform: 'translate(-50%, -50%)',
+                          display: 'none',
+                          alignItems: 'center',
+                          justifyContent: 'center',
+                          width: '100%',
+                          height: '100%',
+                          background: 'var(--color-bg)'
+                        }}>
+                          <i className="bx bx-car" style={{ fontSize: '48px', color: 'var(--color-text-muted)' }}></i>
+                        </div>
+
+                        {/* Promotion Badge */}
+                        {promo && (
+                          <div style={{
+                            position: 'absolute',
+                            top: '12px',
+                            left: '12px',
+                            padding: '6px 12px',
+                            background: 'var(--color-warning)',
+                            borderRadius: 'var(--radius)',
+                            color: 'white',
+                            fontSize: '12px',
+                            fontWeight: '600',
+                            boxShadow: '0 2px 8px rgba(0,0,0,0.2)'
+                          }}>
+                            {promo.discount} OFF
+                          </div>
+                        )}
+                      </div>
+
+                      {/* Card Content */}
+                      <div style={{ padding: '16px' }}>
+
+                        <h3 style={{ margin: '0 0 8px 0', fontSize: '16px', fontWeight: '600', color: 'var(--color-text)' }}>
+                          {vehicle.name}
+                        </h3>
+
+                        <div style={{ marginBottom: '12px', fontSize: '20px', fontWeight: '700', color: 'var(--color-primary)' }}>
+                          {vehicle.price.toLocaleString('vi-VN')} VND
+                        </div>
+
+                        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '8px', fontSize: '11px', color: 'var(--color-text-muted)', marginBottom: '16px' }}>
+                          <div style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
+                            <i className="bx bx-battery" style={{ fontSize: '12px' }}></i>
+                            {vehicle.battery}
+                          </div>
+                          <div style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
+                            <i className="bx bx-category" style={{ fontSize: '12px' }}></i>
+                            {vehicle.vehicleType}
+                          </div>
+                          <div style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
+                            <i className="bx bx-calendar" style={{ fontSize: '12px' }}></i>
+                            {vehicle.year}
+                          </div>
+                          <div style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
+                            <i className="bx bx-check-circle" style={{ fontSize: '12px' }}></i>
+                            {vehicle.status.replace('_', ' ')}
+                          </div>
+                        </div>
+
+                        <button
+                          className={`btn ${selectedModels.includes(vehicle.id) ? 'btn-primary' : 'btn-outline'}`}
+                          style={{
+                            width: '100%',
+                            padding: '10px',
+                            fontSize: '14px',
+                            display: 'flex',
+                            alignItems: 'center',
+                            justifyContent: 'center',
+                            gap: '8px'
+                          }}
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            toggleCompare(vehicle.id, e);
+                          }}
+                          disabled={processingClick.has(vehicle.id)}
+                        >
+                          <i className="bx bx-bar-chart-alt-2"></i>
+                          Compare
+                        </button>
+                      </div>
                     </div>
-                    
-                    <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '8px', fontSize: '11px', color: 'var(--color-text-muted)', marginBottom: '16px' }}>
-                      <div style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
-                        <i className="bx bx-battery" style={{ fontSize: '12px' }}></i>
-                        {vehicle.battery}
-                      </div>
-                      <div style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
-                        <i className="bx bx-category" style={{ fontSize: '12px' }}></i>
-                        {vehicle.vehicleType}
-                      </div>
-                      <div style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
-                        <i className="bx bx-calendar" style={{ fontSize: '12px' }}></i>
-                        {vehicle.year}
-                      </div>
-                      <div style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
-                        <i className="bx bx-check-circle" style={{ fontSize: '12px' }}></i>
-                        {vehicle.status.replace('_', ' ')}
-                      </div>
-                    </div>
-                    
-                    <button 
-                      className="btn btn-primary" 
-                      style={{ width: '100%', padding: '10px', fontSize: '14px' }}
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        showSuccessToast(`${vehicle.name} added to quote`);
-                      }}
-                    >
-                      <i className="bx bx-cart-add"></i>
-                      Add to Quote
-                    </button>
-                  </div>
-                </div>
-              );
-            })}
-          </div>
-        ) : (
-          <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
-            {filteredVehicles.map(vehicle => {
-              const promo = getPromotion(vehicle.id);
-              return (
-                <div key={vehicle.id} style={{
-                  display: 'flex',
-                  gap: '16px',
-                  padding: '16px',
-                  background: 'var(--color-surface)',
-                  border: '1px solid var(--color-border)',
-                  borderRadius: 'var(--radius)'
-                }}>
-                  <div style={{ 
-                    width: '120px', 
-                    height: '80px', 
-                    background: 'var(--color-bg)', 
-                    borderRadius: 'var(--radius)', 
-                    overflow: 'hidden',
-                    position: 'relative'
-                  }}>
-                    <img 
-                      src={vehicle.image} 
-                      alt={vehicle.name}
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        e.preventDefault();
-                      }}
-                      style={{
-                        width: '100%',
-                        height: '100%',
-                        objectFit: 'cover',
-                        transition: 'transform 0.3s ease'
-                      }}
-                      onError={(e) => {
-                        e.target.style.display = 'none';
-                        e.target.nextSibling.style.display = 'flex';
-                      }}
-                    />
-                    <div style={{
-                      position: 'absolute',
-                      top: '50%',
-                      left: '50%',
-                      transform: 'translate(-50%, -50%)',
-                      display: 'none',
-                      alignItems: 'center',
-                      justifyContent: 'center',
-                      width: '100%',
-                      height: '100%',
-                      background: 'var(--color-bg)'
+                  );
+                })}
+              </div>
+            ) : (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
+                {filteredVehicles.map(vehicle => {
+                  const promo = getPromotion(vehicle.id);
+                  return (
+                    <div key={vehicle.id} style={{
+                      display: 'flex',
+                      gap: '16px',
+                      padding: '16px',
+                      background: 'var(--color-surface)',
+                      border: '1px solid var(--color-border)',
+                      borderRadius: 'var(--radius)'
                     }}>
-                      <i className="bx bx-car" style={{ fontSize: '32px', color: 'var(--color-text-muted)' }}></i>
-                    </div>
-                  </div>
-                  <div style={{ flex: 1 }}>
-                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '8px' }}>
-                      <h3 style={{ margin: 0, fontSize: '18px', fontWeight: '600', color: 'var(--color-text)' }}>{vehicle.name}</h3>
-                      <div style={{ fontSize: '20px', fontWeight: '700', color: 'var(--color-primary)' }}>
-                        {vehicle.price.toLocaleString('vi-VN')} VND
+                      <div style={{
+                        width: '120px',
+                        height: '80px',
+                        background: 'var(--color-bg)',
+                        borderRadius: 'var(--radius)',
+                        overflow: 'hidden',
+                        position: 'relative'
+                      }}>
+                        <img
+                          src={vehicle.image}
+                          alt={vehicle.name}
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            handleVehicleClick(vehicle);
+                          }}
+                          style={{
+                            width: '100%',
+                            height: '100%',
+                            objectFit: 'cover',
+                            transition: 'transform 0.3s ease'
+                          }}
+                          onError={(e) => {
+                            e.target.style.display = 'none';
+                            e.target.nextSibling.style.display = 'flex';
+                          }}
+                        />
+                        <div style={{
+                          position: 'absolute',
+                          top: '50%',
+                          left: '50%',
+                          transform: 'translate(-50%, -50%)',
+                          display: 'none',
+                          alignItems: 'center',
+                          justifyContent: 'center',
+                          width: '100%',
+                          height: '100%',
+                          background: 'var(--color-bg)'
+                        }}>
+                          <i className="bx bx-car" style={{ fontSize: '32px', color: 'var(--color-text-muted)' }}></i>
+                        </div>
+                      </div>
+                      <div style={{ flex: 1 }}>
+                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '8px' }}>
+                          <h3 style={{ margin: 0, fontSize: '18px', fontWeight: '600', color: 'var(--color-text)' }}>{vehicle.name}</h3>
+                          <div style={{ fontSize: '20px', fontWeight: '700', color: 'var(--color-primary)' }}>
+                            {vehicle.price.toLocaleString('vi-VN')} VND
+                          </div>
+                        </div>
+                        {promo && (
+                          <div style={{ marginBottom: '8px', padding: '4px 12px', background: 'var(--color-warning)', borderRadius: 'var(--radius)', color: 'white', fontSize: '12px', fontWeight: '600', display: 'inline-block' }}>
+                            {promo.discount} OFF
+                          </div>
+                        )}
+                        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: '16px', fontSize: '14px', color: 'var(--color-text-muted)' }}>
+                          <div><i className="bx bx-battery" style={{ marginRight: '4px' }}></i> {vehicle.battery}</div>
+                          <div><i className="bx bx-category" style={{ marginRight: '4px' }}></i> {vehicle.vehicleType}</div>
+                          <div><i className="bx bx-calendar" style={{ marginRight: '4px' }}></i> {vehicle.year}</div>
+                          <div><i className="bx bx-check-circle" style={{ marginRight: '4px' }}></i> {vehicle.status.replace('_', ' ')}</div>
+                        </div>
+                      </div>
+                      <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+                        <button
+                          className={`btn ${selectedModels.includes(vehicle.id) ? 'btn-primary' : 'btn-outline'}`}
+                          style={{
+                            minWidth: '100px',
+                            display: 'flex',
+                            alignItems: 'center',
+                            justifyContent: 'center',
+                            gap: '8px',
+                            opacity: processingClick.has(vehicle.id) ? 0.6 : 1,
+                            cursor: processingClick.has(vehicle.id) ? 'not-allowed' : 'pointer'
+                          }}
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            toggleCompare(vehicle.id, e);
+                          }}
+                          disabled={processingClick.has(vehicle.id)}
+                        >
+                          <i className="bx bx-bar-chart-alt-2"></i>
+                          Compare
+                        </button>
                       </div>
                     </div>
-                    {promo && (
-                      <div style={{ marginBottom: '8px', padding: '4px 12px', background: 'var(--color-warning)', borderRadius: 'var(--radius)', color: 'white', fontSize: '12px', fontWeight: '600', display: 'inline-block' }}>
-                        {promo.discount} OFF
-                      </div>
-                    )}
-                    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: '16px', fontSize: '14px', color: 'var(--color-text-muted)' }}>
-                      <div><i className="bx bx-battery" style={{ marginRight: '4px' }}></i> {vehicle.battery}</div>
-                      <div><i className="bx bx-category" style={{ marginRight: '4px' }}></i> {vehicle.vehicleType}</div>
-                      <div><i className="bx bx-calendar" style={{ marginRight: '4px' }}></i> {vehicle.year}</div>
-                      <div><i className="bx bx-check-circle" style={{ marginRight: '4px' }}></i> {vehicle.status.replace('_', ' ')}</div>
-                    </div>
-                  </div>
-                  <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
-                    <button
-                      onClick={(e) => toggleCompare(vehicle.id, e)}
-                      disabled={processingClick.has(vehicle.id)}
-                      className={`btn ${selectedModels.includes(vehicle.id) ? 'btn-primary' : 'btn-outline'}`}
-                      style={{ 
-                        minWidth: '100px',
-                        opacity: processingClick.has(vehicle.id) ? 0.6 : 1,
-                        cursor: processingClick.has(vehicle.id) ? 'not-allowed' : 'pointer'
-                      }}
-                    >
-                      <i className="bx bx-check"></i>
-                      Compare
-                    </button>
-                    <button 
-                      className="btn btn-secondary" 
-                      style={{ minWidth: '100px' }}
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        showSuccessToast(`${vehicle.name} added to quote`);
-                      }}
-                    >
-                      <i className="bx bx-cart-add"></i>
-                      Add to Quote
-                    </button>
-                  </div>
-                </div>
-              );
-            })}
-          </div>
-        )}
+                  );
+                })}
+              </div>
+            )}
 
-        {filteredVehicles.length === 0 && !loading && (
-          <div style={{ textAlign: 'center', padding: '40px', color: 'var(--color-text-muted)' }}>
-            <i className="bx bx-search" style={{ fontSize: '48px', marginBottom: '16px', opacity: 0.5 }}></i>
-            <div>No vehicles found</div>
-          </div>
-        )}
+            {filteredVehicles.length === 0 && !loading && (
+              <div style={{ textAlign: 'center', padding: '40px', color: 'var(--color-text-muted)' }}>
+                <i className="bx bx-search" style={{ fontSize: '48px', marginBottom: '16px', opacity: 0.5 }}></i>
+                <div>No vehicles found</div>
+              </div>
+            )}
           </>
         )}
       </div>
@@ -517,7 +517,7 @@ const ProductCatalog = ({ user }) => {
             overflow: 'auto',
             boxShadow: '0 20px 60px rgba(0,0,0,0.3)'
           }} onClick={(e) => e.stopPropagation()}>
-            
+
             {/* Modal Header */}
             <div style={{
               padding: selectedVehicles.length <= 2 ? '24px' : '24px',
@@ -563,23 +563,23 @@ const ProductCatalog = ({ user }) => {
                   padding: '60px 20px',
                   color: 'var(--color-text-muted)'
                 }}>
-                  <i className="bx bx-car" style={{ 
-                    fontSize: '64px', 
-                    marginBottom: '20px', 
+                  <i className="bx bx-car" style={{
+                    fontSize: '64px',
+                    marginBottom: '20px',
                     opacity: 0.5,
                     color: 'var(--color-primary)'
                   }}></i>
-                  <h3 style={{ 
-                    margin: '0 0 12px 0', 
-                    fontSize: '20px', 
-                    fontWeight: '600', 
-                    color: 'var(--color-text)' 
+                  <h3 style={{
+                    margin: '0 0 12px 0',
+                    fontSize: '20px',
+                    fontWeight: '600',
+                    color: 'var(--color-text)'
                   }}>
                     No vehicles to compare
                   </h3>
-                  <p style={{ 
-                    margin: 0, 
-                    fontSize: '14px', 
+                  <p style={{
+                    margin: 0,
+                    fontSize: '14px',
                     color: 'var(--color-text-muted)',
                     lineHeight: '1.5'
                   }}>
@@ -588,18 +588,18 @@ const ProductCatalog = ({ user }) => {
                 </div>
               ) : (
                 <div style={{ overflowX: 'auto' }}>
-                  <table style={{ 
-                    width: '100%', 
-                    borderCollapse: 'collapse', 
+                  <table style={{
+                    width: '100%',
+                    borderCollapse: 'collapse',
                     minWidth: selectedVehicles.length <= 2 ? '600px' : '600px'
                   }}>
                     <thead>
                       <tr style={{ borderBottom: '2px solid var(--color-border)' }}>
-                        <th style={{ 
-                          padding: '16px', 
-                          textAlign: 'left', 
-                          fontSize: '16px', 
-                          fontWeight: '600', 
+                        <th style={{
+                          padding: '16px',
+                          textAlign: 'left',
+                          fontSize: '16px',
+                          fontWeight: '600',
                           color: 'var(--color-text)',
                           background: 'var(--color-bg)',
                           position: 'sticky',
@@ -609,18 +609,18 @@ const ProductCatalog = ({ user }) => {
                           Specification
                         </th>
                         {selectedVehicles.map(v => (
-                          <th key={v.id} style={{ 
-                            padding: '16px', 
-                            textAlign: 'center', 
-                            fontSize: '16px', 
-                            fontWeight: '600', 
+                          <th key={v.id} style={{
+                            padding: '16px',
+                            textAlign: 'center',
+                            fontSize: '16px',
+                            fontWeight: '600',
                             color: 'var(--color-text)',
                             background: 'var(--color-bg)',
                             minWidth: selectedVehicles.length <= 2 ? '250px' : '200px'
                           }}>
                             <div style={{ marginBottom: '12px' }}>
-                              <img 
-                                src={v.image} 
+                              <img
+                                src={v.image}
                                 alt={v.name}
                                 style={{
                                   width: selectedVehicles.length <= 2 ? '150px' : '120px',
@@ -659,9 +659,9 @@ const ProductCatalog = ({ user }) => {
                     </thead>
                     <tbody>
                       <tr style={{ borderBottom: '1px solid var(--color-border)' }}>
-                        <td style={{ 
-                          padding: '16px', 
-                          fontWeight: '600', 
+                        <td style={{
+                          padding: '16px',
+                          fontWeight: '600',
                           background: 'var(--color-bg)',
                           position: 'sticky',
                           left: 0,
@@ -670,8 +670,8 @@ const ProductCatalog = ({ user }) => {
                           Price
                         </td>
                         {selectedVehicles.map(v => (
-                          <td key={v.id} style={{ 
-                            padding: '16px', 
+                          <td key={v.id} style={{
+                            padding: '16px',
                             textAlign: 'center',
                             fontSize: '18px',
                             fontWeight: '700',
@@ -682,8 +682,8 @@ const ProductCatalog = ({ user }) => {
                         ))}
                       </tr>
                       <tr style={{ borderBottom: '1px solid var(--color-border)' }}>
-                        <td style={{ 
-                          padding: '16px', 
+                        <td style={{
+                          padding: '16px',
                           fontWeight: '600',
                           background: 'var(--color-bg)',
                           position: 'sticky',
@@ -697,8 +697,8 @@ const ProductCatalog = ({ user }) => {
                         ))}
                       </tr>
                       <tr style={{ borderBottom: '1px solid var(--color-border)' }}>
-                        <td style={{ 
-                          padding: '16px', 
+                        <td style={{
+                          padding: '16px',
                           fontWeight: '600',
                           background: 'var(--color-bg)',
                           position: 'sticky',
@@ -712,8 +712,8 @@ const ProductCatalog = ({ user }) => {
                         ))}
                       </tr>
                       <tr style={{ borderBottom: '1px solid var(--color-border)' }}>
-                        <td style={{ 
-                          padding: '16px', 
+                        <td style={{
+                          padding: '16px',
                           fontWeight: '600',
                           background: 'var(--color-bg)',
                           position: 'sticky',
@@ -741,8 +741,8 @@ const ProductCatalog = ({ user }) => {
                         ))}
                       </tr>
                       <tr style={{ borderBottom: '1px solid var(--color-border)' }}>
-                        <td style={{ 
-                          padding: '16px', 
+                        <td style={{
+                          padding: '16px',
                           fontWeight: '600',
                           background: 'var(--color-bg)',
                           position: 'sticky',
@@ -770,8 +770,8 @@ const ProductCatalog = ({ user }) => {
                         ))}
                       </tr>
                       <tr style={{ borderBottom: '1px solid var(--color-border)' }}>
-                        <td style={{ 
-                          padding: '16px', 
+                        <td style={{
+                          padding: '16px',
                           fontWeight: '600',
                           background: 'var(--color-bg)',
                           position: 'sticky',
@@ -785,8 +785,8 @@ const ProductCatalog = ({ user }) => {
                         ))}
                       </tr>
                       <tr style={{ borderBottom: '1px solid var(--color-border)' }}>
-                        <td style={{ 
-                          padding: '16px', 
+                        <td style={{
+                          padding: '16px',
                           fontWeight: '600',
                           background: 'var(--color-bg)',
                           position: 'sticky',
@@ -834,6 +834,240 @@ const ProductCatalog = ({ user }) => {
                   Close
                 </button>
               </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Vehicle Detail Modal */}
+      {showDetailModal && selectedVehicleDetail && (
+        <div style={{
+          position: 'fixed',
+          top: 0,
+          left: 0,
+          right: 0,
+          bottom: 0,
+          background: 'rgba(0, 0, 0, 0.7)',
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          zIndex: 2000,
+          padding: '20px'
+        }} onClick={() => setShowDetailModal(false)}>
+          <div style={{
+            background: 'var(--color-surface)',
+            borderRadius: 'var(--radius)',
+            maxWidth: '900px',
+            width: '100%',
+            maxHeight: '90vh',
+            overflow: 'auto',
+            boxShadow: '0 20px 60px rgba(0,0,0,0.3)',
+            display: 'flex',
+            flexDirection: 'column'
+          }} onClick={(e) => e.stopPropagation()}>
+
+            {/* Modal Header */}
+            <div style={{
+              padding: '20px 24px',
+              borderBottom: '1px solid var(--color-border)',
+              display: 'flex',
+              justifyContent: 'space-between',
+              alignItems: 'center',
+              background: 'var(--color-bg)',
+              position: 'sticky',
+              top: 0,
+              zIndex: 10
+            }}>
+              <h2 style={{ margin: 0, fontSize: '20px', fontWeight: '700', color: 'var(--color-text)' }}>
+                {selectedVehicleDetail.name}
+              </h2>
+              <button
+                onClick={() => setShowDetailModal(false)}
+                style={{
+                  background: 'transparent',
+                  border: 'none',
+                  cursor: 'pointer',
+                  color: 'var(--color-text-muted)',
+                  fontSize: '24px',
+                  padding: '4px',
+                  display: 'flex'
+                }}
+              >
+                <i className="bx bx-x"></i>
+              </button>
+            </div>
+
+            {/* Modal Content */}
+            <div style={{ padding: '24px' }}>
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '32px', marginBottom: '32px' }}>
+                {/* Left Column: Image */}
+                <div>
+                  <div style={{
+                    width: '100%',
+                    paddingBottom: '66.67%', // 3:2 Aspect Ratio
+                    position: 'relative',
+                    borderRadius: 'var(--radius)',
+                    overflow: 'hidden',
+                    background: 'var(--color-bg)',
+                    marginBottom: '16px',
+                    border: '1px solid var(--color-border)'
+                  }}>
+                    <img
+                      src={selectedVehicleDetail.image}
+                      alt={selectedVehicleDetail.name}
+                      style={{
+                        position: 'absolute',
+                        top: 0,
+                        left: 0,
+                        width: '100%',
+                        height: '100%',
+                        objectFit: 'cover'
+                      }}
+                      onError={(e) => {
+                        e.target.style.display = 'none';
+                        e.target.nextSibling.style.display = 'flex';
+                      }}
+                    />
+                    <div style={{
+                      position: 'absolute',
+                      top: 0,
+                      left: 0,
+                      width: '100%',
+                      height: '100%',
+                      display: 'none',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      background: 'var(--color-bg)'
+                    }}>
+                      <i className="bx bx-car" style={{ fontSize: '64px', color: 'var(--color-text-muted)' }}></i>
+                    </div>
+                  </div>
+
+                  {/* Quick Stats Row */}
+                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px' }}>
+                    <div style={{ padding: '12px', background: 'var(--color-bg)', borderRadius: 'var(--radius)', textAlign: 'center' }}>
+                      <div style={{ fontSize: '12px', color: 'var(--color-text-muted)', marginBottom: '4px' }}>Brand</div>
+                      <div style={{ fontWeight: '600' }}>{selectedVehicleDetail.brand}</div>
+                    </div>
+                    <div style={{ padding: '12px', background: 'var(--color-bg)', borderRadius: 'var(--radius)', textAlign: 'center' }}>
+                      <div style={{ fontSize: '12px', color: 'var(--color-text-muted)', marginBottom: '4px' }}>Year</div>
+                      <div style={{ fontWeight: '600' }}>{selectedVehicleDetail.year}</div>
+                    </div>
+                  </div>
+                </div>
+
+                {/* Right Column: Info & Specs */}
+                <div>
+                  <div style={{ marginBottom: '24px' }}>
+                    <div style={{ fontSize: '14px', color: 'var(--color-text-muted)', marginBottom: '4px' }}>Starting Price</div>
+                    <div style={{ fontSize: '32px', fontWeight: '700', color: 'var(--color-primary)' }}>
+                      {selectedVehicleDetail.price.toLocaleString('vi-VN')} VND
+                    </div>
+                  </div>
+
+                  <div style={{ marginBottom: '24px' }}>
+                    <h3 style={{ fontSize: '16px', fontWeight: '600', marginBottom: '12px', borderBottom: '1px solid var(--color-border)', paddingBottom: '8px' }}>
+                      Key Specifications
+                    </h3>
+                    <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '16px' }}>
+                      <div>
+                        <div style={{ fontSize: '12px', color: 'var(--color-text-muted)' }}>Battery Capacity</div>
+                        <div style={{ fontWeight: '600', fontSize: '14px' }}>{selectedVehicleDetail.battery}</div>
+                      </div>
+                      <div>
+                        <div style={{ fontSize: '12px', color: 'var(--color-text-muted)' }}>Vehicle Type</div>
+                        <div style={{ fontWeight: '600', fontSize: '14px' }}>{selectedVehicleDetail.vehicleType}</div>
+                      </div>
+                      {selectedVehicleDetail.specifications?.range && (
+                        <div>
+                          <div style={{ fontSize: '12px', color: 'var(--color-text-muted)' }}>Range</div>
+                          <div style={{ fontWeight: '600', fontSize: '14px' }}>{selectedVehicleDetail.specifications.range} km</div>
+                        </div>
+                      )}
+                      {selectedVehicleDetail.specifications?.maxSpeed && (
+                        <div>
+                          <div style={{ fontSize: '12px', color: 'var(--color-text-muted)' }}>Max Speed</div>
+                          <div style={{ fontWeight: '600', fontSize: '14px' }}>{selectedVehicleDetail.specifications.maxSpeed} km/h</div>
+                        </div>
+                      )}
+                      {selectedVehicleDetail.specifications?.chargingTime && (
+                        <div>
+                          <div style={{ fontSize: '12px', color: 'var(--color-text-muted)' }}>Charging Time</div>
+                          <div style={{ fontWeight: '600', fontSize: '14px' }}>{selectedVehicleDetail.specifications.chargingTime}</div>
+                        </div>
+                      )}
+                      {selectedVehicleDetail.specifications?.seats && (
+                        <div>
+                          <div style={{ fontSize: '12px', color: 'var(--color-text-muted)' }}>Seats</div>
+                          <div style={{ fontWeight: '600', fontSize: '14px' }}>{selectedVehicleDetail.specifications.seats}</div>
+                        </div>
+                      )}
+                    </div>
+                  </div>
+
+                  <div style={{ marginBottom: '24px' }}>
+                    <h3 style={{ fontSize: '16px', fontWeight: '600', marginBottom: '12px', borderBottom: '1px solid var(--color-border)', paddingBottom: '8px' }}>
+                      Configuration
+                    </h3>
+                    <div style={{ marginBottom: '12px' }}>
+                      <div style={{ fontSize: '12px', color: 'var(--color-text-muted)', marginBottom: '8px' }}>Available Versions</div>
+                      <div style={{ display: 'flex', flexWrap: 'wrap', gap: '8px' }}>
+                        {selectedVehicleDetail.versions.map((version, idx) => (
+                          <span key={idx} style={{
+                            padding: '4px 12px',
+                            background: 'var(--color-surface)',
+                            border: '1px solid var(--color-border)',
+                            borderRadius: 'var(--radius)',
+                            fontSize: '13px',
+                            fontWeight: '500'
+                          }}>
+                            {version}
+                          </span>
+                        ))}
+                      </div>
+                    </div>
+                    <div>
+                      <div style={{ fontSize: '12px', color: 'var(--color-text-muted)', marginBottom: '8px' }}>Available Colors</div>
+                      <div style={{ display: 'flex', flexWrap: 'wrap', gap: '8px' }}>
+                        {selectedVehicleDetail.colors.map((color, idx) => (
+                          <span key={idx} style={{
+                            padding: '4px 12px',
+                            background: 'var(--color-surface)',
+                            border: '1px solid var(--color-border)',
+                            borderRadius: 'var(--radius)',
+                            fontSize: '13px',
+                            fontWeight: '500',
+                            display: 'flex',
+                            alignItems: 'center',
+                            gap: '6px'
+                          }}>
+                            <span style={{
+                              width: '12px',
+                              height: '12px',
+                              borderRadius: '50%',
+                              background: color.toLowerCase(),
+                              border: '1px solid #ddd',
+                              display: 'inline-block'
+                            }}></span>
+                            {color}
+                          </span>
+                        ))}
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              {selectedVehicleDetail.description && (
+                <div>
+                  <h3 style={{ fontSize: '16px', fontWeight: '600', marginBottom: '12px', borderBottom: '1px solid var(--color-border)', paddingBottom: '8px' }}>
+                    Description
+                  </h3>
+                  <div style={{ lineHeight: '1.6', color: 'var(--color-text)', fontSize: '14px' }}>
+                    {selectedVehicleDetail.description}
+                  </div>
+                </div>
+              )}
             </div>
           </div>
         </div>

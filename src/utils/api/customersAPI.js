@@ -41,5 +41,14 @@ export const customersAPI = {
   bookTestDrive: async (testDriveData) => {
     const response = await apiClient.post('/api/test-drive/schedule', testDriveData);
     return response.data;
+  },
+
+   // Customer Portal - Tra cứu thông tin khách hàng
+   getPortalInfo: async (customerId, citizenId) => {
+    const response = await apiClient.get('/api/customer/portal', {
+      params: { customerId, citizenId }
+    });
+    return response.data;
   }
+
 };

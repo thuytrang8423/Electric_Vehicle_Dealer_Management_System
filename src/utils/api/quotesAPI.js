@@ -67,6 +67,22 @@ export const quotesAPI = {
     return response.data;
   },
 
+  // DEALER_MANAGER: Get quotes by staff ID
+  getQuotesByStaffId: async (staffId) => {
+    const response = await apiClient.get(
+      `/api/dealer-workflow/staff/${staffId}/quotes`
+    );
+    return response.data;
+  },
+
+  // Get quote status (dealer workflow)
+  getQuoteStatus: async (quoteId) => {
+    const response = await apiClient.get(
+      `/api/dealer-workflow/quotes/${quoteId}/status`
+    );
+    return response.data;
+  },
+
   // DEALER_MANAGER: Approve quote
   approveByDealerManager: async (quoteId, managerId, notes) => {
     const response = await apiClient.post(

@@ -1,5 +1,4 @@
-import React, { useEffect, useMemo, useRef, useState } from 'react';
-import { jsPDF } from 'jspdf';
+import React, { useEffect, useMemo, useState } from 'react';
 import { contractsAPI, ordersAPI, customersAPI, vehiclesAPI } from '../../utils/api';
 import { showSuccessToast, showErrorToast } from '../../utils/toast';
 import { handleAPIError } from '../../utils/apiConfig';
@@ -51,7 +50,7 @@ export const uploadFile = async (file, resourceType = 'auto') => {
 };
 
 // ----------------------
-// HELPERS (same as your file, lightly adjusted)
+// HELPERS
 // ----------------------
 const parseContractDocumentMeta = (value) => {
   if (!value) return null;
@@ -114,31 +113,6 @@ const normalizeContract = (contract) => {
   };
 };
 
-function formatCurrency(value) {
-  const numeric = Number(value || 0);
-  if (Number.isNaN(numeric)) {
-    return '0 ₫';
-  }
-  const formatted = new Intl.NumberFormat('vi-VN', {
-    style: 'currency',
-    currency: 'VND',
-    currencyDisplay: 'code',
-    maximumFractionDigits: 0,
-  }).format(numeric);
-  return formatted.replace(/\u00A0/g, ' ');
-}
-
-async function getBase64FromUrl(url) {
-  const response = await fetch(url);
-  const blob = await response.blob();
-  return new Promise((resolve, reject) => {
-    const reader = new FileReader();
-    reader.onloadend = () => resolve(reader.result);
-    reader.onerror = reject;
-    reader.readAsDataURL(blob);
-  });
-}
-
 const enrichOrderWithVehicles = async (order) => {
   if (!order) return order;
   const details = order.orderDetails || order.orderDetailDTOList || order.items || [];
@@ -189,105 +163,6 @@ const enrichOrderWithVehicles = async (order) => {
   };
 };
 
-const extractCustomerSnapshot = (customer) => {
-  if (!customer) return null;
-  const address =
-    customer.address ||
-    [
-      customer.addressLine1,
-      customer.addressLine2,
-      customer.city,
-      customer.province,
-      customer.country,
-    ]
-      .filter(Boolean)
-      .join(', ');
-
-  return {
-    id: customer.id || customer.customerId || null,
-    fullName: customer.fullName || customer.name || customer.customerName || '',
-    email: customer.email || '',
-    phone: customer.phone || customer.phoneNumber || '',
-    address,
-  };
-};
-
-const extractOrderSnapshot = (order) => {
-  if (!order) return null;
-  const resolvedOrderId = order.orderId || order.id || null;
-  const baseFields = {
-    id: resolvedOrderId,
-    orderId: resolvedOrderId,
-    quoteId: order.quoteId || null,
-    dealerId: order.dealerId || null,
-    customerId: order.customerId || null,
-    orderDate: order.orderDate || null,
-    deliveryDate: order.deliveryDate || order.expectedDeliveryDate || null,
-    paymentMethod: order.paymentMethod || order.payment_method || null,
-    paymentStatus: order.paymentStatus || null,
-    totalAmount: order.totalAmount,
-    paidAmount: order.paidAmount,
-    remainingAmount: order.remainingAmount,
-  };
-
-  const items = Array.isArray(order.orderDetails)
-    ? order.orderDetails.map((detail) => ({
-        vehicleId: detail.vehicleId || null,
-        vehicleName:
-          detail.vehicleName ||
-          detail.vehicle?.name ||
-          detail.vehicle?.modelName ||
-          null,
-        quantity: detail.quantity || detail.qty || 1,
-        unitPrice: detail.unitPrice || detail.price || 0,
-        totalAmount: detail.totalAmount || detail.lineTotal || 0,
-      }))
-    : [];
-
-  return {
-    ...baseFields,
-    orderDetails: items,
-  };
-};
-
-const isDataUri = (value) => typeof value === 'string' && value.startsWith('data:');
-
-const extractMimeFromDataUri = (dataUri) => {
-  if (!dataUri) return '';
-  const match = dataUri.match(/^data:(.*?);/);
-  return match ? match[1] : '';
-};
-
-const dataUriToBlob = (dataUri) => {
-  if (!dataUri) return null;
-  const arr = dataUri.split(',');
-  if (arr.length < 2) return null;
-  const mimeMatch = arr[0].match(/:(.*?);/);
-  const mime = mimeMatch ? mimeMatch[1] : 'application/pdf';
-  const binaryString = atob(arr[1]);
-  const len = binaryString.length;
-  const u8arr = new Uint8Array(len);
-  for (let i = 0; i < len; i += 1) {
-    u8arr[i] = binaryString.charCodeAt(i);
-  }
-  return new Blob([u8arr], { type: mime });
-};
-
-const dataUriToFile = (dataUri, filename) => {
-  const blob = dataUriToBlob(dataUri);
-  if (!blob) return null;
-  if (typeof File !== 'undefined') {
-    return new File([blob], filename, { type: blob.type || 'application/pdf' });
-  }
-  const fallbackBlob = new Blob([blob], { type: blob.type || 'application/pdf' });
-  try {
-    fallbackBlob.name = filename;
-  } catch (error) {
-    // ignore
-  }
-  return fallbackBlob;
-};
-
 const inferMimeFromUrl = (url) => {
   if (!url) return '';
   const clean = url.split('?')[0].toLowerCase();
@@ -295,286 +170,6 @@ const inferMimeFromUrl = (url) => {
   if (clean.match(/\.(png|jpg|jpeg|gif)$/)) return 'image/png';
   return '';
 };
-
-const getExtensionFromMime = (mimeType) => {
-  const normalized = (mimeType || '').toLowerCase();
-  if (normalized === 'application/pdf') return 'pdf';
-  if (normalized === 'image/png') return 'png';
-  if (normalized === 'image/jpeg' || normalized === 'image/jpg') return 'jpg';
-  if (normalized === 'image/gif') return 'gif';
-  return '';
-};
-
-const sanitizeFilenameSegment = (value) => {
-  return String(value || 'contract')
-    .trim()
-    .toLowerCase()
-    .replace(/[^a-z0-9-_]+/g, '-')
-    .replace(/^-+|-+$/g, '') || 'contract';
-};
-
-const buildContractFilename = (contract, mimeType = 'application/pdf') => {
-  const reference =
-    contract?.orderId ||
-    contract?.raw?.orderId ||
-    contract?.raw?.contractId ||
-    contract?.id ||
-    'contract';
-  const extension = getExtensionFromMime(mimeType) || 'pdf';
-  return `sales-contract-${sanitizeFilenameSegment(reference)}.${extension}`;
-};
-
-const createObjectUrl = (blob) => {
-  if (typeof URL === 'undefined' || typeof URL.createObjectURL !== 'function') {
-    throw new Error('Object URL API is not available.');
-  }
-  return URL.createObjectURL(blob);
-};
-
-const revokeObjectUrl = (objectUrl) => {
-  if (!objectUrl) return;
-  if (typeof URL !== 'undefined' && typeof URL.revokeObjectURL === 'function') {
-    URL.revokeObjectURL(objectUrl);
-  }
-};
-
-// ----------------------
-// generateContractPdf (unchanged, returns data URI string)
-// ----------------------
-async function generateContractPdf({
-  order,
-  customer,
-  dealer,
-  dealerName,
-  staff,
-  notes,
-  signatureUrl,
-  contractDate,
-}) {
-  if (!order || !customer) {
-    throw new Error('Missing order or customer information for contract PDF.');
-  }
-
-  const doc = new jsPDF({ unit: 'mm', format: 'a4' });
-  doc.setProperties({
-    title: `Sales Contract #${order.orderId || order.id || ''}`,
-    subject: 'Electric Vehicle Sales Contract',
-  });
-  doc.setFont('helvetica', 'normal');
-
-  const pageWidth = doc.internal.pageSize.getWidth();
-  let cursorY = 25;
-  const marginX = 20;
-
-  const moveCursor = (spacing = 8) => {
-    cursorY += spacing;
-    if (cursorY > 280) {
-      doc.addPage();
-      cursorY = 20;
-      doc.setFontSize(12);
-    }
-  };
-
-  const addSectionTitle = (title) => {
-    doc.setFont('helvetica', 'bold');
-    doc.setFontSize(13);
-    doc.text(title, marginX, cursorY);
-    moveCursor(6);
-    doc.setFont('helvetica', 'normal');
-    doc.setFontSize(11);
-  };
-
-  const addText = (text, indent = 0, spacing = 7) => {
-    const x = marginX + indent;
-    const lines = Array.isArray(text) ? text : [text];
-    lines.forEach((line) => {
-      const wrapped = doc.splitTextToSize(line, pageWidth - x - 20);
-      wrapped.forEach((wrappedLine) => {
-        doc.text(wrappedLine, x, cursorY);
-        moveCursor(spacing);
-      });
-    });
-  };
-
-  doc.setFontSize(18);
-  doc.text('Electric Vehicle Sales Contract', pageWidth / 2, cursorY, {
-    align: 'center',
-  });
-  doc.setFontSize(12);
-  moveCursor(12);
-
-  addSectionTitle('General Information');
-  const contractDateText = contractDate
-    ? new Date(contractDate).toLocaleDateString('vi-VN')
-    : new Date().toLocaleDateString('vi-VN');
-  addText(`Contract Date: ${contractDateText}`);
-  if (dealerName) addText(`Dealer: ${dealerName}`);
-  addText(`Dealer ID: ${dealer || 'N/A'}`);
-  addText(`Order ID: ${order.orderId || order.id || 'N/A'}`);
-  moveCursor(2);
-
-  addSectionTitle('Customer Information');
-  addText(`Name: ${customer.fullName || customer.name || customer.customerName || 'N/A'}`);
-  if (customer.email) addText(`Email: ${customer.email}`);
-  if (customer.phone || customer.phoneNumber) {
-    addText(`Phone: ${customer.phone || customer.phoneNumber}`);
-  }
-  const customerAddress =
-    customer.address ||
-    [customer.addressLine1, customer.addressLine2, customer.city, customer.province]
-      .filter(Boolean)
-      .join(', ');
-  if (customerAddress) {
-    addText(`Address: ${customerAddress}`);
-  }
-  moveCursor(2);
-
-  addSectionTitle('Order Summary');
-  const orderDate = order.orderDate ? new Date(order.orderDate).toLocaleDateString('vi-VN') : null;
-  if (orderDate) addText(`Order Date: ${orderDate}`);
-  if (order.deliveryDate) {
-    addText(`Expected Delivery: ${new Date(order.deliveryDate).toLocaleDateString('vi-VN')}`);
-  }
-  if (order.paymentMethod || order.payment_method) {
-    addText(`Payment Method: ${order.paymentMethod || order.payment_method}`);
-  }
-  moveCursor(2);
-
-  addSectionTitle('Vehicle Details');
-  const orderItems = order.orderDetails || order.orderDetailDTOList || order.items || [];
-
-  if (Array.isArray(orderItems) && orderItems.length > 0) {
-    const columnHeaders = ['Vehicle', 'Qty', 'Unit Price', 'Line Total'];
-    const columnWidths = [80, 20, 35, 35];
-
-    doc.setFont('helvetica', 'bold');
-    columnHeaders.reduce((currentX, header, index) => {
-      doc.text(header, marginX + currentX, cursorY);
-      return currentX + columnWidths[index];
-    }, 0);
-    moveCursor(6);
-    doc.setFont('helvetica', 'normal');
-
-    orderItems.forEach((detail) => {
-      const vehicleInfo = detail.vehicle || detail.vehicleInfo || {};
-      const vehicleName =
-        detail.vehicleName ||
-        vehicleInfo.name ||
-        vehicleInfo.modelName ||
-        `Vehicle #${detail.vehicleId || ''}`;
-      const quantity = detail.quantity || detail.qty || 1;
-      const unitPriceRaw =
-        detail.unitPrice !== undefined && detail.unitPrice !== null
-          ? detail.unitPrice
-          : detail.price !== undefined && detail.price !== null
-            ? detail.price
-            : detail.listedPrice || 0;
-      const unitPrice = Number(unitPriceRaw || 0);
-      const lineTotalValue =
-        detail.totalAmount !== undefined && detail.totalAmount !== null
-          ? Number(detail.totalAmount)
-          : unitPrice * quantity;
-      const vehicleLines = doc.splitTextToSize(vehicleName, columnWidths[0] - 2);
-      const requiredHeight = Math.max(vehicleLines.length * 6, 8);
-
-      vehicleLines.forEach((line, i) => {
-        doc.text(line, marginX, cursorY + i * 6);
-      });
-      doc.text(String(quantity), marginX + columnWidths[0], cursorY + 4);
-      doc.text(formatCurrency(unitPrice), marginX + columnWidths[0] + columnWidths[1], cursorY + 4);
-      doc.text(formatCurrency(lineTotalValue), marginX + columnWidths[0] + columnWidths[1] + columnWidths[2], cursorY + 4);
-      moveCursor(requiredHeight + 2);
-    });
-  } else {
-    addText('No detailed vehicle information available.', 4, 8);
-  }
-
-  const totalAmount =
-    order.totalAmount ||
-    order.amount ||
-    order.finalTotal ||
-    order.summaryTotal ||
-    0;
-  const paidAmount = order.paidAmount || 0;
-  const remainingAmount =
-    order.remainingAmount !== undefined ? order.remainingAmount : Math.max(totalAmount - paidAmount, 0);
-
-  moveCursor(2);
-  addSectionTitle('Financial Summary');
-  addText(`Total Amount: ${formatCurrency(totalAmount)}`, 4);
-  addText(`Paid Amount: ${formatCurrency(paidAmount)}`, 4);
-  addText(`Outstanding Balance: ${formatCurrency(remainingAmount)}`, 4);
-  if (order.depositAmount) {
-    addText(`Deposit: ${formatCurrency(order.depositAmount)}`, 4);
-  }
-  if (order.paymentStatus) {
-    addText(`Payment Status: ${order.paymentStatus}`, 4);
-  }
-  if (notes) {
-    moveCursor(2);
-    addSectionTitle('Additional Notes');
-    addText(notes, 4);
-  }
-
-  moveCursor(2);
-  addSectionTitle('Terms & Conditions');
-  const terms = [
-    'The customer agrees to the purchase details as outlined in this contract.',
-    'Payment obligations must be fulfilled according to the agreed schedule. Late payments may incur additional charges.',
-    'Vehicle delivery will be coordinated by the dealer upon confirmation of payment and completion of necessary paperwork.',
-    'Warranty and after-sales services are provided according to manufacturer and dealer policies.',
-    'Any amendments to this contract must be confirmed in writing and signed by both parties.',
-  ];
-  terms.forEach((term, idx) => addText(`${idx + 1}. ${term}`, 4));
-
-  moveCursor(6);
-  addSectionTitle('Signatures');
-  const signatureBlockHeight = 30;
-  const sectionWidth = (pageWidth - marginX * 2) / 2;
-
-  doc.setFont('helvetica', 'bold');
-  doc.text('Dealer Representative', marginX, cursorY);
-  doc.text('Customer', marginX + sectionWidth, cursorY);
-  moveCursor(8);
-  doc.setFont('helvetica', 'normal');
-
-  const staffName = staff?.name || 'Authorized Representative';
-  const staffContact = [staff?.email, staff?.phone].filter(Boolean).join(' • ');
-  doc.text(staffName, marginX, cursorY + signatureBlockHeight - 12);
-  if (staffContact) {
-    doc.setFont('helvetica', 'italic');
-    doc.text(staffContact, marginX, cursorY + signatureBlockHeight - 6);
-    doc.setFont('helvetica', 'normal');
-  }
-
-  const customerName = customer.fullName || customer.name || customer.customerName || 'Customer';
-  doc.text(customerName, marginX + sectionWidth, cursorY + signatureBlockHeight - 6);
-
-  if (signatureUrl) {
-    try {
-      const signatureDataUrl = await getBase64FromUrl(signatureUrl);
-      doc.addImage(signatureDataUrl, 'PNG', marginX + sectionWidth, cursorY, Math.min(sectionWidth - 10, 60), signatureBlockHeight - 12);
-    } catch (e) {
-      console.warn('Failed to load signature image from URL:', signatureUrl, e);
-      doc.setFont('helvetica', 'italic');
-      doc.text('(Signature load failed)', marginX + sectionWidth, cursorY + 10);
-      doc.setFont('helvetica', 'normal');
-    }
-  } else {
-    doc.setFont('helvetica', 'italic');
-    doc.text('(Signature on file)', marginX + sectionWidth, cursorY + 10);
-    doc.setFont('helvetica', 'normal');
-  }
-  moveCursor(signatureBlockHeight + 4);
-
-  doc.setFont('helvetica', 'italic');
-  doc.setFontSize(10);
-  addText('This contract is generated electronically. Please keep a copy for your records.', 0, 6);
-  doc.setFont('helvetica', 'normal');
-  doc.setFontSize(11);
-
-  return doc.output('datauristring');
-}
 
 // ----------------------
 // SalesContracts component
@@ -620,15 +215,6 @@ const SalesContracts = ({ user }) => {
     'Authorized Representative';
   const dealerDisplayName = user?.dealerName || user?.dealer?.name || (dealerId ? `Dealer #${dealerId}` : '');
 
-  const previewObjectUrlRef = useRef(null);
-
-  const releasePreviewObjectUrl = () => {
-    if (previewObjectUrlRef.current) {
-      revokeObjectUrl(previewObjectUrlRef.current);
-      previewObjectUrlRef.current = null;
-    }
-  };
-
   const normalizedRole = user?.role?.toUpperCase().replace(/-/g, '_');
   const isDealerRole = normalizedRole === 'DEALER_MANAGER' || normalizedRole === 'DEALER_STAFF';
 
@@ -660,18 +246,11 @@ const SalesContracts = ({ user }) => {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [normalizedRole, dealerId]);
 
-  useEffect(() => {
-    return () => {
-      releasePreviewObjectUrl();
-    };
-  }, []);
-
   const resetForm = () => {
     setFormData({ ...defaultFormState, dealerId: dealerId ? String(dealerId) : '' });
     setContractImageUrl('');
     setContractImageFile(null);
     setImageError('');
-    releasePreviewObjectUrl();
     setDocumentPreviewUrl('');
     setDocumentPreviewMime('');
     setDocumentPreviewLoading(false);
@@ -722,7 +301,7 @@ const SalesContracts = ({ user }) => {
       const customerId = Number(formData.customerId);
 
       let imageUrl = contractImageUrl;
-      
+
       // Nếu có file mới, upload lên Cloudinary
       if (contractImageFile) {
         setUploadingImage(true);
@@ -803,100 +382,16 @@ const SalesContracts = ({ user }) => {
     }
   };
 
-
-  // --------------- prepareContractDocument & preview/download ---------------
-  const prepareContractDocument = async (contract) => {
-    if (!contract) throw new Error('Contract data is missing.');
-    const existingMeta = contract.documentMeta || parseContractDocumentMeta(contract.documentImage);
-
-    let documentUrl = existingMeta?.cachedPdfUrl || existingMeta?.pdfUrl || null;
-
-    if (!documentUrl && contract.documentImage && typeof contract.documentImage === 'string' && !contract.documentImage.startsWith('{')) {
-      documentUrl = contract.documentImage;
-    }
-
-    if (documentUrl && typeof documentUrl === 'string' && !isDataUri(documentUrl)) {
-      return {
-        url: documentUrl,
-        mime: inferMimeFromUrl(documentUrl) || 'image/png',
-        meta: existingMeta || null,
-      };
-    }
-    if (isDataUri(documentUrl)) {
-      return {
-        url: documentUrl,
-        mime: extractMimeFromDataUri(documentUrl) || 'application/pdf',
-        meta: existingMeta || null,
-      };
-    }
-
-    // regenerate PDF if not found
-    const contractId = contract.raw?.contractId || contract.raw?.id || contract.id;
-    if (!contractId || !contract.customerId) {
-      throw new Error('Cannot regenerate contract: missing order/customer info.');
-    }
-
-    let order = existingMeta?.orderSnapshot || null;
-    if (contract.orderId && !order) {
-      try {
-        order = await ordersAPI.getById(contract.orderId);
-      } catch (error) {
-        console.warn('Unable to fetch order by ID:', error);
-      }
-    }
-    if (!order) order = await contractsAPI.getOrderByContract(contractId);
-
-    order = await enrichOrderWithVehicles(order);
-    const customer = existingMeta?.customerSnapshot || (await customersAPI.getById(contract.customerId));
-    const signatureSource = existingMeta?.signatureUrl || contract.signatureUrl || null;
-
-    const dataUri = await generateContractPdf({
-      order,
-      customer,
-      dealer: contract.dealerId || dealerId,
-      dealerName: dealerDisplayName,
-      staff: {
-        name: existingMeta?.staffName || staffDisplayName,
-        email: user?.email,
-        phone: user?.phoneNumber || user?.phone,
-      },
-      notes: existingMeta?.notes || contract.notes || '',
-      signatureUrl: signatureSource,
-      contractDate: contract.signedDate || contract.createdAt || existingMeta?.generatedAt,
-    });
-
-    const file = dataUriToFile(dataUri, `contract-regenerated-${contractId}.pdf`);
-    if (!file) throw new Error('Failed to regenerate PDF file.');
-
-    // Upload regenerated files (raw + image thumbnail)
-    const uploadRaw = await uploadFile(file, 'raw');
-    const uploadThumb = await uploadFile(file, 'image');
-
-    // Optionally, could update contract meta via API here to persist regenerated urls (left to you)
-    return {
-      url: uploadThumb.secure_url,
-      mime: inferMimeFromUrl(uploadThumb.secure_url) || 'image/png',
-      meta: {
-        ...existingMeta,
-        cachedPdfUrl: uploadThumb.secure_url,
-        cachedPdfPublicId: uploadThumb.public_id,
-        pdfUrl: uploadRaw.secure_url,
-        pdfPublicId: uploadRaw.public_id,
-      },
-    };
-  };
-
   const handlePreviewContractDocument = async (contract) => {
     try {
       setShowDocumentModal(true);
       setDocumentPreviewLoading(true);
       setDocumentPreviewUrl('');
       setDocumentPreviewMime('');
-      releasePreviewObjectUrl();
 
       // Lấy image URL từ contract
       let imageUrl = contract.documentImage || '';
-      
+
       // Nếu là JSON meta (format cũ), parse để lấy URL
       if (imageUrl && imageUrl.startsWith('{')) {
         try {
@@ -916,7 +411,6 @@ const SalesContracts = ({ user }) => {
       setDocumentPreviewMime(mimeType);
       setDocumentPreviewUrl(imageUrl);
     } catch (error) {
-      releasePreviewObjectUrl();
       console.error('Error loading contract image:', error);
       showErrorToast(error.message || 'Không thể tải hình ảnh hợp đồng.');
       setShowDocumentModal(false);
@@ -927,7 +421,6 @@ const SalesContracts = ({ user }) => {
 
 
   const handleCloseDocumentPreview = () => {
-    releasePreviewObjectUrl();
     setShowDocumentModal(false);
     setDocumentPreviewUrl('');
     setDocumentPreviewMime('');
@@ -1045,7 +538,7 @@ const SalesContracts = ({ user }) => {
                       <td style={{ ...tableCellStyle, textAlign: 'center' }}>
                         <div style={{ display: 'flex', gap: '8px', justifyContent: 'center', flexWrap: 'wrap' }}>
                           <button className="btn btn-outline" style={{ padding: '6px 10px', fontSize: '12px' }} onClick={() => handlePreviewContractDocument(contract)}>
-                            <i className="bx bx-show"></i> Xem
+                            <i className="bx bx-show"></i> View
                           </button>
                           <button className="btn btn-outline" style={{ padding: '6px 10px', fontSize: '12px' }} onClick={() => handleViewOrder(contract)}>
                             <i className="bx bx-spreadsheet"></i> Order
@@ -1285,17 +778,17 @@ const SalesContracts = ({ user }) => {
               </div>
             ) : documentPreviewUrl ? (
               <div style={{ display: 'flex', flexDirection: 'column', gap: '16px', height: 'calc(80vh - 80px)', overflow: 'auto' }}>
-                <img 
-                  src={documentPreviewUrl} 
-                  alt="Hình ảnh hợp đồng" 
-                  style={{ 
-                    width: '100%', 
-                    maxHeight: '100%', 
-                    objectFit: 'contain', 
-                    borderRadius: 'var(--radius)', 
+                <img
+                  src={documentPreviewUrl}
+                  alt="Hình ảnh hợp đồng"
+                  style={{
+                    width: '100%',
+                    maxHeight: '100%',
+                    objectFit: 'contain',
+                    borderRadius: 'var(--radius)',
                     border: '1px solid var(--color-border)',
                     background: 'var(--color-bg)'
-                  }} 
+                  }}
                 />
               </div>
             ) : (

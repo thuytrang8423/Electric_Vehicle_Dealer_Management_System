@@ -399,9 +399,10 @@ import { inventoryAPI } from '../../utils/api/inventoryAPI';
             return status || 'Unknown';
         };
 
-        const extractQuoteTimestamp = (quote) => {
-            if (!quote) return 0;
+        const resolveQuoteDateTimestamp = (quote) => {
+            if (!quote) return null;
             const candidates = [
+                quote.approvedAt,
                 quote.createdDate,
                 quote.createdAt,
                 quote.created_on,
@@ -418,13 +419,31 @@ import { inventoryAPI } from '../../utils/api/inventoryAPI';
                     return time;
                 }
             }
-            const numericFallback = Number(quote.quoteId ?? quote.id ?? 0);
-            return Number.isNaN(numericFallback) ? 0 : numericFallback;
+            return null;
+        };
+
+        const getQuoteNumericId = (quote) => {
+            if (!quote) return 0;
+            const rawId = quote.quoteId ?? quote.id;
+            const numeric = Number(rawId);
+            return Number.isNaN(numeric) ? 0 : numeric;
+        };
+
+        const formatQuoteDate = (quote) => {
+            const timestamp = resolveQuoteDateTimestamp(quote);
+            if (!timestamp) return 'N/A';
+            return new Date(timestamp).toLocaleString('vi-VN');
         };
 
         const sortQuotesByNewest = (list = []) => {
             if (!Array.isArray(list)) return [];
-            return [...list].sort((a, b) => extractQuoteTimestamp(b) - extractQuoteTimestamp(a));
+            return [...list].sort((a, b) => {
+                const idDiff = getQuoteNumericId(b) - getQuoteNumericId(a);
+                if (idDiff !== 0) return idDiff;
+                const timeB = resolveQuoteDateTimestamp(b) ?? 0;
+                const timeA = resolveQuoteDateTimestamp(a) ?? 0;
+                return timeB - timeA;
+            });
         };
 
         const normalizeQuotes = (data) =>
@@ -962,7 +981,6 @@ import { inventoryAPI } from '../../utils/api/inventoryAPI';
                                     <th style={{ padding: '12px', textAlign: 'left', fontSize: '14px', fontWeight: '600', color: 'var(--color-text-muted)' }}>Vehicle</th>
                                     <th style={{ padding: '12px', textAlign: 'right', fontSize: '14px', fontWeight: '600', color: 'var(--color-text-muted)' }}>Total</th>
                                     <th style={{ padding: '12px', textAlign: 'center', fontSize: '14px', fontWeight: '600', color: 'var(--color-text-muted)' }}>Status</th>
-                                    <th style={{ padding: '12px', textAlign: 'left', fontSize: '14px', fontWeight: '600', color: 'var(--color-text-muted)' }}>Created</th>
                                     <th style={{ padding: '12px', textAlign: 'center', fontSize: '14px', fontWeight: '600', color: 'var(--color-text-muted)' }}>Actions</th>
                                 </tr>
                             </thead>
@@ -973,11 +991,15 @@ import { inventoryAPI } from '../../utils/api/inventoryAPI';
                                     const totalAmount = resolveTotalAmount(quote);
                                     const statusColor = getStatusColor(quote.status, quote.approvalStatus);
                                     const statusLabel = getStatusLabel(quote.status, quote.approvalStatus, quote.creatorRole);
+                                    const createdDisplay = formatQuoteDate(quote);
                                     
                                     return (
                                         <tr key={quote.quoteId || quote.id} style={{ borderBottom: '1px solid var(--color-border)' }}>
                                             <td style={{ padding: '12px', fontSize: '14px', color: 'var(--color-text)', fontWeight: '600' }}>
-                                                #{quote.quoteId || quote.id}
+                                                <div>#{quote.quoteId || quote.id}</div>
+                                                <div style={{ fontSize: '12px', color: 'var(--color-text-muted)', fontWeight: 400 }}>
+                                                    {createdDisplay}
+                                                </div>
                                             </td>
                                             
                                             {/* Ẩn ô Customer cho DEALER_MANAGER khi ở tab My Quotes */}
@@ -1002,9 +1024,6 @@ import { inventoryAPI } from '../../utils/api/inventoryAPI';
                                                 }}>
                                                     {statusLabel}
                                                 </div>
-                                            </td>
-                                            <td style={{ padding: '12px', fontSize: '14px', color: 'var(--color-text-muted)' }}>
-                                                {quote.createdDate ? new Date(quote.createdDate).toLocaleDateString() : 'N/A'}
                                             </td>
                                             <td style={{ padding: '12px', textAlign: 'center' }}>
                                                 <div style={{ display: 'flex', gap: '8px', justifyContent: 'center', flexWrap: 'wrap' }}>

@@ -1,136 +1,176 @@
-import React, { useMemo, useState } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { installmentsAPI } from '../../utils/api/installmentsAPI';
+import { ordersAPI } from '../../utils/api/ordersAPI';
 import { showErrorToast, showSuccessToast } from '../../utils/toast';
 import { handleAPIError } from '../../utils/apiConfig';
 import 'boxicons/css/boxicons.min.css';
 
 const InstallmentManagement = ({ user }) => {
-  const [previewForm, setPreviewForm] = useState({
-    paymentId: '',
-    totalAmount: '',
+  // State for Orders List
+  const [orders, setOrders] = useState([]);
+  const [loadingOrders, setLoadingOrders] = useState(false);
+  const [searchTerm, setSearchTerm] = useState('');
+  const [selectedOrder, setSelectedOrder] = useState(null);
+
+  // State for Installment Logic
+  const [schedule, setSchedule] = useState([]);
+  const [loadingSchedule, setLoadingSchedule] = useState(false);
+  const [payingScheduleId, setPayingScheduleId] = useState(null);
+
+  // State for Create Plan Form
+  const [createForm, setCreateForm] = useState({
     months: 12,
-    annualInterestRate: 0,
     firstDueDate: '',
   });
   const [previewResult, setPreviewResult] = useState(null);
-  const [previewLoading, setPreviewLoading] = useState(false);
+  const [loadingPreview, setLoadingPreview] = useState(false);
+  const [loadingCreate, setLoadingCreate] = useState(false);
 
-  const [generateLoading, setGenerateLoading] = useState(false);
-  const [generateOrderId, setGenerateOrderId] = useState('');
-
-  const [scheduleOrderId, setScheduleOrderId] = useState('');
-  const [scheduleLoading, setScheduleLoading] = useState(false);
-  const [schedule, setSchedule] = useState([]);
-  const [payingScheduleId, setPayingScheduleId] = useState(null);
-
+  // Permissions
   const canManage = useMemo(() => {
     const role = (user?.role || '').toUpperCase();
     return role === 'DEALER_MANAGER' || role === 'ADMIN';
   }, [user]);
 
-  const handleInputChange = (field, value) => {
-    setPreviewForm((prev) => ({
-      ...prev,
-      [field]: value,
-    }));
-  };
-
-  const buildRequest = () => ({
-    totalAmount: previewForm.totalAmount ? Number(previewForm.totalAmount) : 0,
-    months: previewForm.months ? Number(previewForm.months) : 0,
-    annualInterestRate: previewForm.annualInterestRate ? Number(previewForm.annualInterestRate) : 0,
-    firstDueDate: previewForm.firstDueDate || null,
-  });
-
-  const handlePreview = async (event) => {
-    event.preventDefault();
-    if (!previewForm.totalAmount || !previewForm.months || !previewForm.firstDueDate) {
-      showErrorToast('Please enter Total Amount, Months, and First Due Date.');
-      return;
+  // Fetch Orders on Mount
+  useEffect(() => {
+    if (canManage) {
+      fetchOrders();
     }
+  }, [canManage]);
 
+  const fetchOrders = async () => {
     try {
-      setPreviewLoading(true);
-      // SỬA: Dùng preview API với request object (không có paymentId)
-      const request = buildRequest();
-      const result = await installmentsAPI.preview(request);
-      setPreviewResult(result);
-      showSuccessToast('Installment preview created successfully.');
+      setLoadingOrders(true);
+      // In a real app, you might want to filter by dealer if the user is a dealer manager
+      // For now, we fetch all and filter client-side or assume API handles it
+      const data = await ordersAPI.getAll();
+      // Filter for eligible orders (e.g., not cancelled)
+      const eligibleOrders = Array.isArray(data) ? data.filter(o => o.status !== 'CANCELLED') : [];
+      setOrders(eligibleOrders);
     } catch (error) {
-      console.error('Error previewing installment plan:', error);
-      showErrorToast(handleAPIError(error));
-      setPreviewResult(null);
+      console.error('Error fetching orders:', error);
+      showErrorToast('Failed to load orders.');
     } finally {
-      setPreviewLoading(false);
+      setLoadingOrders(false);
     }
   };
 
-  const handleGenerate = async () => {
-    if (!generateOrderId) {
-      showErrorToast('Please enter the Order ID that needs an installment plan.');
-      return;
-    }
-    if (!previewForm.totalAmount || !previewForm.months || !previewForm.firstDueDate) {
-      showErrorToast('Please complete the plan information before generating.');
-      return;
-    }
+  // Filter Orders
+  const filteredOrders = useMemo(() => {
+    if (!searchTerm) return orders;
+    const lowerTerm = searchTerm.toLowerCase();
+    return orders.filter(o =>
+      String(o.orderId || o.id).includes(lowerTerm) ||
+      (o.customerName || '').toLowerCase().includes(lowerTerm) ||
+      (o.status || '').toLowerCase().includes(lowerTerm)
+    );
+  }, [orders, searchTerm]);
 
+  // Handle Order Selection
+  const handleSelectOrder = async (order) => {
+    setSelectedOrder(order);
+    setSchedule([]);
+    setPreviewResult(null);
+    setCreateForm({
+      months: 12,
+      firstDueDate: new Date().toISOString().split('T')[0] // Default to today
+    });
+
+    // Fetch existing schedule
+    const orderId = order.orderId || order.id;
     try {
-      setGenerateLoading(true);
-      // SỬA: Dùng generate API với orderId và request object
-      const request = buildRequest();
-      await installmentsAPI.generate(Number(generateOrderId), request);
-      showSuccessToast(`Installment schedule for Order #${generateOrderId} created successfully.`);
-      if (scheduleOrderId === generateOrderId) {
-        await handleFetchSchedule();
+      setLoadingSchedule(true);
+      const data = await installmentsAPI.getByOrder(orderId);
+      if (Array.isArray(data) && data.length > 0) {
+        setSchedule(data);
+      } else {
+        setSchedule([]);
       }
     } catch (error) {
-      console.error('Error generating installment plan:', error);
-      showErrorToast(handleAPIError(error));
-    } finally {
-      setGenerateLoading(false);
-    }
-  };
-
-  const handleFetchSchedule = async (event) => {
-    if (event) {
-      event.preventDefault();
-    }
-    if (!scheduleOrderId) {
-      showErrorToast('Please enter an Order ID to fetch the schedule.');
-      return;
-    }
-
-    try {
-      setScheduleLoading(true);
-      // SỬA: Dùng getByOrder API
-      const data = await installmentsAPI.getByOrder(Number(scheduleOrderId));
-      setSchedule(Array.isArray(data) ? data : []);
-      showSuccessToast(`Loaded installment schedule for Order #${scheduleOrderId}.`);
-    } catch (error) {
-      console.error('Error fetching installment schedule:', error);
-      showErrorToast(handleAPIError(error));
+      console.error('Error fetching schedule:', error);
+      // Don't show error toast here, just assume no schedule
       setSchedule([]);
     } finally {
-      setScheduleLoading(false);
+      setLoadingSchedule(false);
     }
   };
 
-  const handlePaySchedule = async (item) => {
-    if (!item?.id) {
-      showErrorToast('Unable to detect installment information.');
+  // Handle Preview
+  const handlePreview = async () => {
+    if (!selectedOrder) return;
+
+    // Calculate remaining amount
+    const totalAmount = selectedOrder.totalAmount || selectedOrder.amount || 0;
+    const paidAmount = selectedOrder.paidAmount || 0;
+    const remaining = Math.max(totalAmount - paidAmount, 0);
+
+    if (remaining <= 0) {
+      showErrorToast('This order is fully paid.');
       return;
     }
 
-    const scheduleId = item.id;
+    const request = {
+      totalAmount: remaining,
+      months: Number(createForm.months),
+      annualInterestRate: 0, // Fixed to 0
+      firstDueDate: createForm.firstDueDate
+    };
+
     try {
-      setPayingScheduleId(scheduleId);
-      // SỬA: Dùng payInstallment với scheduleId
-      await installmentsAPI.payInstallment(scheduleId);
-      showSuccessToast(`Installment #${item.installmentNumber} marked as PAID.`);
-      await handleFetchSchedule();
+      setLoadingPreview(true);
+      const result = await installmentsAPI.preview(request);
+      setPreviewResult(result);
     } catch (error) {
-      console.error('Error paying installment schedule:', error);
+      console.error('Error previewing:', error);
+      showErrorToast(handleAPIError(error));
+    } finally {
+      setLoadingPreview(false);
+    }
+  };
+
+  // Handle Create Plan
+  const handleCreatePlan = async () => {
+    if (!selectedOrder || !previewResult) return;
+
+    const orderId = selectedOrder.orderId || selectedOrder.id;
+    const request = {
+      totalAmount: previewResult.totalAmount,
+      months: Number(createForm.months),
+      annualInterestRate: 0,
+      firstDueDate: createForm.firstDueDate
+    };
+
+    try {
+      setLoadingCreate(true);
+      await installmentsAPI.generate(orderId, request);
+      showSuccessToast('Installment plan created successfully!');
+      // Refresh schedule
+      const data = await installmentsAPI.getByOrder(orderId);
+      setSchedule(data);
+    } catch (error) {
+      console.error('Error creating plan:', error);
+      showErrorToast(handleAPIError(error));
+    } finally {
+      setLoadingCreate(false);
+    }
+  };
+
+  // Handle Pay Installment
+  const handlePayInstallment = async (item) => {
+    if (!window.confirm(`Confirm marking installment #${item.installmentNumber} as PAID?`)) return;
+
+    try {
+      setPayingScheduleId(item.id);
+      await installmentsAPI.payInstallment(item.id);
+      showSuccessToast('Installment marked as paid.');
+
+      // Refresh schedule
+      const orderId = selectedOrder.orderId || selectedOrder.id;
+      const data = await installmentsAPI.getByOrder(orderId);
+      setSchedule(data);
+    } catch (error) {
+      console.error('Error paying installment:', error);
       showErrorToast(handleAPIError(error));
     } finally {
       setPayingScheduleId(null);
@@ -142,213 +182,259 @@ const InstallmentManagement = ({ user }) => {
       <div className="main">
         <div className="card" style={{ textAlign: 'center', padding: '48px' }}>
           <i className="bx bx-error" style={{ fontSize: '48px', color: 'var(--color-warning)' }}></i>
-          <h3 style={{ marginTop: '16px' }}>You don’t have permission to access this feature.</h3>
-          <p style={{ color: 'var(--color-text-muted)', marginTop: '8px' }}>
-            Only Dealer Managers or Administrators can manage installment plans.
-          </p>
+          <h3 style={{ marginTop: '16px' }}>Access Denied</h3>
+          <p style={{ color: 'var(--color-text-muted)' }}>Only Managers can access this page.</p>
         </div>
       </div>
     );
   }
 
-  const previewSchedule = previewResult?.schedule || [];
-  const hasPreviewSchedule = previewSchedule.length > 0;
-  const hasSchedule = schedule.length > 0;
-
   return (
-    <div className="main">
-      <div className="card">
-        <h2 style={{ marginBottom: '24px' }}>Installment Management</h2>
+    <div className="main" style={{ height: 'calc(100vh - 100px)', display: 'flex', flexDirection: 'column' }}>
+      <h2 style={{ marginBottom: '20px' }}>Installment Management</h2>
 
-        <form onSubmit={handlePreview} style={sectionStyle}>
-          <h3 style={sectionTitleStyle}>1. Preview Installment Plan</h3>
-          <div style={gridStyle}>
-            <div>
-              <label style={labelStyle}>Payment ID (optional)</label>
+      <div style={{ display: 'flex', gap: '24px', flex: 1, overflow: 'hidden' }}>
+        {/* LEFT PANEL: ORDER LIST */}
+        <div className="card" style={{ width: '350px', display: 'flex', flexDirection: 'column', padding: '0' }}>
+          <div style={{ padding: '16px', borderBottom: '1px solid var(--color-border)' }}>
+            <div style={{ position: 'relative' }}>
+              <i className="bx bx-search" style={{ position: 'absolute', left: '12px', top: '50%', transform: 'translateY(-50%)', color: 'var(--color-text-muted)' }}></i>
               <input
-                type="number"
-                value={previewForm.paymentId}
-                onChange={(e) => handleInputChange('paymentId', e.target.value)}
-                style={inputStyle}
-                min="0"
-              />
-            </div>
-            <div>
-              <label style={labelStyle}>Total amount *</label>
-              <input
-                type="number"
-                min="0"
-                required
-                value={previewForm.totalAmount}
-                onChange={(e) => handleInputChange('totalAmount', e.target.value)}
-                style={inputStyle}
-              />
-            </div>
-            <div>
-              <label style={labelStyle}>Months *</label>
-              <input
-                type="number"
-                min="1"
-                required
-                value={previewForm.months}
-                onChange={(e) => handleInputChange('months', e.target.value)}
-                style={inputStyle}
-              />
-            </div>
-            <div>
-              <label style={labelStyle}>Annual interest (%)</label>
-              <input
-                type="number"
-                min="0"
-                value={previewForm.annualInterestRate}
-                onChange={(e) => handleInputChange('annualInterestRate', e.target.value)}
-                style={inputStyle}
-              />
-            </div>
-            <div>
-              <label style={labelStyle}>First due date *</label>
-              <input
-                type="date"
-                required
-                value={previewForm.firstDueDate}
-                onChange={(e) => handleInputChange('firstDueDate', e.target.value)}
-                style={inputStyle}
+                type="text"
+                placeholder="Search Order ID, Customer..."
+                value={searchTerm}
+                onChange={(e) => setSearchTerm(e.target.value)}
+                style={{
+                  width: '100%',
+                  padding: '10px 12px 10px 36px',
+                  borderRadius: 'var(--radius)',
+                  border: '1px solid var(--color-border)',
+                  background: 'var(--color-bg)',
+                  color: 'var(--color-text)'
+                }}
               />
             </div>
           </div>
-          <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '12px', marginTop: '16px' }}>
-            <button type="submit" className="btn btn-primary" disabled={previewLoading}>
-              {previewLoading ? (
-                <>
-                  <i className="bx bx-loader-alt bx-spin" style={{ marginRight: '6px' }}></i>
-                  Calculating...
-                </>
-              ) : (
-                <>
-                  <i className="bx bx-show" style={{ marginRight: '6px' }}></i>
-                  Preview plan
-                </>
-              )}
-            </button>
-          </div>
-        </form>
 
-        {previewResult && (
-          <div style={sectionStyle}>
-            <h3 style={sectionTitleStyle}>Preview result</h3>
-            <div style={{ display: 'grid', gap: '12px', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', marginBottom: '16px' }}>
-              <InfoCard label="Principal total" value={previewResult.totalAmount} prefix="$" />
-              <InfoCard label="VAT" value={previewResult.vatAmount} prefix="$" />
-              <InfoCard label="Interest" value={previewResult.interestAmount} prefix="$" />
-              <InfoCard label="Total payable" value={previewResult.totalPayable} prefix="$" highlight />
-              <InfoCard label="Months" value={previewResult.months} />
-              <InfoCard label="Monthly payment" value={previewResult.monthlyPayment} prefix="$" />
-            </div>
-
-            {hasPreviewSchedule ? (
-              <ScheduleTable
-                data={previewSchedule}
-                actionColumn={false}
-                caption="Schedule details (preview)"
-              />
+          <div style={{ flex: 1, overflowY: 'auto' }}>
+            {loadingOrders ? (
+              <div style={{ padding: '20px', textAlign: 'center', color: 'var(--color-text-muted)' }}>
+                <i className="bx bx-loader-alt bx-spin"></i> Loading...
+              </div>
+            ) : filteredOrders.length === 0 ? (
+              <div style={{ padding: '20px', textAlign: 'center', color: 'var(--color-text-muted)' }}>
+                No orders found.
+              </div>
             ) : (
-              <div style={emptyStateStyle}>No installment schedule was generated for this preview.</div>
+              <div style={{ display: 'flex', flexDirection: 'column' }}>
+                {filteredOrders.map(order => {
+                  const isSelected = selectedOrder && (selectedOrder.orderId || selectedOrder.id) === (order.orderId || order.id);
+                  return (
+                    <div
+                      key={order.orderId || order.id}
+                      onClick={() => handleSelectOrder(order)}
+                      style={{
+                        padding: '16px',
+                        borderBottom: '1px solid var(--color-border)',
+                        cursor: 'pointer',
+                        background: isSelected ? 'rgba(var(--primary-rgb), 0.1)' : 'transparent',
+                        borderLeft: isSelected ? '4px solid var(--color-primary)' : '4px solid transparent'
+                      }}
+                    >
+                      <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '4px' }}>
+                        <span style={{ fontWeight: '600' }}>#{order.orderNumber || order.orderId || order.id}</span>
+                        <span style={{
+                          fontSize: '12px',
+                          padding: '2px 8px',
+                          borderRadius: '10px',
+                          background: 'var(--color-bg)',
+                          border: '1px solid var(--color-border)'
+                        }}>
+                          {order.status}
+                        </span>
+                      </div>
+                      <div style={{ fontSize: '13px', color: 'var(--color-text)' }}>{order.customerName || 'Unknown Customer'}</div>
+                      <div style={{ fontSize: '12px', color: 'var(--color-text-muted)', marginTop: '4px' }}>
+                        Remaining: <span style={{ color: 'var(--color-warning)', fontWeight: '600' }}>
+                          ${((order.totalAmount || order.amount || 0) - (order.paidAmount || 0)).toLocaleString()}
+                        </span>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
             )}
           </div>
-        )}
-      </div>
-
-      <div className="card" style={{ marginTop: '24px' }}>
-        <h3 style={{ marginBottom: '16px' }}>2. Generate official installment schedule</h3>
-        <div style={{ display: 'flex', flexWrap: 'wrap', gap: '16px', marginBottom: '16px' }}>
-          <div style={{ flex: '1 1 220px' }}>
-            <label style={labelStyle}>Order ID *</label>
-            <input
-              type="number"
-              min="1"
-              value={generateOrderId}
-              onChange={(e) => setGenerateOrderId(e.target.value)}
-              style={inputStyle}
-              placeholder="Enter Order ID"
-            />
-          </div>
-          <div style={{ alignSelf: 'flex-end' }}>
-            <button
-              type="button"
-              className="btn btn-success"
-              onClick={handleGenerate}
-              disabled={generateLoading}
-            >
-              {generateLoading ? (
-                <>
-                  <i className="bx bx-loader-alt bx-spin" style={{ marginRight: '6px' }}></i>
-                  Generating...
-                </>
-              ) : (
-                <>
-                  <i className="bx bx-layer" style={{ marginRight: '6px' }}></i>
-                  Generate schedule
-                </>
-              )}
-            </button>
-          </div>
         </div>
-        <p style={{ color: 'var(--color-text-muted)', fontSize: '13px', marginBottom: '0' }}>
-          Use the same information as the preview section above to create the official plan.
-        </p>
-      </div>
 
-      <div className="card" style={{ marginTop: '24px' }}>
-        <form onSubmit={handleFetchSchedule}>
-          <h3 style={{ marginBottom: '16px' }}>3. Lookup schedule by Order ID</h3>
-          <div style={{ display: 'flex', gap: '12px', flexWrap: 'wrap' }}>
-            <div style={{ flex: '1 1 220px', minWidth: '200px' }}>
-              <label style={labelStyle}>Order ID *</label>
-              <input
-                type="number"
-                min="1"
-                value={scheduleOrderId}
-                onChange={(e) => setScheduleOrderId(e.target.value)}
-                style={inputStyle}
-                placeholder="Enter Order ID"
-              />
+        {/* RIGHT PANEL: DETAILS */}
+        <div className="card" style={{ flex: 1, overflowY: 'auto', display: 'flex', flexDirection: 'column' }}>
+          {!selectedOrder ? (
+            <div style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', color: 'var(--color-text-muted)' }}>
+              <i className="bx bx-selection" style={{ fontSize: '64px', marginBottom: '16px', opacity: 0.5 }}></i>
+              <h3>Select an order to manage installments</h3>
             </div>
-            <div style={{ alignSelf: 'flex-end' }}>
-              <button type="submit" className="btn btn-primary" disabled={scheduleLoading}>
-                {scheduleLoading ? (
-                  <>
-                    <i className="bx bx-loader-alt bx-spin" style={{ marginRight: '6px' }}></i>
-                    Loading...
-                  </>
-                ) : (
-                  <>
-                    <i className="bx bx-search" style={{ marginRight: '6px' }}></i>
-                    View installment schedule
-                  </>
-                )}
-              </button>
-            </div>
-          </div>
-        </form>
-
-        <div style={{ marginTop: '24px' }}>
-          {scheduleLoading ? (
-            <div style={emptyStateStyle}>
-              <i className="bx bx-loader-alt bx-spin" style={{ fontSize: '28px' }}></i>
-              <div style={{ marginTop: '8px' }}>Loading installment schedule...</div>
-            </div>
-          ) : hasSchedule ? (
-            <ScheduleTable
-              data={schedule}
-              caption={`Installment schedule for Order #${scheduleOrderId}`}
-              actionColumn
-              onPaySchedule={handlePaySchedule}
-              payingScheduleId={payingScheduleId}
-            />
           ) : (
-            <div style={emptyStateStyle}>
-              No installment data found. Enter an order ID and choose “View installment schedule” to load it.
-            </div>
+            <>
+              <div style={{ paddingBottom: '16px', borderBottom: '1px solid var(--color-border)', marginBottom: '16px' }}>
+                <h3 style={{ marginBottom: '8px' }}>Order #{selectedOrder.orderNumber || selectedOrder.orderId || selectedOrder.id}</h3>
+                <div style={{ display: 'flex', gap: '24px', fontSize: '14px' }}>
+                  <div>Customer: <b>{selectedOrder.customerName}</b></div>
+                  <div>Total: <b>${(selectedOrder.totalAmount || selectedOrder.amount || 0).toLocaleString()}</b></div>
+                  <div>Paid: <b style={{ color: 'var(--color-success)' }}>${(selectedOrder.paidAmount || 0).toLocaleString()}</b></div>
+                  <div>Remaining: <b style={{ color: 'var(--color-warning)' }}>${((selectedOrder.totalAmount || selectedOrder.amount || 0) - (selectedOrder.paidAmount || 0)).toLocaleString()}</b></div>
+                </div>
+              </div>
+
+              {loadingSchedule ? (
+                <div style={{ textAlign: 'center', padding: '40px' }}>
+                  <i className="bx bx-loader-alt bx-spin" style={{ fontSize: '32px' }}></i>
+                </div>
+              ) : schedule.length > 0 ? (
+                /* VIEW EXISTING SCHEDULE */
+                <div>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px' }}>
+                    <h4 style={{ margin: 0 }}>Current Installment Plan</h4>
+                    <div style={{ fontSize: '13px', color: 'var(--color-text-muted)' }}>
+                      {schedule.filter(i => i.status === 'PAID').length} / {schedule.length} Paid
+                    </div>
+                  </div>
+
+                  <div style={{ overflowX: 'auto' }}>
+                    <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+                      <thead>
+                        <tr style={{ borderBottom: '2px solid var(--color-border)' }}>
+                          <th style={thStyle}>#</th>
+                          <th style={thStyle}>Due Date</th>
+                          <th style={{ ...thStyle, textAlign: 'right' }}>Amount</th>
+                          <th style={{ ...thStyle, textAlign: 'center' }}>Status</th>
+                          <th style={{ ...thStyle, textAlign: 'center' }}>Action</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {schedule.map((item, idx) => (
+                          <tr key={item.id || idx} style={{ borderBottom: '1px solid var(--color-border)' }}>
+                            <td style={tdStyle}>{item.installmentNumber}</td>
+                            <td style={tdStyle}>{new Date(item.dueDate).toLocaleDateString()}</td>
+                            <td style={{ ...tdStyle, textAlign: 'right', fontWeight: '600' }}>
+                              ${(item.amount || 0).toLocaleString()}
+                            </td>
+                            <td style={{ ...tdStyle, textAlign: 'center' }}>
+                              <span style={{
+                                padding: '4px 10px',
+                                borderRadius: '12px',
+                                fontSize: '12px',
+                                fontWeight: '600',
+                                background: item.status === 'PAID' ? 'var(--color-success)' : 'var(--color-warning)',
+                                color: 'white'
+                              }}>
+                                {item.status}
+                              </span>
+                            </td>
+                            <td style={{ ...tdStyle, textAlign: 'center' }}>
+                              {item.status !== 'PAID' && (
+                                <button
+                                  className="btn btn-primary"
+                                  style={{ fontSize: '12px', padding: '4px 12px' }}
+                                  onClick={() => handlePayInstallment(item)}
+                                  disabled={payingScheduleId === item.id}
+                                >
+                                  {payingScheduleId === item.id ? 'Processing...' : 'Mark as Paid'}
+                                </button>
+                              )}
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+              ) : (
+                /* CREATE NEW PLAN */
+                <div style={{ maxWidth: '600px' }}>
+                  <div style={{
+                    padding: '16px',
+                    background: 'rgba(var(--primary-rgb), 0.05)',
+                    borderRadius: 'var(--radius)',
+                    marginBottom: '24px',
+                    border: '1px solid rgba(var(--primary-rgb), 0.2)'
+                  }}>
+                    <h4 style={{ marginTop: 0, color: 'var(--color-primary)' }}>No active installment plan</h4>
+                    <p style={{ marginBottom: 0, fontSize: '14px' }}>
+                      This order has a remaining balance of <b>${((selectedOrder.totalAmount || selectedOrder.amount || 0) - (selectedOrder.paidAmount || 0)).toLocaleString()}</b>.
+                      You can create a new installment plan below.
+                    </p>
+                  </div>
+
+                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '16px', marginBottom: '24px' }}>
+                    <div>
+                      <label style={labelStyle}>Months</label>
+                      <input
+                        type="number"
+                        min="1"
+                        max="36"
+                        value={createForm.months}
+                        onChange={e => setCreateForm({ ...createForm, months: e.target.value })}
+                        style={inputStyle}
+                      />
+                    </div>
+                    <div>
+                      <label style={labelStyle}>First Due Date</label>
+                      <input
+                        type="date"
+                        value={createForm.firstDueDate}
+                        onChange={e => setCreateForm({ ...createForm, firstDueDate: e.target.value })}
+                        style={inputStyle}
+                      />
+                    </div>
+                  </div>
+
+                  <div style={{ marginBottom: '24px' }}>
+                    <button
+                      className="btn btn-outline"
+                      onClick={handlePreview}
+                      disabled={loadingPreview}
+                    >
+                      {loadingPreview ? 'Calculating...' : 'Preview Plan'}
+                    </button>
+                  </div>
+
+                  {previewResult && (
+                    <div style={{
+                      border: '1px solid var(--color-border)',
+                      borderRadius: 'var(--radius)',
+                      padding: '16px',
+                      background: 'var(--color-bg)'
+                    }}>
+                      <h4 style={{ marginTop: 0 }}>Preview</h4>
+                      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '12px', marginBottom: '16px' }}>
+                        <div>
+                          <div style={{ fontSize: '12px', color: 'var(--color-text-muted)' }}>Monthly Payment</div>
+                          <div style={{ fontSize: '18px', fontWeight: '600' }}>${previewResult.monthlyPayment?.toLocaleString()}</div>
+                        </div>
+                        <div>
+                          <div style={{ fontSize: '12px', color: 'var(--color-text-muted)' }}>Total Payable</div>
+                          <div style={{ fontSize: '18px', fontWeight: '600' }}>${previewResult.totalPayable?.toLocaleString()}</div>
+                        </div>
+                        <div>
+                          <div style={{ fontSize: '12px', color: 'var(--color-text-muted)' }}>Interest</div>
+                          <div style={{ fontSize: '18px', fontWeight: '600' }}>${previewResult.interestAmount?.toLocaleString()}</div>
+                        </div>
+                      </div>
+
+                      <button
+                        className="btn btn-primary"
+                        style={{ width: '100%' }}
+                        onClick={handleCreatePlan}
+                        disabled={loadingCreate}
+                      >
+                        {loadingCreate ? 'Creating...' : 'Confirm & Create Plan'}
+                      </button>
+                    </div>
+                  )}
+                </div>
+              )}
+            </>
           )}
         </div>
       </div>
@@ -356,159 +442,37 @@ const InstallmentManagement = ({ user }) => {
   );
 };
 
-const InfoCard = ({ label, value, prefix = '', highlight = false }) => (
-  <div
-    style={{
-      padding: '16px',
-      borderRadius: 'var(--radius)',
-      border: highlight ? '2px solid var(--color-success)' : '1px solid var(--color-border)',
-      background: 'var(--color-bg)',
-    }}
-  >
-    <div style={{ fontSize: '13px', color: 'var(--color-text-muted)', marginBottom: '6px' }}>{label}</div>
-    <div style={{ fontSize: '18px', fontWeight: 700, color: highlight ? 'var(--color-success)' : 'var(--color-primary)' }}>
-      {prefix}
-      {typeof value === 'number' ? value.toLocaleString() : value || 'N/A'}
-    </div>
-  </div>
-);
-
-const ScheduleTable = ({ data, caption, actionColumn, onPaySchedule, payingScheduleId }) => (
-  <div style={{ overflowX: 'auto' }}>
-    {caption && <h4 style={{ marginBottom: '12px' }}>{caption}</h4>}
-    <table style={{ width: '100%', borderCollapse: 'collapse' }}>
-      <thead>
-        <tr style={{ borderBottom: '2px solid var(--color-border)' }}>
-          <th style={tableHeaderStyle}>#</th>
-          <th style={tableHeaderStyle}>Due date</th>
-          <th style={{ ...tableHeaderStyle, textAlign: 'right' }}>Amount</th>
-          <th style={{ ...tableHeaderStyle, textAlign: 'center' }}>Status</th>
-          {actionColumn && <th style={{ ...tableHeaderStyle, textAlign: 'center' }}>Actions</th>}
-        </tr>
-      </thead>
-      <tbody>
-        {data.map((item) => {
-          const status = (item.status || '').toUpperCase();
-          const scheduleId = item.id || item.scheduleId;
-          return (
-            <tr key={`${scheduleId}-${item.installmentNumber}`} style={{ borderBottom: '1px solid var(--color-border)' }}>
-              <td style={tableCellStyle}>{item.installmentNumber}</td>
-              <td style={tableCellStyle}>
-                {item.dueDate ? new Date(item.dueDate).toLocaleDateString() : 'N/A'}
-              </td>
-              <td style={{ ...tableCellStyle, textAlign: 'right', fontWeight: 600, color: 'var(--color-primary)' }}>
-                ${Number(item.amount || 0).toLocaleString()}
-              </td>
-              <td style={{ ...tableCellStyle, textAlign: 'center' }}>
-                <span
-                  style={{
-                    padding: '4px 12px',
-                    borderRadius: 'var(--radius)',
-                    background: 'var(--color-bg)',
-                    color:
-                      status === 'PAID'
-                        ? 'var(--color-success)'
-                        : status === 'PENDING'
-                        ? 'var(--color-warning)'
-                        : 'var(--color-text-muted)',
-                    fontSize: '12px',
-                    fontWeight: 600,
-                  }}
-                >
-                  {status || 'UNKNOWN'}
-                </span>
-              </td>
-              {actionColumn && (
-                <td style={{ ...tableCellStyle, textAlign: 'center' }}>
-                  {status === 'PAID' ? (
-                    <span style={{ fontSize: '12px', color: 'var(--color-success)' }}>Paid</span>
-                  ) : (
-                    <button
-                      className="btn btn-outline"
-                      style={{ fontSize: '12px' }}
-                      onClick={() => onPaySchedule(item)}
-                      disabled={payingScheduleId === scheduleId}
-                    >
-                      {payingScheduleId === scheduleId ? (
-                        <>
-                          <i className="bx bx-loader-alt bx-spin"></i> Updating...
-                        </>
-                      ) : (
-                        <>
-                          <i className="bx bx-check"></i> Mark as paid
-                        </>
-                      )}
-                    </button>
-                  )}
-                </td>
-              )}
-            </tr>
-          );
-        })}
-      </tbody>
-    </table>
-  </div>
-);
-
-const sectionStyle = {
-  border: '1px solid var(--color-border)',
-  borderRadius: 'var(--radius)',
-  padding: '16px',
-  background: 'var(--color-bg)',
-  marginBottom: '24px',
+const thStyle = {
+  padding: '12px',
+  textAlign: 'left',
+  fontSize: '13px',
+  fontWeight: '600',
+  color: 'var(--color-text-muted)',
+  borderBottom: '2px solid var(--color-border)'
 };
 
-const sectionTitleStyle = {
-  marginBottom: '12px',
-  fontSize: '16px',
-  fontWeight: 700,
-};
-
-const gridStyle = {
-  display: 'grid',
-  gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))',
-  gap: '16px',
+const tdStyle = {
+  padding: '12px',
+  fontSize: '14px',
+  color: 'var(--color-text)',
+  borderBottom: '1px solid var(--color-border)'
 };
 
 const labelStyle = {
   display: 'block',
   marginBottom: '6px',
   fontSize: '13px',
-  fontWeight: 600,
-  color: 'var(--color-text-muted)',
+  fontWeight: '600',
+  color: 'var(--color-text-muted)'
 };
 
 const inputStyle = {
   width: '100%',
-  padding: '10px 12px',
+  padding: '10px',
+  borderRadius: 'var(--radius)',
   border: '1px solid var(--color-border)',
-  borderRadius: 'var(--radius)',
   background: 'var(--color-bg)',
-  color: 'var(--color-text)',
-  fontSize: '14px',
-};
-
-const tableHeaderStyle = {
-  padding: '12px',
-  textAlign: 'left',
-  fontSize: '14px',
-  fontWeight: 600,
-  color: 'var(--color-text-muted)',
-  whiteSpace: 'nowrap',
-};
-
-const tableCellStyle = {
-  padding: '12px',
-  fontSize: '14px',
-  color: 'var(--color-text)',
-};
-
-const emptyStateStyle = {
-  textAlign: 'center',
-  padding: '24px',
-  border: '1px dashed var(--color-border)',
-  borderRadius: 'var(--radius)',
-  color: 'var(--color-text-muted)',
+  color: 'var(--color-text)'
 };
 
 export default InstallmentManagement;

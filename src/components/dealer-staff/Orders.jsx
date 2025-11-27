@@ -254,23 +254,16 @@ const normalizeOrder = (order) => {
   const totalAmount = Number(order.totalAmount ?? order.total_amount ?? order.amount ?? 0);
 
   // Determine if order is fully paid
-  const isFullyPaid = paymentStatus.includes('PAID') && !paymentStatus.includes('PARTIALLY') &&
-    (remainingAmount <= 0 || (totalAmount > 0 && paidAmount >= totalAmount));
-  const hasRemainingDebt = remainingAmount > 0 || (!isFullyPaid && totalAmount > 0 && paidAmount < totalAmount);
+  // Match đúng enum PaymentStatus từ backend:
+  // - PAID           -> fully paid
+  // - PARTIALLY_PAID -> còn nợ
+  // - UNPAID         -> chưa thanh toán
+  const isFullyPaid = paymentStatus === 'PAID';
+  const hasRemainingDebt =
+    paymentStatus === 'PARTIALLY_PAID' || paymentStatus === 'UNPAID';
 
-  // 🔥 TỰ ĐỘNG CẬP NHẬT ORDER STATUS DỰA TRÊN PAYMENTS
-  // Nếu order đã approved, cập nhật status dựa trên remainingAmount
-  let updatedStatus = status;
-  const isApproved = approvalStatus === 'APPROVED';
-  const isAlreadyDelivered = status.includes('DELIVER');
-
-  if (isApproved && !isAlreadyDelivered) {
-    if (remainingAmount <= 0 && totalAmount > 0) {
-      updatedStatus = 'COMPLETED';
-    } else if (remainingAmount > 0) {
-      updatedStatus = 'APPROVED';
-    }
-  }
+  // Không tự override business status từ FE, chỉ normalize để hiển thị
+  const normalizedStatus = status;
 
   return {
     ...order,
@@ -291,15 +284,13 @@ const normalizeOrder = (order) => {
     displayOrderNumber: orderNumber || 'N/A',
     displayPaymentMethod: paymentMethodRaw ? paymentMethodRaw.toUpperCase() : 'N/A',
     normalizedApprovalStatus: approvalStatus,
-    normalizedStatus: updatedStatus, // Sử dụng updatedStatus thay vì status
+    normalizedStatus,
     normalizedPaymentStatus: paymentStatus,
     paidAmount: paidAmount,
     remainingAmount: remainingAmount,
-    totalAmount: totalAmount,
-    isFullyPaid: isFullyPaid,
-    hasRemainingDebt: hasRemainingDebt,
-    // Cập nhật status trong order object
-    status: updatedStatus,
+    totalAmount,
+    isFullyPaid,
+    hasRemainingDebt,
   };
 };
 
@@ -349,28 +340,24 @@ const aggregatePaymentData = (order, paymentHistoryRaw = [], paymentOverview = n
     )
     .reduce((sum, payment) => sum + Number(payment?.amount ?? 0), 0);
 
-  const paidAmount =
-    paymentHistory.length > 0
-      ? calculatedPaid
-      : Number(
-          paymentOverview?.totalPaid ??
-            paymentOverview?.totalAmountPaid ??
-            (calculatedPaid > 0 ? calculatedPaid : order.paidAmount ?? 0)
-        ) || 0;
+  // Ưu tiên số tiền đã trả từ Order API (do backend tính toán chính xác)
+  // Tránh việc cộng dồn thủ công từ payment history vì có thể bị duplicate hoặc sai lệch
+  const paidAmount = Number(order.paidAmount ?? order.paid_amount ?? order.totalPaid ?? 0);
 
-  const remainingAmount = Math.max(totalAmount - paidAmount, 0);
+  // Ưu tiên số tiền còn lại từ Order API (do backend tính toán chính xác)
+  // Tránh việc tính toán thủ công từ totalAmount - paidAmount vì có thể sai lệch
+  const remainingAmount = Number(order.remainingAmount ?? order.remaining_amount ?? order.balanceDue ?? 0);
 
+  // Bám sát PaymentStatus do backend trả về, không tự suy ra từ số tiền
   const paymentStatusRaw =
     paymentOverview?.paymentStatus ||
     order.paymentStatus ||
-    (remainingAmount <= 0 && paidAmount > 0
-      ? 'PAID'
-      : paidAmount > 0
-      ? 'PARTIALLY_PAID'
-      : 'UNPAID');
+    'UNPAID';
 
   const normalizedPaymentStatus = String(paymentStatusRaw || '').toUpperCase();
-  const updatedStatus = recomputeStatusFromPayments(order, remainingAmount, paidAmount);
+
+  // Không tự override OrderStatus từ FE
+  const normalizedStatus = order.normalizedStatus || order.status;
 
   return {
     paymentOverview,
@@ -382,55 +369,52 @@ const aggregatePaymentData = (order, paymentHistoryRaw = [], paymentOverview = n
     normalizedPaymentStatus,
     isFullyPaid: remainingAmount <= 0 && paidAmount > 0,
     hasRemainingDebt: remainingAmount > 0,
-    normalizedStatus: updatedStatus || order.normalizedStatus,
-    status: updatedStatus || order.status,
+    normalizedStatus,
+    status: order.status,
   };
 };
 
-const enrichOrdersWithPaymentData = async (orders = []) => {
-  if (!Array.isArray(orders) || orders.length === 0) return orders;
 
-  return Promise.all(
-    orders.map(async (order) => {
-      const orderId = order?.orderId || order?.id;
-      if (!orderId) return order;
 
-      try {
-        const [paymentOverview, paymentHistoryRaw] = await Promise.all([
-          paymentsAPI.getDealerWorkflowPaymentStatus(orderId).catch(() => null),
-          paymentsAPI.getDealerWorkflowPayments(orderId).catch(() => []),
-        ]);
-
-        return {
-          ...order,
-          ...aggregatePaymentData(order, paymentHistoryRaw, paymentOverview),
-        };
-      } catch (error) {
-        console.warn(`Không thể đồng bộ payment cho order ${orderId}`, error);
-        return order;
-      }
-    })
-  );
-};
-
-const extractOrderTimestamp = (order) => {
-  if (!order) return 0;
+const resolveOrderCreatedAt = (order) => {
+  if (!order) return null;
   const candidates = [
-    order.createdDate,
+    order.approvedAt,
+    order.approvedDate,
     order.createdAt,
+    order.createdDate,
     order.creationDate,
     order.created_on,
     order.createdOn,
     order.orderDate,
     order.orderedAt,
-    order.updatedDate,
-    order.updatedAt,
-    order.approvedDate,
-    order.approvedAt,
-    order.deliveryDate,
   ];
 
   for (const candidate of candidates) {
+    if (!candidate) continue;
+    const time = new Date(candidate).getTime();
+    if (!Number.isNaN(time)) {
+      return candidate;
+    }
+  }
+  return null;
+};
+
+const resolveOrderSortTimestamp = (order) => {
+  if (!order) return null;
+  const primary = resolveOrderCreatedAt(order);
+  if (primary) {
+    const time = new Date(primary).getTime();
+    if (!Number.isNaN(time)) return time;
+  }
+
+  const fallbackCandidates = [
+    order.updatedDate,
+    order.updatedAt,
+    order.deliveryDate,
+  ];
+
+  for (const candidate of fallbackCandidates) {
     if (!candidate) continue;
     const time = new Date(candidate).getTime();
     if (!Number.isNaN(time)) {
@@ -439,12 +423,30 @@ const extractOrderTimestamp = (order) => {
   }
 
   const numericFallback = Number(order.orderId ?? order.id ?? 0);
-  return Number.isNaN(numericFallback) ? 0 : numericFallback;
+  return Number.isNaN(numericFallback) ? null : numericFallback;
+};
+
+const getOrderNumericId = (order) => {
+  if (!order) return 0;
+  const value = Number(order.orderId ?? order.id ?? 0);
+  return Number.isNaN(value) ? 0 : value;
+};
+
+const formatOrderCreatedDisplay = (order) => {
+  const timestamp = resolveOrderSortTimestamp(order);
+  if (!timestamp) return 'N/A';
+  return new Date(timestamp).toLocaleString('vi-VN');
 };
 
 const sortOrdersByNewest = (list = []) => {
   if (!Array.isArray(list)) return [];
-  return [...list].sort((a, b) => extractOrderTimestamp(b) - extractOrderTimestamp(a));
+  return [...list].sort((a, b) => {
+    const idDiff = getOrderNumericId(b) - getOrderNumericId(a);
+    if (idDiff !== 0) return idDiff;
+    const timeB = resolveOrderSortTimestamp(b) ?? 0;
+    const timeA = resolveOrderSortTimestamp(a) ?? 0;
+    return timeB - timeA;
+  });
 };
 
 const INSTALLMENT_MONTH_OPTIONS = [3, 6, 9, 12];
@@ -625,7 +627,14 @@ const Orders = ({ user }) => {
   });
   const [showApproveModal, setShowApproveModal] = useState(false);
   const [selectedOrder, setSelectedOrder] = useState(null);
-  const [approveNotes, setApproveNotes] = useState('');
+  const [showPaymentModal, setShowPaymentModal] = useState(false);
+  const [selectedOrderForPayment, setSelectedOrderForPayment] = useState(null);
+  const [paymentFormData, setPaymentFormData] = useState({
+    paymentMethod: 'CASH',
+    paymentPercentage: 100,
+    notes: ''
+  });
+  const [paymentSubmitting, setPaymentSubmitting] = useState(false);
   const [showOrderDetailModal, setShowOrderDetailModal] = useState(false);
   const [orderDetailLoading, setOrderDetailLoading] = useState(false);
   const [orderDetailError, setOrderDetailError] = useState('');
@@ -1462,6 +1471,64 @@ const Orders = ({ user }) => {
     [userRole]
   );
 
+  // Thanh toán VNPay trực tiếp từ danh sách đơn hàng (lần thanh toán đầu tiên)
+  const handleQuickVNPayPayment = async (order) => {
+    if (!order) return;
+    const orderId = order.orderId || order.id;
+    if (!orderId) {
+      showErrorToast('Order ID is missing. Cannot create VNPay payment.');
+      return;
+    }
+
+    const paymentMethod = String(order.displayPaymentMethod || order.paymentMethod || '').toUpperCase();
+    const paymentStatusText = String(
+      order.normalizedPaymentStatus || order.paymentStatus || order.workflowPaymentStatus || ''
+    ).toUpperCase();
+    const isFullyPaid = paymentStatusText === 'PAID';
+    const hasPendingVnpay =
+      Array.isArray(order.orderPayments) &&
+      order.orderPayments.some(
+        (p) =>
+          String(p.paymentMethod || '').toUpperCase() === 'VNPAY' &&
+          String(p.status || '').toUpperCase() === 'PENDING'
+      );
+
+    // Chỉ cho tạo link VNPay khi:
+    // - Phương thức thanh toán là VNPAY
+    // - Đơn chưa được đánh dấu PAID
+    // - Chưa có VNPay payment ở trạng thái PENDING
+    if (paymentMethod !== 'VNPAY') {
+      showErrorToast('Quick VNPay payment is only available for VNPay orders.');
+      return;
+    }
+    if (isFullyPaid) {
+      showErrorToast('This order is already paid. VNPay payment is not required.');
+      return;
+    }
+    if (hasPendingVnpay) {
+      showErrorToast('This order already has a pending VNPay payment.');
+      return;
+    }
+
+    try {
+      const payload = { orderId };
+
+      const response = await paymentsAPI.createVNPayPayment(payload);
+
+      if (response && response.paymentUrl) {
+        // Điều hướng sang cổng thanh toán VNPay
+        window.location.href = response.paymentUrl;
+      } else if (response && response.error) {
+        showErrorToast(`VNPay error: ${response.error}`);
+      } else {
+        showErrorToast('Unable to create VNPay payment link. Please try again.');
+      }
+    } catch (error) {
+      console.error('Error creating VNPay payment from Orders list:', error);
+      showErrorToast(handleAPIError(error));
+    }
+  };
+
   // Load orders based on role
   useEffect(() => {
     const loadOrders = async () => {
@@ -1484,8 +1551,7 @@ const Orders = ({ user }) => {
         }
 
         const normalizedOrders = normalizeOrdersList(data);
-        const syncedOrders = await enrichOrdersWithPaymentData(normalizedOrders);
-        setOrders(sortOrdersByNewest(syncedOrders));
+        setOrders(sortOrdersByNewest(normalizedOrders));
       } catch (error) {
         console.error('Error loading orders:', error);
         showErrorToast(handleAPIError(error));
@@ -1570,6 +1636,19 @@ const Orders = ({ user }) => {
             })
             : [];
         }
+
+        // Sort quotes by newest first (ID descending)
+        quotes.sort((a, b) => {
+          // Prioritize ID descending
+          const idA = Number(a.id || a.quoteId || 0);
+          const idB = Number(b.id || b.quoteId || 0);
+          if (idA !== idB) return idB - idA;
+
+          // Fallback to approvedAt
+          const timeA = new Date(a.approvedAt || a.createdDate || 0).getTime();
+          const timeB = new Date(b.approvedAt || b.createdDate || 0).getTime();
+          return timeB - timeA;
+        });
 
         setAvailableQuotes(quotes);
 
@@ -1970,7 +2049,9 @@ const Orders = ({ user }) => {
     if (hasKeyword(tokens, ['REJECT', 'DECLINE', 'CANCEL'])) return 'Rejected';
 
     // DELIVERED statuses
-    if (hasKeyword(tokens, ['DELIVERED_APPROVED'])) return 'Delivered - Outstanding balance';
+    if (hasKeyword(tokens, ['DELIVERED_APPROVED'])) {
+      return hasRemainingDebt ? 'Delivered ' : 'Delivered';
+    }
     if (hasKeyword(tokens, ['DELIVER'])) return 'Delivered';
 
     // COMPLETED = đã trả hết (theo backend logic: remainingAmount = 0 → COMPLETED)
@@ -1979,13 +2060,13 @@ const Orders = ({ user }) => {
     }
 
     if (hasKeyword(tokens, ['APPROVE_PENDING', 'PENDING_APPROVAL'])) {
-      return hasRemainingDebt ? 'Approve Pending - Còn nợ' : 'Approve Pending';
+      return hasRemainingDebt ? 'Approve Pending - Outstanding Balance' : 'Approve Pending';
     }
 
     // APPROVED = chưa trả hết (theo backend logic: remainingAmount > 0 → APPROVED)
     if (hasKeyword(tokens, ['APPROV'])) {
       if (hasRemainingDebt) {
-        return 'Approved - Còn nợ';
+        return 'Approved - Outstanding Balance';
       }
       return 'Approved';
     }
@@ -2001,7 +2082,7 @@ const Orders = ({ user }) => {
   const handleViewOrderDetails = async (order) => {
     const orderId = order?.orderId || order?.id;
     if (!orderId) {
-      const message = 'Không tìm thấy Order ID để xem chi tiết.';
+      const message = 'Order ID is missing, unable to view details.';
       showErrorToast(message);
       return;
     }
@@ -2333,7 +2414,7 @@ const Orders = ({ user }) => {
       const paymentMethod = orderFormData.paymentMethod || 'VNPAY';
       const validPaymentMethods = ['CASH', 'TRANSFER', 'VNPAY'];
       if (!validPaymentMethods.includes(paymentMethod.toUpperCase())) {
-        showErrorToast('Phương thức thanh toán không hợp lệ. Chỉ hỗ trợ: CASH, TRANSFER, VNPAY');
+        showErrorToast('Invalid payment method. Supported options: CASH, TRANSFER, VNPAY.');
         return;
       }
 
@@ -2343,30 +2424,34 @@ const Orders = ({ user }) => {
           const vehicle = await vehiclesAPI.getById(vehicleId);
           // Check VIN - phải có và không rỗng
           if (!vehicle.vin || (typeof vehicle.vin === 'string' && vehicle.vin.trim() === '')) {
-            showErrorToast(`Xe với ID ${vehicleId} chưa có số khung (VIN). Vui lòng cập nhật VIN cho xe trước khi tạo đơn hàng.`);
+            showErrorToast(`Vehicle ${vehicleId} is missing a VIN. Please update the VIN before creating the order.`);
             return;
           }
           // Check EngineNumber - phải có và không rỗng
           if (!vehicle.engineNumber || (typeof vehicle.engineNumber === 'string' && vehicle.engineNumber.trim() === '')) {
-            showErrorToast(`Xe với ID ${vehicleId} chưa có số máy (Engine Number). Vui lòng cập nhật số máy cho xe trước khi tạo đơn hàng.`);
+            showErrorToast(`Vehicle ${vehicleId} is missing an engine number. Please update it before creating the order.`);
             return;
           }
         } catch (vehicleError) {
           console.error('Error checking vehicle VIN/EngineNumber:', vehicleError);
           // Nếu không lấy được vehicle info, KHÔNG tiếp tục - báo lỗi
-          showErrorToast(`Không thể kiểm tra thông tin xe (ID: ${vehicleId}). Vui lòng thử lại.`);
+          showErrorToast(`Unable to verify vehicle information (ID: ${vehicleId}). Please try again.`);
           return;
         }
       } else {
         // Nếu không lấy được vehicleId, báo lỗi
         console.error('Cannot find vehicleId from quote:', activeQuote);
-        showErrorToast('Không thể xác định thông tin xe từ báo giá. Vui lòng thử lại.');
+        showErrorToast('Unable to determine vehicle information from the quote. Please try again.');
         return;
       }
 
       // DEALER_MANAGER: Sử dụng workflow API (/api/workflow/orders/create-from-approved-quote), customerId = null
       if (userRole === 'DEALER_MANAGER') {
         // Đảm bảo customerId là null cho DEALER_MANAGER
+        const actualPaymentPercentage = typeof orderFormData.paymentPercentage === 'number'
+          ? orderFormData.paymentPercentage
+          : 0;
+
         const orderData = {
           quoteId: finalQuoteId,
           customerId: null, // DEALER_MANAGER: customerId phải là null
@@ -2374,9 +2459,7 @@ const Orders = ({ user }) => {
           userId: userId,
           orderDate: orderFormData.orderDate ? new Date(orderFormData.orderDate).toISOString().split('T')[0] : new Date().toISOString().split('T')[0],
           paymentMethod: paymentMethod.toUpperCase(), // Đảm bảo uppercase và đã validate
-          paymentPercentage: typeof orderFormData.paymentPercentage === 'number'
-            ? orderFormData.paymentPercentage
-            : 0,
+          paymentPercentage: actualPaymentPercentage, // 🔥 FIX: Send actual percentage to satisfy backend validation
           notes: orderFormData.notes || '',
           orderDetails: vehicleId ? [{
             vehicleId: Number(vehicleId),
@@ -2386,9 +2469,29 @@ const Orders = ({ user }) => {
         };
 
         const createdOrder = await ordersAPI.createFromEVMApprovedQuote(orderData);
+
+        // 🔥 FIX: Process payment separately if percentage > 0
+        if (actualPaymentPercentage > 0) {
+          try {
+            if (paymentMethod.toUpperCase() === 'VNPAY') {
+              const paymentData = {
+                orderId: createdOrder.id
+              };
+              const vnpayRes = await paymentsAPI.createVNPayPayment(paymentData);
+              if (vnpayRes.paymentUrl) {
+                window.location.href = vnpayRes.paymentUrl;
+                return; // Stop execution to redirect
+              }
+            }
+            // For CASH/TRANSFER, backend handles it if paymentPercentage > 0
+            // So we DO NOT call createDealerWorkflowPayment here to avoid double payment records.
+          } catch (paymentError) {
+            console.error('Error processing initial payment:', paymentError);
+            showErrorToast('Order created but initial payment failed. Please try paying from the order list.');
+          }
+        }
+
         showSuccessToast('Create successfully');
-
-
       }
       // DEALER_STAFF: Sử dụng dealer-workflow API (/api/dealer-workflow/orders/create-from-approved-quote), customerId phải có
       else if (userRole === 'DEALER_STAFF') {
@@ -2397,6 +2500,10 @@ const Orders = ({ user }) => {
           return;
         }
 
+        const actualPaymentPercentage = typeof orderFormData.paymentPercentage === 'number'
+          ? orderFormData.paymentPercentage
+          : 0;
+
         const orderData = {
           quoteId: finalQuoteId,
           customerId: finalCustomerId, // DEALER_STAFF: customerId phải có
@@ -2404,9 +2511,7 @@ const Orders = ({ user }) => {
           userId: userId,
           orderDate: orderFormData.orderDate ? new Date(orderFormData.orderDate).toISOString().split('T')[0] : new Date().toISOString().split('T')[0],
           paymentMethod: paymentMethod.toUpperCase(), // Đảm bảo uppercase và đã validate
-          paymentPercentage: typeof orderFormData.paymentPercentage === 'number'
-            ? orderFormData.paymentPercentage
-            : 0,
+          paymentPercentage: actualPaymentPercentage, // 🔥 FIX: Send actual percentage to satisfy backend validation
           notes: orderFormData.notes || '',
           orderDetails: vehicleId ? [{
             vehicleId: Number(vehicleId),
@@ -2416,9 +2521,29 @@ const Orders = ({ user }) => {
         };
 
         const createdOrder = await ordersAPI.createFromApprovedQuote(orderData, userId);
+
+        // 🔥 FIX: Process payment separately if percentage > 0
+        if (actualPaymentPercentage > 0) {
+          try {
+            if (paymentMethod.toUpperCase() === 'VNPAY') {
+              const paymentData = {
+                orderId: createdOrder.id
+              };
+              const vnpayRes = await paymentsAPI.createVNPayPayment(paymentData);
+              if (vnpayRes.paymentUrl) {
+                window.location.href = vnpayRes.paymentUrl;
+                return; // Stop execution to redirect
+              }
+            }
+            // For CASH/TRANSFER, backend handles it if paymentPercentage > 0
+            // So we DO NOT call createDealerWorkflowPayment here to avoid double payment records.
+          } catch (paymentError) {
+            console.error('Error processing initial payment:', paymentError);
+            showErrorToast('Order created but initial payment failed. Please try paying from the order list.');
+          }
+        }
+
         showSuccessToast('Create successfully');
-
-
       }
       else {
         const orderData = {
@@ -2461,8 +2586,7 @@ const Orders = ({ user }) => {
       }
 
       const normalizedReload = normalizeOrdersList(reloadedOrders);
-      const syncedReload = await enrichOrdersWithPaymentData(normalizedReload);
-      setOrders(sortOrdersByNewest(syncedReload));
+      setOrders(sortOrdersByNewest(normalizedReload));
 
       // Reset form
       handleDismissOrderForm();
@@ -2503,7 +2627,7 @@ const Orders = ({ user }) => {
         try {
           const inventoryCheck = await quotesAPI.checkDealerInventory(quoteId);
           if (!inventoryCheck?.hasSufficientInventory) {
-            const message = inventoryCheck?.message || 'Kho đại lý không đủ xe để duyệt đơn hàng này. Vui lòng bổ sung hàng tồn kho.';
+            const message = inventoryCheck?.message || 'Dealer inventory does not have enough vehicles to approve this order. Please restock before approving.';
             showErrorToast(message);
             setShowApproveModal(false);
             return;
@@ -2557,8 +2681,7 @@ const Orders = ({ user }) => {
           reloadedOrders = await ordersAPI.getAll();
         }
         const normalizedReload = normalizeOrdersList(reloadedOrders);
-        const syncedReload = await enrichOrdersWithPaymentData(normalizedReload);
-        setOrders(sortOrdersByNewest(syncedReload));
+        setOrders(sortOrdersByNewest(normalizedReload));
       } catch (reloadError) {
         console.warn('Error reloading orders after approve (order was approved successfully):', reloadError);
         // Không báo lỗi cho user vì approve đã thành công, chỉ log warning
@@ -2569,11 +2692,11 @@ const Orders = ({ user }) => {
       // Hiển thị message lỗi từ backend rõ ràng hơn
       const errorMessage = handleAPIError(error);
       if (errorMessage.includes('inventory') || errorMessage.includes('kho')) {
-        showErrorToast(`Không thể duyệt đơn hàng: ${errorMessage}. Vui lòng kiểm tra kho đại lý.`);
+        showErrorToast(`Unable to approve the order: ${errorMessage}. Please verify dealer inventory.`);
       } else if (errorMessage.includes('status') || errorMessage.includes('trạng thái')) {
-        showErrorToast(`Không thể duyệt đơn hàng: ${errorMessage}. Vui lòng kiểm tra trạng thái đơn hàng.`);
+        showErrorToast(`Unable to approve the order: ${errorMessage}. Please verify the order status.`);
       } else {
-        showErrorToast(`Không thể duyệt đơn hàng: ${errorMessage}`);
+        showErrorToast(`Unable to approve the order: ${errorMessage}`);
       }
     }
   };
@@ -2611,8 +2734,7 @@ const Orders = ({ user }) => {
         reloadedOrders = await ordersAPI.getAll();
       }
       const normalizedReload = normalizeOrdersList(reloadedOrders);
-      const syncedReload = await enrichOrdersWithPaymentData(normalizedReload);
-      setOrders(sortOrdersByNewest(syncedReload));
+      setOrders(sortOrdersByNewest(normalizedReload));
     } catch (error) {
       console.error('Error rejecting order:', error);
       showErrorToast(handleAPIError(error));
@@ -2624,11 +2746,11 @@ const Orders = ({ user }) => {
     const orderId = order.orderId || order.id;
 
     if (!orderId) {
-      showErrorToast('Order ID không hợp lệ');
+      showErrorToast('Invalid Order ID');
       return;
     }
 
-    const confirmAction = window.confirm('Xác nhận đã giao xe cho khách và trừ tồn kho?');
+    const confirmAction = window.confirm('Confirm that the vehicle has been delivered and inventory has been deducted?');
     if (!confirmAction) return;
 
     setConfirmingDeliveryId(orderId);
@@ -2674,13 +2796,62 @@ const Orders = ({ user }) => {
         reloadedOrders = await ordersAPI.getAll();
       }
       const normalizedReload = normalizeOrdersList(reloadedOrders);
-      const syncedReload = await enrichOrdersWithPaymentData(normalizedReload);
-      setOrders(sortOrdersByNewest(syncedReload));
+      setOrders(sortOrdersByNewest(normalizedReload));
     } catch (error) {
       console.error('Error confirming delivery:', error);
       showErrorToast(handleAPIError(error));
     } finally {
       setConfirmingDeliveryId(null);
+    }
+  };
+
+  const handleOpenPaymentModal = (order) => {
+    setSelectedOrderForPayment(order);
+    // Default to paying remaining amount or 100% if nothing paid
+    setPaymentFormData({
+      paymentMethod: order.paymentMethod || 'CASH',
+      paymentPercentage: 100, // Default to full payment of remaining
+      notes: ''
+    });
+    setShowPaymentModal(true);
+  };
+
+  const handleClosePaymentModal = () => {
+    setShowPaymentModal(false);
+    setSelectedOrderForPayment(null);
+    setPaymentFormData({
+      paymentMethod: 'CASH',
+      paymentPercentage: 100,
+      notes: ''
+    });
+  };
+
+  const handleSubmitPayment = async (e) => {
+    e.preventDefault();
+    if (!selectedOrderForPayment) return;
+
+    try {
+      setPaymentSubmitting(true);
+
+      const paymentData = {
+        paymentMethod: paymentFormData.paymentMethod,
+        paymentPercentage: Number(paymentFormData.paymentPercentage),
+        paymentNotes: paymentFormData.notes
+      };
+
+      await paymentsAPI.createDealerWorkflowPayment(
+        selectedOrderForPayment.orderId || selectedOrderForPayment.id,
+        paymentData
+      );
+
+      showSuccessToast('Payment created successfully');
+      handleClosePaymentModal();
+      loadOrders(); // Reload to update status
+    } catch (error) {
+      console.error('Error creating payment:', error);
+      showErrorToast(error.response?.data?.message || 'Failed to create payment');
+    } finally {
+      setPaymentSubmitting(false);
     }
   };
 
@@ -2929,6 +3100,7 @@ const Orders = ({ user }) => {
             // Thẻ đánh dấu Order của Manager/Staff
             const isMyOrder = (order.createdBy?.id || order.createdBy?.userId || order.userId)?.toString() === userId?.toString();
             const creatorTag = userRole === 'DEALER_MANAGER' && isMyOrder ? ' (You)' : userRole === 'DEALER_MANAGER' && !isMyOrder ? ' (Staff)' : '';
+            const createdDisplay = formatOrderCreatedDisplay(order);
 
             return (
               <div key={order.orderId || order.id} style={{
@@ -2943,6 +3115,9 @@ const Orders = ({ user }) => {
                   <div style={{ flex: 1 }}>
                     <div style={{ display: 'flex', alignItems: 'center', gap: '12px', marginBottom: '8px', flexWrap: 'wrap' }}>
                       <h3 style={{ margin: '0', fontSize: '18px', fontWeight: '600', color: 'var(--color-text)' }}>{orderNumber}{creatorTag}</h3>
+                      <div style={{ fontSize: '12px', color: 'var(--color-text-muted)' }}>
+                        {createdDisplay}
+                      </div>
                       <span style={{
                         padding: '4px 12px',
                         borderRadius: 'var(--radius)',
@@ -2964,7 +3139,7 @@ const Orders = ({ user }) => {
                       </div>
                     )}
                     <div style={{ fontSize: '13px', color: 'var(--color-text-muted)' }}>
-                      Order Date · {order.orderDate ? new Date(order.orderDate).toLocaleDateString() : 'N/A'}
+                      Created · {createdDisplay}
                     </div>
                     {order.quoteId && (
                       <div style={{ fontSize: '12px', color: 'var(--color-text-muted)', marginTop: '4px' }}>
@@ -2982,31 +3157,7 @@ const Orders = ({ user }) => {
                   </div>
                 </div>
 
-                {/* Payment Info Section */}
-                {(order.paidAmount > 0 || order.remainingAmount > 0) && (
-                  <div style={{
-                    marginBottom: '12px',
-                    padding: '12px',
-                    background: 'rgba(59, 130, 246, 0.1)',
-                    borderRadius: 'var(--radius)',
-                    border: '1px solid rgba(59, 130, 246, 0.2)'
-                  }}>
-                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '6px' }}>
-                      <span style={{ fontSize: '13px', color: 'var(--color-text-muted)' }}>Paid:</span>
-                      <span style={{ fontSize: '14px', fontWeight: '600', color: '#10b981' }}>
-                        ${(order.paidAmount || 0).toLocaleString()}
-                      </span>
-                    </div>
-                    {order.hasRemainingDebt && (
-                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                        <span style={{ fontSize: '13px', color: 'var(--color-text-muted)' }}>Outstanding:</span>
-                        <span style={{ fontSize: '14px', fontWeight: '600', color: '#f59e0b' }}>
-                          ${(order.remainingAmount || 0).toLocaleString()}
-                        </span>
-                      </div>
-                    )}
-                  </div>
-                )}
+
 
                 {order.notes && (
                   <div style={{
@@ -3053,14 +3204,59 @@ const Orders = ({ user }) => {
                         style={{ fontSize: '12px' }}
                         onClick={() => handleConfirmDelivery(order)}
                         disabled={confirmingDeliveryId === (order.orderId || order.id)}
-                        title="Xác nhận giao xe và trừ kho"
+                        title="Confirm delivery and deduct inventory"
                       >
                         <i className="bx bx-car"></i>
                         {confirmingDeliveryId === (order.orderId || order.id) ? 'Delivering...' : 'Shipping'}
                       </button>
                     )}
+                    {/* Create Payment Button for Dealer Staff */}
+                    {userRole === 'DEALER_STAFF' &&
+                      order.status !== 'CANCELLED' &&
+                      (order.paymentStatus || '').toUpperCase() !== 'PAID' && (
+                        <button
+                          className="btn btn-primary"
+                          style={{ fontSize: '12px', display: 'flex', alignItems: 'center', gap: '4px' }}
+                          onClick={() => handleOpenPaymentModal(order)}
+                          title="Create payment for this order"
+                        >
+                          <i className="bx bx-dollar-circle"></i>
+                          Create Payment
+                        </button>
+                      )}
                   </div>
                   <div style={{ display: 'flex', gap: '8px' }}>
+                    {/* Nút xác nhận VNPay cho đơn VNPay chưa thanh toán */}
+                    {(() => {
+                      const paymentMethod = String(order.displayPaymentMethod || order.paymentMethod || '').toUpperCase();
+                      const paymentStatusText = String(
+                        order.normalizedPaymentStatus || order.paymentStatus || order.workflowPaymentStatus || ''
+                      ).toUpperCase();
+                      const hasPendingVnpay =
+                        Array.isArray(order.orderPayments) &&
+                        order.orderPayments.some(
+                          (p) =>
+                            String(p.paymentMethod || '').toUpperCase() === 'VNPAY' &&
+                            String(p.status || '').toUpperCase() === 'PENDING'
+                        );
+                      const canQuickPay =
+                        paymentMethod === 'VNPAY' &&
+                        !paymentStatusText.includes('PAID') &&
+                        !hasPendingVnpay;
+                      if (!canQuickPay) return null;
+                      return (
+                        <button
+                          className="btn btn-primary"
+                          style={{ padding: '6px 10px', fontSize: '12px', display: 'flex', alignItems: 'center', gap: '4px' }}
+                          title="Create VNPay payment link for this order"
+                          onClick={() => handleQuickVNPayPayment(order)}
+                        >
+                          <i className="bx bx-credit-card"></i>
+                          Confirm VNPay Payment
+                        </button>
+                      );
+                    })()}
+
                     <button
                       className="btn btn-outline"
                       style={{ padding: '6px', fontSize: '14px' }}
@@ -3315,7 +3511,9 @@ const Orders = ({ user }) => {
                       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                         <div>
                           <div style={{ fontWeight: '600', color: 'var(--color-text)', marginBottom: '4px' }}>
-                            Quote #{quote.quoteId || quote.id}
+                            Quote #{quote.quoteId || quote.id} <span style={{ fontWeight: '400', fontSize: '13px', color: 'var(--color-text-muted)', marginLeft: '8px' }}>
+                              ({new Date(quote.approvedAt || quote.createdDate).toLocaleDateString('vi-VN')})
+                            </span>
                           </div>
                           <div style={{ fontSize: '14px', color: 'var(--color-text-muted)' }}>
                             {customerName ? `${customerName} - ${vehicleName}` : vehicleName}
@@ -3803,7 +4001,10 @@ const Orders = ({ user }) => {
                   <div style={{ padding: '14px', borderRadius: 'var(--radius)', border: '1px solid var(--color-border)', background: 'var(--color-bg)' }}>
                     <div style={{ fontSize: '12px', color: 'var(--color-text-muted)', marginBottom: '4px' }}>Created At</div>
                     <div style={{ fontWeight: 600, color: 'var(--color-text)' }}>
-                      {activeOrderDetail?.orderDate ? new Date(activeOrderDetail.orderDate).toLocaleString() : 'N/A'}
+                      {(() => {
+                        const createdAt = resolveOrderCreatedAt(activeOrderDetail);
+                        return createdAt ? new Date(createdAt).toLocaleString() : 'N/A';
+                      })()}
                     </div>
                   </div>
                   <div style={{ padding: '14px', borderRadius: 'var(--radius)', border: '1px solid var(--color-border)', background: 'var(--color-bg)' }}>
@@ -3822,41 +4023,7 @@ const Orders = ({ user }) => {
                   </div>
                 </div>
 
-                {/* Payment Info Section */}
-                {(activeOrderDetail?.paidAmount > 0 || activeOrderDetail?.remainingAmount > 0) && (
-                  <div style={{
-                    padding: '16px',
-                    borderRadius: 'var(--radius)',
-                    border: '1px solid rgba(59, 130, 246, 0.3)',
-                    background: 'rgba(59, 130, 246, 0.1)'
-                  }}>
-                    <div style={{ fontWeight: 600, color: 'var(--color-text)', marginBottom: '12px' }}>
-                      Payment Information
-                    </div>
-                    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(150px, 1fr))', gap: '12px' }}>
-                      <div>
-                        <div style={{ fontSize: '12px', color: 'var(--color-text-muted)', marginBottom: '4px' }}>Paid</div>
-                        <div style={{ fontSize: '16px', fontWeight: '700', color: '#10b981' }}>
-                          ${(activeOrderDetail.paidAmount || 0).toLocaleString()}
-                        </div>
-                      </div>
-                      {activeOrderDetail?.hasRemainingDebt && (
-                        <div>
-                          <div style={{ fontSize: '12px', color: 'var(--color-text-muted)', marginBottom: '4px' }}>Outstanding</div>
-                          <div style={{ fontSize: '16px', fontWeight: '700', color: '#f59e0b' }}>
-                            ${(activeOrderDetail.remainingAmount || 0).toLocaleString()}
-                          </div>
-                        </div>
-                      )}
-                      <div>
-                        <div style={{ fontSize: '12px', color: 'var(--color-text-muted)', marginBottom: '4px' }}>Status</div>
-                        <div style={{ fontSize: '14px', fontWeight: '600', color: 'var(--color-text)' }}>
-                          {activeOrderDetail?.normalizedPaymentStatus || activeOrderDetail?.paymentStatus || 'N/A'}
-                        </div>
-                      </div>
-                    </div>
-                  </div>
-                )}
+
 
                 {/* Payment History Table */}
                 {activeOrderDetail?.orderPayments?.length > 0 && (
@@ -4043,13 +4210,99 @@ const Orders = ({ user }) => {
                   </div>
                 )}
               </div>
-            )}
-          </div>
-        </div>
+            )
+            }
+          </div >
+        </div >
       )}
 
       {/* Approve Order Modal */}
-      {showApproveModal && selectedOrder && (
+      {
+        showApproveModal && selectedOrder && (
+          <div style={{
+            position: 'fixed',
+            top: 0,
+            left: 0,
+            right: 0,
+            bottom: 0,
+            background: 'rgba(0, 0, 0, 0.5)',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            zIndex: 1000
+          }}>
+            <div style={{
+              background: 'var(--color-surface)',
+              borderRadius: 'var(--radius)',
+              padding: '24px',
+              width: '90%',
+              maxWidth: '400px'
+            }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '24px' }}>
+                <h3>Approve Order</h3>
+                <button
+                  onClick={() => {
+                    setShowApproveModal(false);
+                    setSelectedOrder(null);
+                    setApproveNotes('');
+                  }}
+                  style={{ background: 'none', border: 'none', fontSize: '24px', cursor: 'pointer', color: 'var(--color-text-muted)' }}
+                >
+                  <i className="bx bx-x"></i>
+                </button>
+              </div>
+
+              <div style={{ marginBottom: '16px' }}>
+                <div style={{ fontSize: '14px', color: 'var(--color-text-muted)', marginBottom: '4px' }}>Order</div>
+                <div style={{ fontWeight: '600', color: 'var(--color-text)' }}>
+                  {selectedOrder.displayOrderNumber || selectedOrder.orderNumber || selectedOrder.orderId}
+                </div>
+              </div>
+
+              <div style={{ marginBottom: '16px' }}>
+                <label style={{ display: 'block', marginBottom: '8px', fontSize: '14px', fontWeight: '600', color: 'var(--color-text)' }}>
+                  Approval Notes (Optional)
+                </label>
+                <textarea
+                  value={approveNotes}
+                  onChange={(e) => setApproveNotes(e.target.value)}
+                  style={{
+                    width: '100%',
+                    padding: '12px',
+                    border: '1px solid var(--color-border)',
+                    borderRadius: 'var(--radius)',
+                    background: 'var(--color-bg)',
+                    color: 'var(--color-text)',
+                    fontSize: '14px',
+                    minHeight: '80px',
+                    resize: 'vertical'
+                  }}
+                  placeholder="Add approval notes..."
+                />
+              </div>
+
+              <div style={{ display: 'flex', gap: '12px', justifyContent: 'flex-end' }}>
+                <button
+                  className="btn btn-outline"
+                  onClick={() => {
+                    setShowApproveModal(false);
+                    setSelectedOrder(null);
+                    setApproveNotes('');
+                  }}
+                >
+                  Cancel
+                </button>
+                <button className="btn btn-primary" onClick={handleConfirmApprove}>
+                  Confirm Approve
+                </button>
+              </div>
+            </div>
+          </div>
+        )
+      }
+
+      {/* Create Payment Modal */}
+      {showPaymentModal && selectedOrderForPayment && (
         <div style={{
           position: 'fixed',
           top: 0,
@@ -4067,70 +4320,128 @@ const Orders = ({ user }) => {
             borderRadius: 'var(--radius)',
             padding: '24px',
             width: '90%',
-            maxWidth: '400px'
+            maxWidth: '450px'
           }}>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '24px' }}>
-              <h3>Approve Order</h3>
+              <h3>Create Payment</h3>
               <button
-                onClick={() => {
-                  setShowApproveModal(false);
-                  setSelectedOrder(null);
-                  setApproveNotes('');
-                }}
+                onClick={handleClosePaymentModal}
                 style={{ background: 'none', border: 'none', fontSize: '24px', cursor: 'pointer', color: 'var(--color-text-muted)' }}
               >
                 <i className="bx bx-x"></i>
               </button>
             </div>
 
-            <div style={{ marginBottom: '16px' }}>
-              <div style={{ fontSize: '14px', color: 'var(--color-text-muted)', marginBottom: '4px' }}>Order</div>
-              <div style={{ fontWeight: '600', color: 'var(--color-text)' }}>
-                {selectedOrder.displayOrderNumber || selectedOrder.orderNumber || selectedOrder.orderId}
+            <form onSubmit={handleSubmitPayment}>
+              <div style={{ marginBottom: '16px' }}>
+                <div style={{ fontSize: '14px', color: 'var(--color-text-muted)', marginBottom: '4px' }}>Order</div>
+                <div style={{ fontWeight: '600', color: 'var(--color-text)' }}>
+                  {selectedOrderForPayment.displayOrderNumber || selectedOrderForPayment.orderNumber || selectedOrderForPayment.orderId}
+                </div>
+                <div style={{ fontSize: '13px', color: 'var(--color-text-muted)', marginTop: '4px' }}>
+                  Total: ${Number(selectedOrderForPayment.totalAmount || 0).toLocaleString()} |
+                  Paid: ${Number(selectedOrderForPayment.paidAmount || 0).toLocaleString()} |
+                  Remaining: ${Number(selectedOrderForPayment.remainingAmount || 0).toLocaleString()}
+                </div>
               </div>
-            </div>
 
-            <div style={{ marginBottom: '16px' }}>
-              <label style={{ display: 'block', marginBottom: '8px', fontSize: '14px', fontWeight: '600', color: 'var(--color-text)' }}>
-                Approval Notes (Optional)
-              </label>
-              <textarea
-                value={approveNotes}
-                onChange={(e) => setApproveNotes(e.target.value)}
-                style={{
-                  width: '100%',
-                  padding: '12px',
-                  border: '1px solid var(--color-border)',
-                  borderRadius: 'var(--radius)',
-                  background: 'var(--color-bg)',
-                  color: 'var(--color-text)',
-                  fontSize: '14px',
-                  minHeight: '80px',
-                  resize: 'vertical'
-                }}
-                placeholder="Add approval notes..."
-              />
-            </div>
+              <div style={{ marginBottom: '16px' }}>
+                <label style={{ display: 'block', marginBottom: '8px', fontSize: '14px', fontWeight: '600', color: 'var(--color-text)' }}>
+                  Payment Method
+                </label>
+                <select
+                  value={paymentFormData.paymentMethod}
+                  onChange={(e) => setPaymentFormData({ ...paymentFormData, paymentMethod: e.target.value })}
+                  style={{
+                    width: '100%',
+                    padding: '12px',
+                    border: '1px solid var(--color-border)',
+                    borderRadius: 'var(--radius)',
+                    background: 'var(--color-bg)',
+                    color: 'var(--color-text)',
+                    fontSize: '14px'
+                  }}
+                >
+                  <option value="CASH">Cash</option>
+                  <option value="TRANSFER">Bank Transfer</option>
+                </select>
+              </div>
 
-            <div style={{ display: 'flex', gap: '12px', justifyContent: 'flex-end' }}>
-              <button
-                className="btn btn-outline"
-                onClick={() => {
-                  setShowApproveModal(false);
-                  setSelectedOrder(null);
-                  setApproveNotes('');
-                }}
-              >
-                Cancel
-              </button>
-              <button className="btn btn-primary" onClick={handleConfirmApprove}>
-                Confirm Approve
-              </button>
-            </div>
+              <div style={{ marginBottom: '16px' }}>
+                <label style={{ display: 'block', marginBottom: '8px', fontSize: '14px', fontWeight: '600', color: 'var(--color-text)' }}>
+                  Payment Percentage (%)
+                </label>
+                <select
+                  value={paymentFormData.paymentPercentage}
+                  onChange={(e) => setPaymentFormData({ ...paymentFormData, paymentPercentage: e.target.value })}
+                  style={{
+                    width: '100%',
+                    padding: '12px',
+                    border: '1px solid var(--color-border)',
+                    borderRadius: 'var(--radius)',
+                    background: 'var(--color-bg)',
+                    color: 'var(--color-text)',
+                    fontSize: '14px'
+                  }}
+                >
+                  <option value="30">30%</option>
+                  <option value="50">50%</option>
+                  <option value="70">70%</option>
+                  <option value="100">100% (Full Remaining)</option>
+                </select>
+              </div>
+
+              <div style={{ marginBottom: '16px' }}>
+                <label style={{ display: 'block', marginBottom: '8px', fontSize: '14px', fontWeight: '600', color: 'var(--color-text)' }}>
+                  Notes (Optional)
+                </label>
+                <textarea
+                  value={paymentFormData.notes}
+                  onChange={(e) => setPaymentFormData({ ...paymentFormData, notes: e.target.value })}
+                  style={{
+                    width: '100%',
+                    padding: '12px',
+                    border: '1px solid var(--color-border)',
+                    borderRadius: 'var(--radius)',
+                    background: 'var(--color-bg)',
+                    color: 'var(--color-text)',
+                    fontSize: '14px',
+                    minHeight: '80px',
+                    resize: 'vertical'
+                  }}
+                  placeholder="Payment notes..."
+                />
+              </div>
+
+              <div style={{ display: 'flex', gap: '12px', justifyContent: 'flex-end' }}>
+                <button
+                  type="button"
+                  className="btn btn-outline"
+                  onClick={handleClosePaymentModal}
+                  disabled={paymentSubmitting}
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  className="btn btn-primary"
+                  disabled={paymentSubmitting}
+                >
+                  {paymentSubmitting ? (
+                    <>
+                      <i className="bx bx-loader-alt bx-spin" style={{ marginRight: '6px' }}></i>
+                      Processing...
+                    </>
+                  ) : (
+                    'Confirm Payment'
+                  )}
+                </button>
+              </div>
+            </form>
           </div>
         </div>
       )}
-    </div>
+    </div >
   );
 };
 

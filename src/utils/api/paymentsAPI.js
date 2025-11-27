@@ -13,15 +13,7 @@ export const paymentsAPI = {
     return response.data;
   },
 
-  // Create VNPay payment for installment
-  createVNPayPaymentForInstallment: async (orderId, scheduleId, amount) => {
-    const response = await apiClient.post('/api/payments/vnpay/create', {
-      orderId,
-      scheduleId,
-      amount
-    });
-    return response.data;
-  },
+
 
   // Get payment by transaction reference (VNPay)
   getByTxnRef: async (txnRef) => {

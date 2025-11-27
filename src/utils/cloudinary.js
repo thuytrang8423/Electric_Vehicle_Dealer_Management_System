@@ -21,26 +21,53 @@
       // choose endpoint based on resource_type
       const endpoint = `https://api.cloudinary.com/v1_1/${CLOUDINARY_CONFIG.cloud_name}/${rt}/upload`;
   
+      console.log('Uploading to Cloudinary:', {
+        cloud_name: CLOUDINARY_CONFIG.cloud_name,
+        upload_preset: CLOUDINARY_CONFIG.upload_preset,
+        resource_type: rt,
+        file_name: file.name,
+        file_size: file.size,
+        file_type: file.type
+      });
+  
       const response = await fetch(endpoint, {
         method: 'POST',
         body: formData,
       });
   
       if (!response.ok) {
-        const errorData = await response.json().catch(() => ({}));
-        throw new Error(errorData.error?.message || 'Upload failed');
+        const errorText = await response.text();
+        let errorData;
+        try {
+          errorData = JSON.parse(errorText);
+        } catch {
+          errorData = { error: { message: errorText || 'Upload failed' } };
+        }
+        console.error('Cloudinary upload error:', errorData);
+        throw new Error(errorData.error?.message || errorData.message || `Upload failed: ${response.status} ${response.statusText}`);
       }
   
       const data = await response.json();
+      console.log('Cloudinary upload success:', {
+        public_id: data.public_id,
+        secure_url: data.secure_url,
+        url: data.url,
+        format: data.format
+      });
+      
       // Return full data so caller can store public_id + resource_type etc.
       return data;
     } catch (error) {
-      console.error('Error uploading file:', error);
+      console.error('Error uploading file to Cloudinary:', error);
       throw error;
     }
   };
 
-  export const uploadImage = async (file) => uploadFile(file, 'image');
+  export const uploadImage = async (file) => {
+    const data = await uploadFile(file, 'image');
+    // Return secure_url for image uploads
+    return data.secure_url || data.url || '';
+  };
 
   export const deleteImage = async (publicId) => {
     try {

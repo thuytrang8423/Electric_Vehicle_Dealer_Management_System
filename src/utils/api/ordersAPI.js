@@ -107,15 +107,19 @@ export const ordersAPI = {
     return response.data;
   },
 
-  // DEALER_MANAGER: Approve order
-  approveByDealerManager: async (orderId, approvedBy, notes) => {
-    const response = await apiClient.post(
-      `/api/dealer-workflow/orders/${orderId}/approve?approvedBy=${approvedBy}`,
-      null,
-      { params: { notes } }
-    );
-    return response.data;
-  },
+  // DEALER_MANAGER: Approve order
+  // API: POST /api/dealer-workflow/orders/{orderId}/approve?approvedBy={approvedBy}&notes={notes}
+  approveByDealerManager: async (orderId, approvedBy, notes) => {
+    const params = new URLSearchParams();
+    params.append('approvedBy', approvedBy);
+    if (notes) {
+      params.append('notes', notes);
+    }
+    const response = await apiClient.post(
+      `/api/dealer-workflow/orders/${orderId}/approve?${params.toString()}`
+    );
+    return response.data;
+  },
 
   // DEALER_MANAGER: Reject order
   rejectByDealerManager: async (orderId, rejectedBy, reason) => {
@@ -165,15 +169,25 @@ export const ordersAPI = {
     return response.data;
   },
 
-  // Legacy: Check if order can be approved (defaults to dealer workflow for backward compatibility)
-  canApprove: async (orderId) => {
-    try {
-      const response = await apiClient.get(`/api/dealer-workflow/orders/${orderId}/can-approve`);
-      return response.data;
-    } catch (error) {
-      // Fallback to EVM workflow if dealer workflow fails
-      const response = await apiClient.get(`/api/workflow/orders/${orderId}/can-approve`);
-      return response.data;
-    }
-  }
+  // Legacy: Check if order can be approved (defaults to dealer workflow for backward compatibility)
+  canApprove: async (orderId) => {
+    try {
+      const response = await apiClient.get(`/api/dealer-workflow/orders/${orderId}/can-approve`);
+      return response.data;
+    } catch (error) {
+      // Fallback to EVM workflow if dealer workflow fails
+      const response = await apiClient.get(`/api/workflow/orders/${orderId}/can-approve`);
+      return response.data;
+    }
+  },
+
+  // Confirm delivery and deduct inventory
+  // API: POST /api/orders/{orderId}/confirm-delivery
+  // Backend tự động xác định status:
+  // - Nếu order status là APPROVED (chưa trả hết) → DELIVERED_APPROVED
+  // - Nếu order status là COMPLETED (đã trả hết) → DELIVERED
+  confirmDelivery: async (orderId) => {
+    const response = await apiClient.post(`/api/orders/${orderId}/confirm-delivery`);
+    return response.data;
+  }
 };

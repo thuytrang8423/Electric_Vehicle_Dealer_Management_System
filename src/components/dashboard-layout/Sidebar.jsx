@@ -20,131 +20,51 @@ const Sidebar = ({ user, activeItem, onItemClick }) => {
     }));
   };
 
-  // Define menu items based on role
-  // Based on ROLE_FEATURES.md from backend
   const getMenuItems = (role) => {
     const allItems = [
-      // Overview & Activity
       { id: 'overview', label: 'Overview', icon: 'bx-home-alt-2', group: 'overview' },
-      // { id: 'activity', label: 'Activity History', icon: 'bx-history', group: 'overview' },
-      
-      // Vehicle Management
       { id: 'vehicles', label: 'Vehicles', icon: 'bx-car', group: 'vehicleManagement' },
       { id: 'vehicle-management', label: 'Vehicle Management', icon: 'bx-wrench', group: 'vehicleManagement' },
       { id: 'vehicle-types', label: 'Vehicle Types', icon: 'bx-category', group: 'vehicleManagement' },
-      
-      // Sales & Contracts
       { id: 'quotes', label: 'Quotes', icon: 'bx-file', group: 'sales' },
       { id: 'orders', label: 'Orders', icon: 'bx-clipboard', group: 'sales' },
       { id: 'sales-contracts', label: 'Sales Contracts', icon: 'bx-file-blank', group: 'sales' },
-      
-      // Logistics
-      // { id: 'vehicle-orders', label: 'Vehicle Orders', icon: 'bx-package', group: 'logistics' },
-      // { id: 'delivery-tracking', label: 'Delivery Tracking', icon: 'bx-location-plus', group: 'logistics' },
-      // { id: 'vehicle-distribution', label: 'Vehicle Distribution', icon: 'bx-package', group: 'logistics' },
       { id: 'inventory', label: 'Inventory', icon: 'bx-box', group: 'logistics' },
-      
-      // Customers & Services
       { id: 'customers', label: 'Customers', icon: 'bx-group', group: 'customers' },
       { id: 'test-drives', label: 'Test Drives', icon: 'bx-car', group: 'customers' },
-      
-      // Finance & Promotions
       { id: 'payments', label: 'Payments', icon: 'bx-credit-card', group: 'finance' },
       { id: 'installments', label: 'Installments', icon: 'bx-calendar-check', group: 'finance' },
       { id: 'debt-management', label: 'Debt Management', icon: 'bx-dollar-circle', group: 'finance' },
-      // { id: 'promotions', label: 'Promotions', icon: 'bx-gift', group: 'finance' },
-      
-      // Organization
       { id: 'dealers', label: 'Dealers', icon: 'bx-store', group: 'organization' },
       { id: 'users', label: 'Users', icon: 'bx-user', group: 'organization' },
-      
-      // Reports & Audit
-      // { id: 'reports', label: 'Reports', icon: 'bx-bar-chart-alt-2', group: 'reports' },
       { id: 'audit-logs', label: 'Audit Logs', icon: 'bx-history', group: 'reports' },
-      
-      // Settings
       { id: 'settings', label: 'Settings', icon: 'bx-cog', group: 'settings' }
     ];
 
-    // Normalize role to uppercase for comparison
-    const normalizedRole = role?.toUpperCase();
+    const normalizedRole = String(role || '').toUpperCase().replace(/[-_]/g, '_');
+    
+    const rolePermissions = {
+      DEALER_STAFF: ['overview', 'activity', 'vehicles', 'quotes', 'orders', 'sales-contracts', 
+                     'customers', 'customer-feedback', 'test-drives', 'payments', 'promotions', 'settings'],
+      DEALER_MANAGER: ['overview', 'activity', 'vehicles', 'quotes', 'orders', 'sales-contracts', 
+                       'customers', 'test-drives', 'payments', 'installments', 'debt-management', 
+                       'inventory', 'promotions', 'reports', 'settings'],
+      EVM_MANAGER: ['overview', 'activity', 'vehicles', 'vehicle-management', 'vehicle-types', 
+                    'vehicle-orders', 'vehicle-distribution', 'quotes', 'orders', 'sales-contracts', 
+                    'inventory', 'payments', 'debt-management', 'promotions', 'dealers', 'users', 
+                    'reports', 'delivery-tracking', 'settings'],
+      ADMIN: ['overview', 'activity', 'vehicles', 'vehicle-management', 'vehicle-types', 
+              'vehicle-orders', 'vehicle-distribution', 'sales-contracts', 'inventory', 
+              'payments', 'installments', 'debt-management', 'promotions', 'dealers', 'users', 
+              'reports', 'delivery-tracking', 'audit-logs', 'settings']
+    };
 
-    // Role-based filtering based on ROLE_FEATURES.md
-    switch (normalizedRole) {
-      case 'DEALER_STAFF':
-        return allItems.filter(item => 
-          ['overview', 'activity', 'vehicles', 'quotes', 'orders', 'sales-contracts', 
-           'customers', 'customer-feedback', 'test-drives', 'payments', 'promotions', 'settings'].includes(item.id)
-        );
-      
-      case 'DEALER_MANAGER':
-        return allItems.filter(item => 
-          ['overview', 'activity', 'vehicles', 'quotes', 'orders', 'sales-contracts', 
-           'customers', 'test-drives', 'payments', 'installments', 'debt-management', 'inventory',
-           'promotions', 'reports', 'settings'].includes(item.id)
-        );
-      
-      case 'EVM_MANAGER':
-        return allItems.filter(item => 
-          ['overview', 'activity', 'vehicles', 'vehicle-management', 'vehicle-types', 
-           'vehicle-orders', 'vehicle-distribution', 'quotes', 'orders', 'sales-contracts', 
-           'inventory', 'payments', 'debt-management', 'promotions', 'dealers', 'users', 'reports', 
-           'delivery-tracking', 'settings'].includes(item.id)
-        );
-      
-      case 'ADMIN':
-        // ADMIN: All EVM_MANAGER permissions + Audit Logs
-        // NOTE: NO Customers, Customer Feedback, Test Drives (as per ROLE_FEATURES.md)
-        // Updated: hide Quotes & Orders entries for Admin dashboard
-        return allItems.filter(item => 
-          ['overview', 'activity', 'vehicles', 'vehicle-management', 'vehicle-types', 
-           'vehicle-orders', 'vehicle-distribution', 'sales-contracts', 
-           'inventory', 'payments', 'installments', 'debt-management', 'promotions', 'dealers', 'users', 'reports', 
-           'delivery-tracking', 'audit-logs', 'settings'].includes(item.id)
-        );
-      
-      // Fallback for lowercase roles (for backward compatibility)
-      case 'DEALER-STAFF':
-      case 'dealer-staff':
-        return allItems.filter(item => 
-          ['overview', 'activity', 'vehicles', 'quotes', 'orders', 'sales-contracts', 
-           'customers', 'test-drives', 'payments', 'settings'].includes(item.id)
-        );
-      
-      case 'DEALER-MANAGER':
-      case 'dealer-manager':
-        return allItems.filter(item => 
-          ['overview', 'activity', 'vehicles', 'quotes', 'orders', 'sales-contracts', 
-           'customers', 'test-drives', 'payments', 'installments', 'debt-management', 'inventory',
-            'reports', 'settings'].includes(item.id)
-        );
-      
-      case 'EVM-MANAGER':
-      case 'evm-manager':
-        return allItems.filter(item => 
-          ['overview', 'activity', 'vehicles', 'vehicle-management', 'vehicle-types', 
-           'vehicle-orders', 'vehicle-distribution', 'quotes', 'orders', 'sales-contracts', 
-           'inventory', 'payments', 'debt-management', 'promotions', 'dealers', 'users', 'reports', 
-           'delivery-tracking', 'settings'].includes(item.id)
-        );
-      
-      case 'admin':
-        return allItems.filter(item => 
-          ['overview', 'activity', 'vehicles', 'vehicle-management', 'vehicle-types', 
-           'vehicle-orders', 'vehicle-distribution', 'sales-contracts', 
-           'inventory', 'payments', 'installments', 'debt-management', 'promotions', 'dealers', 'users', 'reports', 
-           'delivery-tracking', 'audit-logs', 'settings'].includes(item.id)
-        );
-      
-      default:
-        // Default: show all items (for development/debugging)
-        return allItems;
-    }
+    const allowedIds = rolePermissions[normalizedRole] || allItems.map(item => item.id);
+    return allItems.filter(item => allowedIds.includes(item.id));
   };
 
   const menuItems = getMenuItems(user.role);
 
-  // Define groups with labels
   const groupLabels = {
     overview: 'OVERVIEW & ACTIVITY',
     vehicleManagement: 'VEHICLE MANAGEMENT',
@@ -154,10 +74,9 @@ const Sidebar = ({ user, activeItem, onItemClick }) => {
     finance: 'FINANCE',
     organization: 'ORGANIZATION',
     reports: 'REPORTS & AUDIT',
-    settings: 'Setting'
+    settings: 'SETTINGS'
   };
 
-  // Group menu items by their group
   const groupedItems = menuItems.reduce((acc, item) => {
     if (!acc[item.group]) {
       acc[item.group] = [];
@@ -167,10 +86,9 @@ const Sidebar = ({ user, activeItem, onItemClick }) => {
   }, {});
 
   const renderGroup = (groupName, items) => {
-    const isExpanded = expandedGroups[groupName];
-    
-    // Don't render group if no items in it
     if (items.length === 0) return null;
+    
+    const isExpanded = expandedGroups[groupName];
 
     return (
       <div key={groupName} className="sidebar__group">

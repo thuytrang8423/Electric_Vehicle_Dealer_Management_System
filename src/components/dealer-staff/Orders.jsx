@@ -1,5 +1,7 @@
 import React, { useState, useEffect, useMemo, useCallback, useRef } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { ordersAPI } from '../../utils/api/ordersAPI';
+import { paymentsAPI } from '../../utils/api/paymentsAPI';
 import { quotesAPI } from '../../utils/api/quotesAPI';
 import { installmentsAPI } from '../../utils/api/installmentsAPI';
 import { customersAPI } from '../../utils/api/customersAPI';
@@ -181,7 +183,7 @@ const normalizeOrder = (order) => {
       order.vehicle?.display_name,
       order.vehicle?.vehicleTitle,
       // Kết hợp brand và modelName nếu có
-      order.vehicle?.brand && order.vehicle?.modelName 
+      order.vehicle?.brand && order.vehicle?.modelName
         ? `${order.vehicle.brand} ${order.vehicle.modelName}`
         : null,
       order.vehicle?.brand && order.vehicle?.name
@@ -238,6 +240,31 @@ const normalizeOrder = (order) => {
   const approvalStatus = (order.approvalStatus || order.orderApprovalStatus || order.workflowStatus || '').toUpperCase();
   const status = (order.status || order.orderStatus || '').toUpperCase();
 
+  // Normalize payment status
+  const paymentStatus = (
+    order.paymentStatus ||
+    order.payment_status ||
+    order.workflowPaymentStatus ||
+    ''
+  ).toUpperCase();
+
+  // Get payment amounts
+  const paidAmount = Number(order.paidAmount ?? order.paid_amount ?? order.totalPaid ?? 0);
+  const remainingAmount = Number(order.remainingAmount ?? order.remaining_amount ?? order.balanceDue ?? 0);
+  const totalAmount = Number(order.totalAmount ?? order.total_amount ?? order.amount ?? 0);
+
+  // Determine if order is fully paid
+  // Match đúng enum PaymentStatus từ backend:
+  // - PAID           -> fully paid
+  // - PARTIALLY_PAID -> còn nợ
+  // - UNPAID         -> chưa thanh toán
+  const isFullyPaid = paymentStatus === 'PAID';
+  const hasRemainingDebt =
+    paymentStatus === 'PARTIALLY_PAID' || paymentStatus === 'UNPAID';
+
+  // Không tự override business status từ FE, chỉ normalize để hiển thị
+  const normalizedStatus = status;
+
   return {
     ...order,
     resolvedCustomer:
@@ -250,38 +277,144 @@ const normalizeOrder = (order) => {
       (order.vehicleId
         ? { id: order.vehicleId, name: vehicleName }
         : quoteVehicleId
-        ? { id: quoteVehicleId, name: vehicleName }
-        : null),
+          ? { id: quoteVehicleId, name: vehicleName }
+          : null),
     displayCustomerName: customerName,
     displayVehicleName: vehicleName,
     displayOrderNumber: orderNumber || 'N/A',
     displayPaymentMethod: paymentMethodRaw ? paymentMethodRaw.toUpperCase() : 'N/A',
     normalizedApprovalStatus: approvalStatus,
-    normalizedStatus: status,
+    normalizedStatus,
+    normalizedPaymentStatus: paymentStatus,
+    paidAmount: paidAmount,
+    remainingAmount: remainingAmount,
+    totalAmount,
+    isFullyPaid,
+    hasRemainingDebt,
   };
 };
 
 const normalizeOrdersList = (data) =>
   Array.isArray(data) ? data.map(normalizeOrder).filter(Boolean) : [];
 
-const extractOrderTimestamp = (order) => {
-  if (!order) return 0;
+const recomputeStatusFromPayments = (order, remainingAmount, paidAmount) => {
+  const baseStatus = (order.normalizedStatus || order.status || '').toUpperCase();
+  const approvalStatus = (order.normalizedApprovalStatus || order.approvalStatus || '').toUpperCase();
+  const deliveryStatus = (order.deliveryStatus || '').toUpperCase();
+
+  const alreadyDelivered =
+    baseStatus.includes('DELIVER') || deliveryStatus.includes('DELIVER');
+
+  if (alreadyDelivered) {
+    return order.normalizedStatus || order.status || 'DELIVERED';
+  }
+
+  const isApproved =
+    approvalStatus === 'APPROVED' || baseStatus === 'APPROVED';
+
+  if (isApproved) {
+    if (remainingAmount <= 0 && paidAmount > 0) {
+      return 'COMPLETED';
+    }
+    return 'APPROVED';
+  }
+
+  return order.normalizedStatus || order.status || '';
+};
+
+const normalizePaymentHistory = (data) => {
+  if (Array.isArray(data)) return data;
+  if (Array.isArray(data?.payments)) return data.payments;
+  return [];
+};
+
+const aggregatePaymentData = (order, paymentHistoryRaw = [], paymentOverview = null) => {
+  const paymentHistory = normalizePaymentHistory(paymentHistoryRaw);
+
+  const totalAmount =
+    Number(paymentOverview?.totalAmount ?? order.totalAmount ?? order.amount ?? 0) || 0;
+
+  const calculatedPaid = paymentHistory
+    .filter((payment) =>
+      String(payment?.status || '').toUpperCase().includes('COMPLETE')
+    )
+    .reduce((sum, payment) => sum + Number(payment?.amount ?? 0), 0);
+
+  // Ưu tiên số tiền đã trả từ Order API (do backend tính toán chính xác)
+  // Tránh việc cộng dồn thủ công từ payment history vì có thể bị duplicate hoặc sai lệch
+  const paidAmount = Number(order.paidAmount ?? order.paid_amount ?? order.totalPaid ?? 0);
+
+  // Ưu tiên số tiền còn lại từ Order API (do backend tính toán chính xác)
+  // Tránh việc tính toán thủ công từ totalAmount - paidAmount vì có thể sai lệch
+  const remainingAmount = Number(order.remainingAmount ?? order.remaining_amount ?? order.balanceDue ?? 0);
+
+  // Bám sát PaymentStatus do backend trả về, không tự suy ra từ số tiền
+  const paymentStatusRaw =
+    paymentOverview?.paymentStatus ||
+    order.paymentStatus ||
+    'UNPAID';
+
+  const normalizedPaymentStatus = String(paymentStatusRaw || '').toUpperCase();
+
+  // Không tự override OrderStatus từ FE
+  const normalizedStatus = order.normalizedStatus || order.status;
+
+  return {
+    paymentOverview,
+    orderPayments: paymentHistory,
+    totalAmount: totalAmount || order.totalAmount || 0,
+    paidAmount,
+    remainingAmount,
+    paymentStatus: paymentStatusRaw,
+    normalizedPaymentStatus,
+    isFullyPaid: remainingAmount <= 0 && paidAmount > 0,
+    hasRemainingDebt: remainingAmount > 0,
+    normalizedStatus,
+    status: order.status,
+  };
+};
+
+
+
+const resolveOrderCreatedAt = (order) => {
+  if (!order) return null;
   const candidates = [
-    order.createdDate,
+    order.approvedAt,
+    order.approvedDate,
     order.createdAt,
+    order.createdDate,
     order.creationDate,
     order.created_on,
     order.createdOn,
     order.orderDate,
     order.orderedAt,
-    order.updatedDate,
-    order.updatedAt,
-    order.approvedDate,
-    order.approvedAt,
-    order.deliveryDate,
   ];
 
   for (const candidate of candidates) {
+    if (!candidate) continue;
+    const time = new Date(candidate).getTime();
+    if (!Number.isNaN(time)) {
+      return candidate;
+    }
+  }
+  return null;
+};
+
+const resolveOrderSortTimestamp = (order) => {
+  if (!order) return null;
+  const primary = resolveOrderCreatedAt(order);
+  if (primary) {
+    const time = new Date(primary).getTime();
+    if (!Number.isNaN(time)) return time;
+  }
+
+  const fallbackCandidates = [
+    order.updatedDate,
+    order.updatedAt,
+    order.deliveryDate,
+  ];
+
+  for (const candidate of fallbackCandidates) {
     if (!candidate) continue;
     const time = new Date(candidate).getTime();
     if (!Number.isNaN(time)) {
@@ -290,12 +423,30 @@ const extractOrderTimestamp = (order) => {
   }
 
   const numericFallback = Number(order.orderId ?? order.id ?? 0);
-  return Number.isNaN(numericFallback) ? 0 : numericFallback;
+  return Number.isNaN(numericFallback) ? null : numericFallback;
+};
+
+const getOrderNumericId = (order) => {
+  if (!order) return 0;
+  const value = Number(order.orderId ?? order.id ?? 0);
+  return Number.isNaN(value) ? 0 : value;
+};
+
+const formatOrderCreatedDisplay = (order) => {
+  const timestamp = resolveOrderSortTimestamp(order);
+  if (!timestamp) return 'N/A';
+  return new Date(timestamp).toLocaleString('vi-VN');
 };
 
 const sortOrdersByNewest = (list = []) => {
   if (!Array.isArray(list)) return [];
-  return [...list].sort((a, b) => extractOrderTimestamp(b) - extractOrderTimestamp(a));
+  return [...list].sort((a, b) => {
+    const idDiff = getOrderNumericId(b) - getOrderNumericId(a);
+    if (idDiff !== 0) return idDiff;
+    const timeB = resolveOrderSortTimestamp(b) ?? 0;
+    const timeA = resolveOrderSortTimestamp(a) ?? 0;
+    return timeB - timeA;
+  });
 };
 
 const INSTALLMENT_MONTH_OPTIONS = [3, 6, 9, 12];
@@ -455,27 +606,36 @@ const installmentPreviewCardStyle = {
 };
 
 const Orders = ({ user }) => {
-  const [orders, setOrders] = useState([]);
-  const [loading, setLoading] = useState(true);
-  const [filterStatus, setFilterStatus] = useState('all');
-  const [searchTerm, setSearchTerm] = useState('');
-  const [showCreateFromQuoteModal, setShowCreateFromQuoteModal] = useState(false);
-  const [availableQuotes, setAvailableQuotes] = useState([]);
-  const [selectedQuote, setSelectedQuote] = useState(null);
-  const [showOrderForm, setShowOrderForm] = useState(false);
-  const [orderFormData, setOrderFormData] = useState({
-    quoteId: null,
-    customerId: null,
-    dealerId: null,
-    orderDate: new Date().toISOString().split('T')[0],
-    deliveryDate: '',
-    paymentMethod: 'VNPAY',
-    paymentPercentage: 0,
-    notes: ''
-  });
+  const navigate = useNavigate();
+  const [orders, setOrders] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [filterStatus, setFilterStatus] = useState('all');
+  const [searchTerm, setSearchTerm] = useState('');
+  const [showCreateFromQuoteModal, setShowCreateFromQuoteModal] = useState(false);
+  const [availableQuotes, setAvailableQuotes] = useState([]);
+  const [selectedQuote, setSelectedQuote] = useState(null);
+  const [showOrderForm, setShowOrderForm] = useState(false);
+  const [orderFormData, setOrderFormData] = useState({
+    quoteId: null,
+    customerId: null,
+    dealerId: null,
+    orderDate: new Date().toISOString().split('T')[0],
+    deliveryDate: '',
+    paymentMethod: 'VNPAY',
+    paymentPercentage: 0,
+    notes: ''
+  });
   const [showApproveModal, setShowApproveModal] = useState(false);
   const [selectedOrder, setSelectedOrder] = useState(null);
   const [approveNotes, setApproveNotes] = useState('');
+  const [showPaymentModal, setShowPaymentModal] = useState(false);
+  const [selectedOrderForPayment, setSelectedOrderForPayment] = useState(null);
+  const [paymentFormData, setPaymentFormData] = useState({
+    paymentMethod: 'CASH',
+    paymentPercentage: 100,
+    notes: ''
+  });
+  const [paymentSubmitting, setPaymentSubmitting] = useState(false);
   const [showOrderDetailModal, setShowOrderDetailModal] = useState(false);
   const [orderDetailLoading, setOrderDetailLoading] = useState(false);
   const [orderDetailError, setOrderDetailError] = useState('');
@@ -490,14 +650,15 @@ const Orders = ({ user }) => {
   const [vehicleLookup, setVehicleLookup] = useState({});
   const [quoteLookup, setQuoteLookup] = useState({});
   const pendingQuoteIdsRef = useRef(new Set());
+  const [confirmingDeliveryId, setConfirmingDeliveryId] = useState(null);
 
   // 1. THÊM STATE CHO TAB MỚI
   // 'all_dealer' (tất cả orders của dealer), 'my_orders' (chính manager tạo), 'staff_orders' (staff tạo)
-  const [tabFilter, setTabFilter] = useState('all_dealer'); 
+  const [tabFilter, setTabFilter] = useState('all_dealer');
   const [currentPage, setCurrentPage] = useState(1);
-  
-  const userRole = user?.role?.toUpperCase().replace(/-/g, '_');
-  const userId = user?.id || user?.userId || user?.user?.id;
+
+  const userRole = user?.role?.toUpperCase().replace(/-/g, '_');
+  const userId = user?.id || user?.userId || user?.user?.id;
   const userDealerId = user?.dealerId || user?.user?.dealerId;
 
   const resolveLookupCustomer = useCallback(
@@ -627,7 +788,7 @@ const Orders = ({ user }) => {
         }
       }
 
-      return null;  
+      return null;
     },
     [vehicleLookup, quoteLookup]
   );
@@ -705,9 +866,9 @@ const Orders = ({ user }) => {
       const quotePrimaryDetail = quoteDetails.length > 0 ? quoteData.quoteDetails[0] : null;
       const quoteVehicleCandidate = ensureObject(
         quoteData?.vehicle ||
-          quotePrimaryDetail?.vehicle ||
-          quotePrimaryDetail?.vehicleInfo ||
-          quotePrimaryDetail?.vehicleDetails
+        quotePrimaryDetail?.vehicle ||
+        quotePrimaryDetail?.vehicleInfo ||
+        quotePrimaryDetail?.vehicleDetails
       );
       const quoteVehicleId =
         quoteData?.vehicleId ||
@@ -717,26 +878,26 @@ const Orders = ({ user }) => {
         null;
       const quoteVehicleNameFromLookup = quoteData
         ? coalesceText(
-            quoteData.vehicleName,
-            quoteVehicleCandidate?.name,
-            quoteVehicleCandidate?.model,
-            quoteVehicleCandidate?.modelName,
-            quoteVehicleCandidate?.vehicleName,
-            quoteVehicleCandidate?.displayName,
-            quoteVehicleCandidate?.title,
-            quoteVehicleCandidate?.variantName,
-            // Kết hợp brand và modelName nếu có
-            quoteVehicleCandidate?.brand && quoteVehicleCandidate?.modelName 
-              ? `${quoteVehicleCandidate.brand} ${quoteVehicleCandidate.modelName}`
-              : null,
-            quoteVehicleCandidate?.brand && quoteVehicleCandidate?.name
-              ? `${quoteVehicleCandidate.brand} ${quoteVehicleCandidate.name}`
-              : null,
-            quotePrimaryDetail?.vehicleName,
-            quotePrimaryDetail?.vehicleModel,
-            quotePrimaryDetail?.vehicleDisplayName,
-            quotePrimaryDetail?.vehicleDescription
-          )
+          quoteData.vehicleName,
+          quoteVehicleCandidate?.name,
+          quoteVehicleCandidate?.model,
+          quoteVehicleCandidate?.modelName,
+          quoteVehicleCandidate?.vehicleName,
+          quoteVehicleCandidate?.displayName,
+          quoteVehicleCandidate?.title,
+          quoteVehicleCandidate?.variantName,
+          // Kết hợp brand và modelName nếu có
+          quoteVehicleCandidate?.brand && quoteVehicleCandidate?.modelName
+            ? `${quoteVehicleCandidate.brand} ${quoteVehicleCandidate.modelName}`
+            : null,
+          quoteVehicleCandidate?.brand && quoteVehicleCandidate?.name
+            ? `${quoteVehicleCandidate.brand} ${quoteVehicleCandidate.name}`
+            : null,
+          quotePrimaryDetail?.vehicleName,
+          quotePrimaryDetail?.vehicleModel,
+          quotePrimaryDetail?.vehicleDisplayName,
+          quotePrimaryDetail?.vehicleDescription
+        )
         : '';
 
       const displayCustomerName = lookupCustomer
@@ -748,43 +909,43 @@ const Orders = ({ user }) => {
       const orderDetailVehicle = primaryOrderDetail?.vehicle || primaryOrderDetail?.vehicleInfo || primaryOrderDetail?.vehicleDetails;
       const orderDetailVehicleName = orderDetailVehicle
         ? coalesceText(
-            orderDetailVehicle.name,
-            orderDetailVehicle.model,
-            orderDetailVehicle.modelName,
-            orderDetailVehicle.vehicleName,
-            orderDetailVehicle.displayName,
-            orderDetailVehicle.title,
-            orderDetailVehicle.variantName,
-            // Kết hợp brand và modelName nếu có
-            orderDetailVehicle.brand && orderDetailVehicle.modelName 
-              ? `${orderDetailVehicle.brand} ${orderDetailVehicle.modelName}`
-              : null,
-            orderDetailVehicle.brand && orderDetailVehicle.name
-              ? `${orderDetailVehicle.brand} ${orderDetailVehicle.name}`
-              : null,
-            primaryOrderDetail?.vehicleName,
-            primaryOrderDetail?.vehicleModel,
-            primaryOrderDetail?.vehicleDisplayName
-          )
+          orderDetailVehicle.name,
+          orderDetailVehicle.model,
+          orderDetailVehicle.modelName,
+          orderDetailVehicle.vehicleName,
+          orderDetailVehicle.displayName,
+          orderDetailVehicle.title,
+          orderDetailVehicle.variantName,
+          // Kết hợp brand và modelName nếu có
+          orderDetailVehicle.brand && orderDetailVehicle.modelName
+            ? `${orderDetailVehicle.brand} ${orderDetailVehicle.modelName}`
+            : null,
+          orderDetailVehicle.brand && orderDetailVehicle.name
+            ? `${orderDetailVehicle.brand} ${orderDetailVehicle.name}`
+            : null,
+          primaryOrderDetail?.vehicleName,
+          primaryOrderDetail?.vehicleModel,
+          primaryOrderDetail?.vehicleDisplayName
+        )
         : null;
 
       let displayVehicleName = lookupVehicle
         ? coalesceText(
-            lookupVehicle.name,
-            lookupVehicle.model,
-            lookupVehicle.modelName,
-            lookupVehicle.vehicleName,
-            lookupVehicle.displayName,
-            lookupVehicle.title,
-            lookupVehicle.variantName,
-            // Kết hợp brand và modelName nếu có
-            lookupVehicle.brand && lookupVehicle.modelName 
-              ? `${lookupVehicle.brand} ${lookupVehicle.modelName}`
-              : null,
-            lookupVehicle.brand && lookupVehicle.name
-              ? `${lookupVehicle.brand} ${lookupVehicle.name}`
-              : null
-          ) || order.displayVehicleName
+          lookupVehicle.name,
+          lookupVehicle.model,
+          lookupVehicle.modelName,
+          lookupVehicle.vehicleName,
+          lookupVehicle.displayName,
+          lookupVehicle.title,
+          lookupVehicle.variantName,
+          // Kết hợp brand và modelName nếu có
+          lookupVehicle.brand && lookupVehicle.modelName
+            ? `${lookupVehicle.brand} ${lookupVehicle.modelName}`
+            : null,
+          lookupVehicle.brand && lookupVehicle.name
+            ? `${lookupVehicle.brand} ${lookupVehicle.name}`
+            : null
+        ) || order.displayVehicleName
         : order.displayVehicleName;
 
       // Ưu tiên: orderDetailVehicleName > quoteVehicleNameFromLookup > displayVehicleName
@@ -797,7 +958,7 @@ const Orders = ({ user }) => {
       }
 
       const resolvedCustomer = order.resolvedCustomer || (lookupCustomer ? { ...lookupCustomer } : order.resolvedCustomer);
-      
+
       // Ưu tiên: orderDetailVehicle > lookupVehicle > quoteVehicleCandidate > order.resolvedVehicle
       const resolvedVehicle =
         orderDetailVehicle ||
@@ -913,7 +1074,7 @@ const Orders = ({ user }) => {
       return flattened.some((value) => value.includes(loweredSearch));
     };
 
-    return enhancedOrders.filter((order) => {
+    const filtered = enhancedOrders.filter((order) => {
       if (!matchStatusFilter(order)) return false;
 
       if (!matchesSearch(order)) return false;
@@ -928,6 +1089,9 @@ const Orders = ({ user }) => {
 
       return true;
     });
+
+    // Đảm bảo orders được sắp xếp theo thứ tự mới nhất trước
+    return sortOrdersByNewest(filtered);
   }, [enhancedOrders, searchTerm, filterStatus, tabFilter, userRole, userId]);
 
   const totalPages = Math.max(1, Math.ceil(filteredOrders.length / ORDERS_PER_PAGE));
@@ -1058,9 +1222,9 @@ const Orders = ({ user }) => {
     const quotePrimaryDetail = quoteDetails.length > 0 ? quoteData.quoteDetails[0] : null;
     const quoteVehicleCandidate = ensureObject(
       quoteData?.vehicle ||
-        quotePrimaryDetail?.vehicle ||
-        quotePrimaryDetail?.vehicleInfo ||
-        quotePrimaryDetail?.vehicleDetails
+      quotePrimaryDetail?.vehicle ||
+      quotePrimaryDetail?.vehicleInfo ||
+      quotePrimaryDetail?.vehicleDetails
     );
     const quoteVehicleId =
       quoteData?.vehicleId ||
@@ -1070,26 +1234,26 @@ const Orders = ({ user }) => {
       null;
     const quoteVehicleNameFromLookup = quoteData
       ? coalesceText(
-          quoteData.vehicleName,
-          quoteVehicleCandidate?.name,
-          quoteVehicleCandidate?.model,
-          quoteVehicleCandidate?.modelName,
-          quoteVehicleCandidate?.vehicleName,
-          quoteVehicleCandidate?.displayName,
-          quoteVehicleCandidate?.title,
-          quoteVehicleCandidate?.variantName,
-          // Kết hợp brand và modelName nếu có
-          quoteVehicleCandidate?.brand && quoteVehicleCandidate?.modelName 
-            ? `${quoteVehicleCandidate.brand} ${quoteVehicleCandidate.modelName}`
-            : null,
-          quoteVehicleCandidate?.brand && quoteVehicleCandidate?.name
-            ? `${quoteVehicleCandidate.brand} ${quoteVehicleCandidate.name}`
-            : null,
-          quotePrimaryDetail?.vehicleName,
-          quotePrimaryDetail?.vehicleModel,
-          quotePrimaryDetail?.vehicleDisplayName,
-          quotePrimaryDetail?.vehicleDescription
-        )
+        quoteData.vehicleName,
+        quoteVehicleCandidate?.name,
+        quoteVehicleCandidate?.model,
+        quoteVehicleCandidate?.modelName,
+        quoteVehicleCandidate?.vehicleName,
+        quoteVehicleCandidate?.displayName,
+        quoteVehicleCandidate?.title,
+        quoteVehicleCandidate?.variantName,
+        // Kết hợp brand và modelName nếu có
+        quoteVehicleCandidate?.brand && quoteVehicleCandidate?.modelName
+          ? `${quoteVehicleCandidate.brand} ${quoteVehicleCandidate.modelName}`
+          : null,
+        quoteVehicleCandidate?.brand && quoteVehicleCandidate?.name
+          ? `${quoteVehicleCandidate.brand} ${quoteVehicleCandidate.name}`
+          : null,
+        quotePrimaryDetail?.vehicleName,
+        quotePrimaryDetail?.vehicleModel,
+        quotePrimaryDetail?.vehicleDisplayName,
+        quotePrimaryDetail?.vehicleDescription
+      )
       : '';
 
     const displayCustomerName = lookupCustomer
@@ -1101,43 +1265,43 @@ const Orders = ({ user }) => {
     const orderDetailVehicle = primaryOrderDetail?.vehicle || primaryOrderDetail?.vehicleInfo || primaryOrderDetail?.vehicleDetails;
     const orderDetailVehicleName = orderDetailVehicle
       ? coalesceText(
-          orderDetailVehicle.name,
-          orderDetailVehicle.model,
-          orderDetailVehicle.modelName,
-          orderDetailVehicle.vehicleName,
-          orderDetailVehicle.displayName,
-          orderDetailVehicle.title,
-          orderDetailVehicle.variantName,
-          // Kết hợp brand và modelName nếu có
-          orderDetailVehicle.brand && orderDetailVehicle.modelName 
-            ? `${orderDetailVehicle.brand} ${orderDetailVehicle.modelName}`
-            : null,
-          orderDetailVehicle.brand && orderDetailVehicle.name
-            ? `${orderDetailVehicle.brand} ${orderDetailVehicle.name}`
-            : null,
-          primaryOrderDetail?.vehicleName,
-          primaryOrderDetail?.vehicleModel,
-          primaryOrderDetail?.vehicleDisplayName
-        )
+        orderDetailVehicle.name,
+        orderDetailVehicle.model,
+        orderDetailVehicle.modelName,
+        orderDetailVehicle.vehicleName,
+        orderDetailVehicle.displayName,
+        orderDetailVehicle.title,
+        orderDetailVehicle.variantName,
+        // Kết hợp brand và modelName nếu có
+        orderDetailVehicle.brand && orderDetailVehicle.modelName
+          ? `${orderDetailVehicle.brand} ${orderDetailVehicle.modelName}`
+          : null,
+        orderDetailVehicle.brand && orderDetailVehicle.name
+          ? `${orderDetailVehicle.brand} ${orderDetailVehicle.name}`
+          : null,
+        primaryOrderDetail?.vehicleName,
+        primaryOrderDetail?.vehicleModel,
+        primaryOrderDetail?.vehicleDisplayName
+      )
       : null;
 
     let displayVehicleName = lookupVehicle
       ? coalesceText(
-          lookupVehicle.name,
-          lookupVehicle.model,
-          lookupVehicle.modelName,
-          lookupVehicle.vehicleName,
-          lookupVehicle.displayName,
-          lookupVehicle.title,
-          lookupVehicle.variantName,
-          // Kết hợp brand và modelName nếu có
-          lookupVehicle.brand && lookupVehicle.modelName 
-            ? `${lookupVehicle.brand} ${lookupVehicle.modelName}`
-            : null,
-          lookupVehicle.brand && lookupVehicle.name
-            ? `${lookupVehicle.brand} ${lookupVehicle.name}`
-            : null
-        ) || detail.displayVehicleName
+        lookupVehicle.name,
+        lookupVehicle.model,
+        lookupVehicle.modelName,
+        lookupVehicle.vehicleName,
+        lookupVehicle.displayName,
+        lookupVehicle.title,
+        lookupVehicle.variantName,
+        // Kết hợp brand và modelName nếu có
+        lookupVehicle.brand && lookupVehicle.modelName
+          ? `${lookupVehicle.brand} ${lookupVehicle.modelName}`
+          : null,
+        lookupVehicle.brand && lookupVehicle.name
+          ? `${lookupVehicle.brand} ${lookupVehicle.name}`
+          : null
+      ) || detail.displayVehicleName
       : detail.displayVehicleName;
 
     // Ưu tiên: orderDetailVehicleName > quoteVehicleNameFromLookup > displayVehicleName
@@ -1168,6 +1332,70 @@ const Orders = ({ user }) => {
     if (userRole !== 'DEALER_STAFF' && userRole !== 'DEALER_MANAGER') return false;
     return true; // DEALER_STAFF và DEALER_MANAGER đều có thể tạo order từ quote
   }, [userRole]);
+
+  const canConfirmDelivery = useCallback(
+    (order) => {
+      if (!order) return false;
+
+      const normalizedRole = (userRole || '').toUpperCase();
+      if (!['DEALER_STAFF', 'DEALER_MANAGER'].includes(normalizedRole)) {
+        return false;
+      }
+
+      const statusText = (
+        order.normalizedStatus ||
+        order.status ||
+        order.orderStatus ||
+        order.workflowStatus ||
+        ''
+      ).toUpperCase();
+      const approvalStatusText = (
+        order.normalizedApprovalStatus ||
+        order.approvalStatus ||
+        order.orderApprovalStatus ||
+        order.workflowApprovalStatus ||
+        ''
+      ).toUpperCase();
+
+      // Kiểm tra xem đơn đã được giao chưa
+      const isDelivered =
+        statusText.includes('DELIVERED') ||
+        (order.deliveryStatus && String(order.deliveryStatus).toUpperCase().includes('DELIVERED'));
+
+      // Nếu đã giao rồi thì không cho phép giao lại
+      if (isDelivered) {
+        return false;
+      }
+
+      const paymentStatusText = (
+        order.normalizedPaymentStatus ||
+        order.paymentStatus ||
+        order.workflowPaymentStatus ||
+        ''
+      ).toUpperCase();
+      const paidAmount = Number(order.paidAmount || 0);
+      const hasAnyPayment = paidAmount > 0 || paymentStatusText.includes('PAID');
+
+      // Không cho giao nếu chưa có khoản thanh toán nào
+      if (!hasAnyPayment) {
+        return false;
+      }
+
+      // Chỉ cho giao xe khi backend cũng công nhận order đã được approve/completed
+      const isApprovedOrCompleted =
+        approvalStatusText === 'APPROVED' ||
+        statusText === 'APPROVED' ||
+        statusText === 'COMPLETED';
+
+      // Allow delivery if order is fully paid (remaining amount <= 0)
+      const totalAmount = Number(order.totalAmount || order.amount || 0);
+      const remainingAmount = Number(order.remainingAmount ?? (totalAmount - paidAmount));
+      const isFullyPaid = paidAmount > 0 && remainingAmount <= 0;
+
+      return isApprovedOrCompleted || isFullyPaid;
+    },
+    [userRole]
+  );
 
   const canApproveOrder = useCallback(
     (order) => {
@@ -1227,13 +1455,23 @@ const Orders = ({ user }) => {
       // Kiểm tra workflow type dựa trên customerId
       // customerId = null: Order từ DEALER_MANAGER gửi cho EVM (workflow API) - chỉ EVM_MANAGER có thể approve
       // customerId có giá trị: Order từ DEALER_STAFF gửi cho DEALER_MANAGER (dealer-workflow API) - chỉ DEALER_MANAGER có thể approve
-      const orderCustomerId = order.customerId || order.customer?.id || order.customer?.customerId;
+      const orderCustomerId =
+        order.customerId ||
+        order.customer?.id ||
+        order.customer?.customerId ||
+        order.resolvedCustomer?.id ||
+        order.resolvedCustomer?.customerId;
+
       const isEVMWorkflowOrder = orderCustomerId === null || orderCustomerId === undefined;
 
       if (normalizedRole === 'DEALER_MANAGER') {
         // DEALER_MANAGER chỉ có thể approve orders từ dealer-workflow (customerId có giá trị)
         // Không thể approve orders từ EVM workflow (customerId = null)
-        return !isEVMWorkflowOrder;
+        // Exception: If the order was created by a STAFF member, it's definitely a dealer workflow
+        const creatorRole = (order.creatorRole || order.createdBy?.role || '').toUpperCase();
+        const isStaffCreated = creatorRole.includes('STAFF');
+
+        return !isEVMWorkflowOrder || isStaffCreated;
       } else if (normalizedRole === 'EVM_MANAGER' || normalizedRole === 'ADMIN') {
         // EVM_MANAGER chỉ có thể approve orders từ EVM workflow (customerId = null)
         return isEVMWorkflowOrder;
@@ -1244,39 +1482,98 @@ const Orders = ({ user }) => {
     [userRole]
   );
 
-  // Load orders based on role
-  useEffect(() => {
-    const loadOrders = async () => {
-      try {
-        setLoading(true);
-        let data = [];
-        
-        if (userRole === 'DEALER_STAFF' && userId) {
-          // DEALER_STAFF: Get their own orders
-          data = await ordersAPI.getByUser(userId);
-        } else if (userRole === 'DEALER_MANAGER' && userDealerId) {
-          // DEALER_MANAGER: Get ALL orders of their dealer (Manager's own and staff's)
-          data = await ordersAPI.getOrdersByDealerId(userDealerId);
-        } else if (userRole === 'EVM_MANAGER' || userRole === 'ADMIN') {
-          // EVM_MANAGER/ADMIN: Chỉ lấy orders từ workflow (pending EVM approval)
-          data = await ordersAPI.getPendingEVMApproval();
-        } else {
-          // Fallback cho các roles khác hoặc nếu không có dealerId
-          data = await ordersAPI.getAll();
-        }
-        
-        setOrders(sortOrdersByNewest(normalizeOrdersList(data)));
-      } catch (error) {
-        console.error('Error loading orders:', error);
-        showErrorToast(handleAPIError(error));
-        setOrders([]);
-      } finally {
-        setLoading(false);
-      }
-    };
+  // Thanh toán VNPay trực tiếp từ danh sách đơn hàng (lần thanh toán đầu tiên)
+  const handleQuickVNPayPayment = async (order) => {
+    if (!order) return;
+    const orderId = order.orderId || order.id;
+    if (!orderId) {
+      showErrorToast('Order ID is missing. Cannot create VNPay payment.');
+      return;
+    }
 
-    loadOrders();
+    const paymentMethod = String(order.displayPaymentMethod || order.paymentMethod || '').toUpperCase();
+    const paymentStatusText = String(
+      order.normalizedPaymentStatus || order.paymentStatus || order.workflowPaymentStatus || ''
+    ).toUpperCase();
+    const isFullyPaid = paymentStatusText === 'PAID';
+    const hasPendingVnpay =
+      Array.isArray(order.orderPayments) &&
+      order.orderPayments.some(
+        (p) =>
+          String(p.paymentMethod || '').toUpperCase() === 'VNPAY' &&
+          String(p.status || '').toUpperCase() === 'PENDING'
+      );
+
+    // Chỉ cho tạo link VNPay khi:
+    // - Phương thức thanh toán là VNPAY
+    // - Đơn chưa được đánh dấu PAID
+    // - Chưa có VNPay payment ở trạng thái PENDING
+    if (paymentMethod !== 'VNPAY') {
+      showErrorToast('Quick VNPay payment is only available for VNPay orders.');
+      return;
+    }
+    if (isFullyPaid) {
+      showErrorToast('This order is already paid. VNPay payment is not required.');
+      return;
+    }
+    if (hasPendingVnpay) {
+      showErrorToast('This order already has a pending VNPay payment.');
+      return;
+    }
+
+    try {
+      const payload = { orderId };
+
+      const response = await paymentsAPI.createVNPayPayment(payload);
+
+      if (response && response.paymentUrl) {
+        // Điều hướng sang cổng thanh toán VNPay
+        window.location.href = response.paymentUrl;
+      } else if (response && response.error) {
+        showErrorToast(`VNPay error: ${response.error}`);
+      } else {
+        showErrorToast('Unable to create VNPay payment link. Please try again.');
+      }
+    } catch (error) {
+      console.error('Error creating VNPay payment from Orders list:', error);
+      showErrorToast(handleAPIError(error));
+    }
+  };
+
+  // Load orders based on role
+  const loadOrders = useCallback(async () => {
+    try {
+      setLoading(true);
+      let data = [];
+
+      if (userRole === 'DEALER_STAFF' && userId) {
+        // DEALER_STAFF: Get their own orders
+        data = await ordersAPI.getByUser(userId);
+      } else if (userRole === 'DEALER_MANAGER' && userDealerId) {
+        // DEALER_MANAGER: Get ALL orders of their dealer (Manager's own and staff's)
+        data = await ordersAPI.getOrdersByDealerId(userDealerId);
+      } else if (userRole === 'EVM_MANAGER' || userRole === 'ADMIN') {
+        // EVM_MANAGER/ADMIN: Chỉ lấy orders từ workflow (pending EVM approval)
+        data = await ordersAPI.getPendingEVMApproval();
+      } else {
+        // Fallback cho các roles khác hoặc nếu không có dealerId
+        data = await ordersAPI.getAll();
+      }
+
+      const normalizedOrders = normalizeOrdersList(data);
+      setOrders(sortOrdersByNewest(normalizedOrders));
+    } catch (error) {
+      console.error('Error loading orders:', error);
+      showErrorToast(handleAPIError(error));
+      setOrders([]);
+    } finally {
+      setLoading(false);
+    }
   }, [userRole, userId, userDealerId]);
+
+  useEffect(() => {
+    loadOrders();
+  }, [loadOrders]);
 
   // Load approved quotes when opening create from quote modal
   useEffect(() => {
@@ -1285,6 +1582,36 @@ const Orders = ({ user }) => {
       if (userRole !== 'DEALER_STAFF' && userRole !== 'DEALER_MANAGER') return;
 
       try {
+        // Lấy tất cả orders để kiểm tra quotes đã được sử dụng
+        // Ưu tiên dùng orders từ state nếu đã có, nếu không thì gọi API
+        let existingOrders = Array.isArray(orders) && orders.length > 0 ? orders : [];
+
+        if (existingOrders.length === 0) {
+          try {
+            if (userRole === 'DEALER_STAFF' && userId) {
+              existingOrders = await ordersAPI.getByUser(userId);
+            } else if (userRole === 'DEALER_MANAGER' && userDealerId) {
+              existingOrders = await ordersAPI.getOrdersByDealerId(userDealerId);
+            }
+          } catch (orderError) {
+            console.warn('Could not load orders for filtering:', orderError);
+            // Nếu không lấy được orders, vẫn tiếp tục nhưng không filter
+          }
+        }
+
+        // Tạo Set chứa các quoteId đã có order
+        const usedQuoteIds = new Set();
+        if (Array.isArray(existingOrders)) {
+          existingOrders.forEach((order) => {
+            const quoteId = order.quoteId ||
+              order.quote?.id ||
+              order.quote?.quoteId;
+            if (quoteId) {
+              usedQuoteIds.add(String(quoteId));
+            }
+          });
+        }
+
         let quotes = [];
 
         if (userRole === 'DEALER_STAFF' && userId) {
@@ -1292,29 +1619,47 @@ const Orders = ({ user }) => {
           const rawQuotes = await quotesAPI.getByUser(userId);
           quotes = Array.isArray(rawQuotes)
             ? rawQuotes.filter((quote) => {
-                const ownerId = getQuoteOwnerId(quote);
-                const creatorRole = getQuoteCreatorRole(quote);
-                const sameOwner = ownerId !== null && String(ownerId) === String(userId);
-                const isStaffQuote = !creatorRole || creatorRole === 'DEALER_STAFF' || creatorRole === 'STAFF';
-                // Chỉ lấy quotes đã được approve và sẵn sàng để tạo order
-                return sameOwner && isQuoteApprovedForOrder(quote) && isStaffQuote;
-              })
+              const ownerId = getQuoteOwnerId(quote);
+              const creatorRole = getQuoteCreatorRole(quote);
+              const sameOwner = ownerId !== null && String(ownerId) === String(userId);
+              const isStaffQuote = !creatorRole || creatorRole === 'DEALER_STAFF' || creatorRole === 'STAFF';
+              const quoteId = String(quote.quoteId || quote.id || '');
+              const isNotUsed = !usedQuoteIds.has(quoteId);
+              // Chỉ lấy quotes đã được approve, sẵn sàng để tạo order và chưa được sử dụng
+              return sameOwner && isQuoteApprovedForOrder(quote) && isStaffQuote && isNotUsed;
+            })
             : [];
         } else if (userRole === 'DEALER_MANAGER' && userId) {
           const rawQuotes = await quotesAPI.getApprovedReadyForOrder();
           quotes = Array.isArray(rawQuotes)
             ? rawQuotes.filter((quote) => {
-                const ownerId = getQuoteOwnerId(quote);
-                const creatorRole = getQuoteCreatorRole(quote);
-                return (
-                  creatorRole === 'DEALER_MANAGER' &&
-                  ownerId !== null &&
-                  String(ownerId) === String(userId) &&
-                  isQuoteApprovedForOrder(quote)
-                );
-              })
+              const ownerId = getQuoteOwnerId(quote);
+              const creatorRole = getQuoteCreatorRole(quote);
+              const quoteId = String(quote.quoteId || quote.id || '');
+              const isNotUsed = !usedQuoteIds.has(quoteId);
+              return (
+                creatorRole === 'DEALER_MANAGER' &&
+                ownerId !== null &&
+                String(ownerId) === String(userId) &&
+                isQuoteApprovedForOrder(quote) &&
+                isNotUsed
+              );
+            })
             : [];
         }
+
+        // Sort quotes by newest first (ID descending)
+        quotes.sort((a, b) => {
+          // Prioritize ID descending
+          const idA = Number(a.id || a.quoteId || 0);
+          const idB = Number(b.id || b.quoteId || 0);
+          if (idA !== idB) return idB - idA;
+
+          // Fallback to approvedAt
+          const timeA = new Date(a.approvedAt || a.createdDate || 0).getTime();
+          const timeB = new Date(b.approvedAt || b.createdDate || 0).getTime();
+          return timeB - timeA;
+        });
 
         setAvailableQuotes(quotes);
 
@@ -1338,7 +1683,7 @@ const Orders = ({ user }) => {
     };
 
     loadApprovedQuotes();
-  }, [showCreateFromQuoteModal, userRole, userId]);
+  }, [showCreateFromQuoteModal, userRole, userId, userDealerId, orders]);
 
   // Load missing vehicles from availableQuotes
   useEffect(() => {
@@ -1350,13 +1695,13 @@ const Orders = ({ user }) => {
     availableQuotes.forEach((quote) => {
       // Lấy vehicleId từ quote
       let vehicleId = quote.vehicleId || quote.vehicle?.id || quote.vehicle?.vehicleId;
-      
+
       // Lấy vehicleId từ quoteDetails
       if (!vehicleId && Array.isArray(quote.quoteDetails) && quote.quoteDetails.length > 0) {
         const detail = quote.quoteDetails[0];
         vehicleId = detail.vehicleId || detail.vehicle?.id || detail.vehicle?.vehicleId;
       }
-      
+
       if (vehicleId !== undefined && vehicleId !== null && vehicleId !== '') {
         const key = String(vehicleId);
         // Kiểm tra vehicleLookup[key] 是否存在，如果不存在则添加到 missingVehicleIds
@@ -1421,7 +1766,7 @@ const Orders = ({ user }) => {
     const handleNavigateToOrders = (event) => {
       const quoteId = event.detail?.quoteId;
       const fromEVM = event.detail?.fromEVM || false;
-      
+
       if (quoteId) {
         setShowCreateFromQuoteModal(true);
         // Load quote details
@@ -1695,6 +2040,7 @@ const Orders = ({ user }) => {
 
   const getStatusColor = (status, approvalStatus) => {
     const tokens = resolveStatusTokens(status, approvalStatus);
+    if (hasKeyword(tokens, ['APPROVE_PENDING'])) return 'var(--color-warning)';
     if (hasKeyword(tokens, ['REJECT', 'DECLINE', 'CANCEL'])) return 'var(--color-error)';
     if (hasKeyword(tokens, ['COMPLETE', 'DELIVER'])) return 'var(--color-success)';
     if (hasKeyword(tokens, ['APPROV'])) return 'var(--color-info)';
@@ -1702,12 +2048,40 @@ const Orders = ({ user }) => {
     return 'var(--color-text-muted)';
   };
 
-  const getStatusLabel = (status, approvalStatus) => {
+  const getStatusLabel = (status, approvalStatus, order = null) => {
     const tokens = resolveStatusTokens(status, approvalStatus);
+
+    // Check if order has remaining debt
+    const hasRemainingDebt = order?.hasRemainingDebt ||
+      (order?.remainingAmount && Number(order.remainingAmount) > 0) ||
+      (order?.normalizedPaymentStatus &&
+        order.normalizedPaymentStatus.includes('PARTIALLY'));
+
     if (hasKeyword(tokens, ['REJECT', 'DECLINE', 'CANCEL'])) return 'Rejected';
+
+    // DELIVERED statuses
+    if (hasKeyword(tokens, ['DELIVERED_APPROVED'])) {
+      return hasRemainingDebt ? 'Delivered ' : 'Delivered';
+    }
     if (hasKeyword(tokens, ['DELIVER'])) return 'Delivered';
-    if (hasKeyword(tokens, ['COMPLETE'])) return 'Completed';
-    if (hasKeyword(tokens, ['APPROV'])) return 'Approved';
+
+    // COMPLETED = đã trả hết (theo backend logic: remainingAmount = 0 → COMPLETED)
+    if (hasKeyword(tokens, ['COMPLETE'])) {
+      return 'Completed';
+    }
+
+    if (hasKeyword(tokens, ['APPROVE_PENDING', 'PENDING_APPROVAL'])) {
+      return hasRemainingDebt ? 'Approve Pending - Outstanding Balance' : 'Approve Pending';
+    }
+
+    // APPROVED = chưa trả hết (theo backend logic: remainingAmount > 0 → APPROVED)
+    if (hasKeyword(tokens, ['APPROV'])) {
+      if (hasRemainingDebt) {
+        return 'Approved - Outstanding Balance';
+      }
+      return 'Approved';
+    }
+
     if (hasKeyword(tokens, ['PEND', 'REVIEW', 'PROCESS'])) return 'Pending Approval';
     return tokens[0] || 'Unknown';
   };
@@ -1719,7 +2093,7 @@ const Orders = ({ user }) => {
   const handleViewOrderDetails = async (order) => {
     const orderId = order?.orderId || order?.id;
     if (!orderId) {
-      const message = 'Không tìm thấy Order ID để xem chi tiết.';
+      const message = 'Order ID is missing, unable to view details.';
       showErrorToast(message);
       return;
     }
@@ -1732,8 +2106,22 @@ const Orders = ({ user }) => {
     setOrderDetail(null);
 
     try {
-      const data = await ordersAPI.getById(orderId);
-      setOrderDetail(normalizeOrder(data) || normalizeOrder(order));
+      const [orderData, paymentsData, installmentsData] = await Promise.all([
+        ordersAPI.getById(orderId),
+        paymentsAPI.getDealerWorkflowPayments(orderId).catch(() => []),
+        installmentsAPI.getByOrder(orderId).catch(() => [])
+      ]);
+
+      const normalizedOrder = normalizeOrder(orderData) || normalizeOrder(order);
+      const payments = normalizePaymentHistory(paymentsData);
+      const installments = Array.isArray(installmentsData) ? installmentsData : [];
+      const paymentAggregates = aggregatePaymentData(normalizedOrder, payments);
+
+      setOrderDetail({
+        ...normalizedOrder,
+        ...paymentAggregates,
+        installmentSchedule: installments
+      });
     } catch (error) {
       console.error('Error loading order detail:', error);
       const message = handleAPIError(error);
@@ -1754,7 +2142,7 @@ const Orders = ({ user }) => {
     const sameOwner = ownerId !== null && String(ownerId) === String(userId);
 
     if (!sameOwner) {
-      showErrorToast('Bạn chỉ có thể tạo order từ quote do chính mình tạo.');
+      showErrorToast('You can only create orders from quotes you created.');
       return;
     }
 
@@ -1762,19 +2150,19 @@ const Orders = ({ user }) => {
     if (userRole === 'DEALER_STAFF') {
       const isStaffQuote = !creatorRole || creatorRole === 'DEALER_STAFF' || creatorRole === 'STAFF';
       if (!isStaffQuote) {
-        showErrorToast('Dealer Staff chỉ có thể tạo order từ quote do chính mình tạo.');
+        showErrorToast('Dealer Staff can only create orders from their own quotes.');
         return;
       }
     } else if (userRole === 'DEALER_MANAGER') {
       if (creatorRole !== 'DEALER_MANAGER') {
-        showErrorToast('Dealer Manager chỉ có thể tạo order từ quote do chính mình tạo.');
+        showErrorToast('Dealer Managers can only create orders from their own quotes.');
         return;
       }
     }
 
     // Kiểm tra quote đã được approve chưa
     if (!isQuoteApprovedForOrder(quote)) {
-      showErrorToast('Quote này chưa được approve hoặc chưa sẵn sàng để tạo order.');
+      showErrorToast('This quote is not approved or not ready for an order yet.');
       return;
     }
 
@@ -1784,7 +2172,7 @@ const Orders = ({ user }) => {
     }
 
     setSelectedQuote(quote);
-    
+
     // DEALER_MANAGER: customerId phải là null
     // DEALER_STAFF: lấy customerId từ quote
     let extractedCustomerId = null;
@@ -1799,7 +2187,7 @@ const Orders = ({ user }) => {
       }
     }
     // DEALER_MANAGER: customerId = null (không lấy từ quote)
-    
+
     setOrderFormData((prev) => ({
       ...prev,
       quoteId: quote.quoteId || quote.id,
@@ -1920,7 +2308,7 @@ const Orders = ({ user }) => {
 
   const handleCreateOrderFromQuote = async (e) => {
     e.preventDefault();
-    
+
     // Ưu tiên kiểm tra selectedQuote vì user đã chọn quote
     if (!selectedQuote) {
       showErrorToast('Please select a quote');
@@ -1933,15 +2321,15 @@ const Orders = ({ user }) => {
     }
 
     const activeQuote = selectedQuote;
-    
+
     // Đảm bảo orderFormData có quoteId từ selectedQuote
     const quoteId = activeQuote.quoteId || activeQuote.id;
-    
+
     if (!quoteId) {
       showErrorToast('Quote ID is missing. Please re-select the quote.');
       return;
     }
-    
+
     // DEALER_MANAGER: customerId phải là null (quotes từ EVM đã có customerId = null)
     // DEALER_STAFF: lấy customerId từ quote và phải có giá trị
     let customerId = null;
@@ -1954,14 +2342,14 @@ const Orders = ({ user }) => {
       if (!customerId) {
         customerId = activeQuote.customer?.customerId || activeQuote.customer?.id || activeQuote.customer?.userId;
       }
-      
+
       if (!customerId) {
         showErrorToast('Customer information is missing from the quote. Please re-select the quote.');
         return;
       }
     }
     // DEALER_MANAGER: customerId = null (không cần kiểm tra)
-    
+
     // Cập nhật orderFormData để đảm bảo có đầy đủ thông tin
     setOrderFormData(prev => ({
       ...prev,
@@ -1976,7 +2364,7 @@ const Orders = ({ user }) => {
     const sameOwner = ownerId !== null && String(ownerId) === String(userId);
 
     if (!sameOwner) {
-      showErrorToast('Bạn chỉ có thể tạo order từ quote do chính mình tạo.');
+      showErrorToast('You can only create orders from quotes you created.');
       return;
     }
 
@@ -1984,19 +2372,19 @@ const Orders = ({ user }) => {
     if (userRole === 'DEALER_STAFF') {
       const isStaffQuote = !creatorRole || creatorRole === 'DEALER_STAFF' || creatorRole === 'STAFF';
       if (!isStaffQuote) {
-        showErrorToast('Dealer Staff chỉ có thể tạo order từ quote do chính mình tạo.');
+        showErrorToast('Dealer Staff can only create orders from their own quotes.');
         return;
       }
     } else if (userRole === 'DEALER_MANAGER') {
       if (creatorRole !== 'DEALER_MANAGER') {
-        showErrorToast('Dealer Manager chỉ có thể tạo order từ quote do chính mình tạo.');
+        showErrorToast('Dealer Managers can only create orders from their own quotes.');
         return;
       }
     }
 
     // Kiểm tra quote đã được approve chưa
     if (!isQuoteApprovedForOrder(activeQuote)) {
-      showErrorToast('Quote này chưa được approve hoặc chưa sẵn sàng để tạo order.');
+      showErrorToast('This quote is not approved or not ready for an order yet.');
       return;
     }
 
@@ -2018,34 +2406,71 @@ const Orders = ({ user }) => {
       // DEALER_MANAGER: customerId phải là null
       // DEALER_STAFF: customerId từ orderFormData (đã được validate ở trên)
       const finalCustomerId = userRole === 'DEALER_MANAGER' ? null : (customerId || orderFormData.customerId);
-      
+
       // Lấy vehicleId từ quote
-      const vehicleId = activeQuote.vehicleId || 
-                        activeQuote.vehicle?.id || 
-                        activeQuote.vehicle?.vehicleId ||
-                        activeQuote.quoteDetails?.[0]?.vehicleId ||
-                        activeQuote.quoteDetails?.[0]?.vehicle?.id ||
-                        null;
-      
+      const vehicleId = activeQuote.vehicleId ||
+        activeQuote.vehicle?.id ||
+        activeQuote.vehicle?.vehicleId ||
+        activeQuote.quoteDetails?.[0]?.vehicleId ||
+        activeQuote.quoteDetails?.[0]?.vehicle?.id ||
+        null;
+
       // EVM_MANAGER không được tạo order
       if (userRole === 'EVM_MANAGER' || userRole === 'ADMIN') {
         showErrorToast('EVM Manager cannot create orders. Only approve orders.');
         return;
       }
 
+      // ✅ VALIDATE: Backend chỉ hỗ trợ CASH, TRANSFER, VNPAY (không có INSTALLMENT)
+      const paymentMethod = orderFormData.paymentMethod || 'VNPAY';
+      const validPaymentMethods = ['CASH', 'TRANSFER', 'VNPAY'];
+      if (!validPaymentMethods.includes(paymentMethod.toUpperCase())) {
+        showErrorToast('Invalid payment method. Supported options: CASH, TRANSFER, VNPAY.');
+        return;
+      }
+
+      // ✅ VALIDATE: Kiểm tra VIN và EngineNumber của vehicle trước khi tạo order
+      if (vehicleId) {
+        try {
+          const vehicle = await vehiclesAPI.getById(vehicleId);
+          // Check VIN - phải có và không rỗng
+          if (!vehicle.vin || (typeof vehicle.vin === 'string' && vehicle.vin.trim() === '')) {
+            showErrorToast(`Vehicle ${vehicleId} is missing a VIN. Please update the VIN before creating the order.`);
+            return;
+          }
+          // Check EngineNumber - phải có và không rỗng
+          if (!vehicle.engineNumber || (typeof vehicle.engineNumber === 'string' && vehicle.engineNumber.trim() === '')) {
+            showErrorToast(`Vehicle ${vehicleId} is missing an engine number. Please update it before creating the order.`);
+            return;
+          }
+        } catch (vehicleError) {
+          console.error('Error checking vehicle VIN/EngineNumber:', vehicleError);
+          // Nếu không lấy được vehicle info, KHÔNG tiếp tục - báo lỗi
+          showErrorToast(`Unable to verify vehicle information (ID: ${vehicleId}). Please try again.`);
+          return;
+        }
+      } else {
+        // Nếu không lấy được vehicleId, báo lỗi
+        console.error('Cannot find vehicleId from quote:', activeQuote);
+        showErrorToast('Unable to determine vehicle information from the quote. Please try again.');
+        return;
+      }
+
       // DEALER_MANAGER: Sử dụng workflow API (/api/workflow/orders/create-from-approved-quote), customerId = null
       if (userRole === 'DEALER_MANAGER') {
         // Đảm bảo customerId là null cho DEALER_MANAGER
+        const actualPaymentPercentage = typeof orderFormData.paymentPercentage === 'number'
+          ? orderFormData.paymentPercentage
+          : 0;
+
         const orderData = {
           quoteId: finalQuoteId,
           customerId: null, // DEALER_MANAGER: customerId phải là null
           dealerId: Number(derivedDealerId),
           userId: userId,
           orderDate: orderFormData.orderDate ? new Date(orderFormData.orderDate).toISOString().split('T')[0] : new Date().toISOString().split('T')[0],
-          paymentMethod: orderFormData.paymentMethod || 'VNPAY',
-          paymentPercentage: typeof orderFormData.paymentPercentage === 'number'
-            ? orderFormData.paymentPercentage
-            : 0,
+          paymentMethod: paymentMethod.toUpperCase(), // Đảm bảo uppercase và đã validate
+          paymentPercentage: actualPaymentPercentage, // 🔥 FIX: Send actual percentage to satisfy backend validation
           notes: orderFormData.notes || '',
           orderDetails: vehicleId ? [{
             vehicleId: Number(vehicleId),
@@ -2053,27 +2478,51 @@ const Orders = ({ user }) => {
             unitPrice: activeQuote.finalTotal || activeQuote.totalAmount || 0
           }] : []
         };
-        
-        await ordersAPI.createFromEVMApprovedQuote(orderData);
-        showSuccessToast('Order created from quote successfully. Waiting for EVM Manager approval.');
-      } 
+
+        const createdOrder = await ordersAPI.createFromApprovedQuoteByManager(orderData);
+
+        // 🔥 FIX: Process payment separately if percentage > 0
+        if (actualPaymentPercentage > 0) {
+          try {
+            if (paymentMethod.toUpperCase() === 'VNPAY') {
+              const paymentData = {
+                orderId: createdOrder.id
+              };
+              const vnpayRes = await paymentsAPI.createVNPayPayment(paymentData);
+              if (vnpayRes.paymentUrl) {
+                window.location.href = vnpayRes.paymentUrl;
+                return; // Stop execution to redirect
+              }
+            }
+            // For CASH/TRANSFER, backend handles it if paymentPercentage > 0
+            // So we DO NOT call createDealerWorkflowPayment here to avoid double payment records.
+          } catch (paymentError) {
+            console.error('Error processing initial payment:', paymentError);
+            showErrorToast('Order created but initial payment failed. Please try paying from the order list.');
+          }
+        }
+
+        showSuccessToast('Create successfully');
+      }
       // DEALER_STAFF: Sử dụng dealer-workflow API (/api/dealer-workflow/orders/create-from-approved-quote), customerId phải có
       else if (userRole === 'DEALER_STAFF') {
         if (!finalCustomerId) {
           showErrorToast('Customer information is required for creating order.');
           return;
         }
-        
+
+        const actualPaymentPercentage = typeof orderFormData.paymentPercentage === 'number'
+          ? orderFormData.paymentPercentage
+          : 0;
+
         const orderData = {
           quoteId: finalQuoteId,
           customerId: finalCustomerId, // DEALER_STAFF: customerId phải có
           dealerId: Number(derivedDealerId),
           userId: userId,
           orderDate: orderFormData.orderDate ? new Date(orderFormData.orderDate).toISOString().split('T')[0] : new Date().toISOString().split('T')[0],
-          paymentMethod: orderFormData.paymentMethod || 'VNPAY',
-          paymentPercentage: typeof orderFormData.paymentPercentage === 'number'
-            ? orderFormData.paymentPercentage
-            : 0,
+          paymentMethod: paymentMethod.toUpperCase(), // Đảm bảo uppercase và đã validate
+          paymentPercentage: actualPaymentPercentage, // 🔥 FIX: Send actual percentage to satisfy backend validation
           notes: orderFormData.notes || '',
           orderDetails: vehicleId ? [{
             vehicleId: Number(vehicleId),
@@ -2081,10 +2530,32 @@ const Orders = ({ user }) => {
             unitPrice: activeQuote.finalTotal || activeQuote.totalAmount || 0
           }] : []
         };
-        
-        await ordersAPI.createFromApprovedQuote(orderData, userId);
-        showSuccessToast('Order created from quote successfully. Waiting for Dealer Manager approval.');
-      } 
+
+        const createdOrder = await ordersAPI.createFromApprovedQuote(orderData, userId);
+
+        // 🔥 FIX: Process payment separately if percentage > 0
+        if (actualPaymentPercentage > 0) {
+          try {
+            if (paymentMethod.toUpperCase() === 'VNPAY') {
+              const paymentData = {
+                orderId: createdOrder.id
+              };
+              const vnpayRes = await paymentsAPI.createVNPayPayment(paymentData);
+              if (vnpayRes.paymentUrl) {
+                window.location.href = vnpayRes.paymentUrl;
+                return; // Stop execution to redirect
+              }
+            }
+            // For CASH/TRANSFER, backend handles it if paymentPercentage > 0
+            // So we DO NOT call createDealerWorkflowPayment here to avoid double payment records.
+          } catch (paymentError) {
+            console.error('Error processing initial payment:', paymentError);
+            showErrorToast('Order created but initial payment failed. Please try paying from the order list.');
+          }
+        }
+
+        showSuccessToast('Create successfully');
+      }
       else {
         const orderData = {
           quoteId: finalQuoteId,
@@ -2092,7 +2563,7 @@ const Orders = ({ user }) => {
           dealerId: Number(derivedDealerId),
           orderDate: orderFormData.orderDate ? new Date(orderFormData.orderDate).toISOString().split('T')[0] : new Date().toISOString().split('T')[0],
           deliveryDate: orderFormData.deliveryDate ? new Date(orderFormData.deliveryDate).toISOString().split('T')[0] : null,
-          paymentMethod: orderFormData.paymentMethod || 'VNPAY',
+          paymentMethod: paymentMethod.toUpperCase(), // Đảm bảo uppercase và đã validate
           paymentPercentage: typeof orderFormData.paymentPercentage === 'number'
             ? orderFormData.paymentPercentage
             : 0,
@@ -2104,11 +2575,13 @@ const Orders = ({ user }) => {
             unitPrice: activeQuote.finalTotal || activeQuote.totalAmount || 0
           }] : []
         };
-        
-        await ordersAPI.create(orderData);
-        showSuccessToast('Order created from quote successfully');
+
+        const createdOrder = await ordersAPI.create(orderData);
+        showSuccessToast('Create successfully');
+
+
       }
-      
+
       // Reload orders based on role
       let reloadedOrders = [];
       if (userRole === 'DEALER_STAFF' && userId) {
@@ -2122,9 +2595,10 @@ const Orders = ({ user }) => {
       } else {
         reloadedOrders = await ordersAPI.getAll();
       }
-      
-      setOrders(sortOrdersByNewest(normalizeOrdersList(reloadedOrders)));
-      
+
+      const normalizedReload = normalizeOrdersList(reloadedOrders);
+      setOrders(sortOrdersByNewest(normalizedReload));
+
       // Reset form
       handleDismissOrderForm();
       setOrderFormData({
@@ -2157,35 +2631,88 @@ const Orders = ({ user }) => {
 
     try {
       const orderId = selectedOrder.orderId || selectedOrder.id;
-      
+      const quoteId = selectedOrder.quoteId || selectedOrder.quote?.id || selectedOrder.quote?.quoteId;
+
+      // ✅ DEALER_MANAGER: Check dealer inventory từ quote trước khi approve
+      if (userRole === 'DEALER_MANAGER' && quoteId && userDealerId) {
+        try {
+          const inventoryCheck = await quotesAPI.checkDealerInventory(quoteId);
+          if (!inventoryCheck?.hasSufficientInventory) {
+            const message = inventoryCheck?.message || 'Dealer inventory does not have enough vehicles to approve this order. Please restock before approving.';
+            showErrorToast(message);
+            setShowApproveModal(false);
+            return;
+          }
+        } catch (inventoryError) {
+          console.warn('Error checking dealer inventory:', inventoryError);
+          // Nếu check inventory fail, vẫn tiếp tục approve (backend sẽ validate)
+        }
+      }
+
+      // ✅ EVM_MANAGER: Check can approve từ backend (check factory inventory)
+      if (userRole === 'EVM_MANAGER' || userRole === 'ADMIN') {
+        try {
+          const canApprove = await ordersAPI.canApproveByEVM(orderId);
+          if (canApprove === false) {
+            showErrorToast('Order cannot be approved. Please check order status and factory inventory availability.');
+            setShowApproveModal(false);
+            return;
+          }
+        } catch (checkError) {
+          console.warn('Error checking can approve:', checkError);
+          // Nếu check fail, vẫn cho phép approve (fallback)
+        }
+      }
+
+      // Tiếp tục approve
+      let approveResult;
       if (userRole === 'DEALER_MANAGER') {
-        await ordersAPI.approveByDealerManager(orderId, userId, approveNotes);
+        approveResult = await ordersAPI.approveByDealerManager(orderId, userId, approveNotes || '');
       } else if (userRole === 'EVM_MANAGER' || userRole === 'ADMIN') {
-        await ordersAPI.approveByEVM(orderId, userId, approveNotes);
-      }
-      
-      showSuccessToast('Order approved successfully');
-      
-      // Reload orders
-      let reloadedOrders = [];
-      if (userRole === 'DEALER_STAFF' && userId) {
-        reloadedOrders = await ordersAPI.getByUser(userId);
-      } else if (userRole === 'DEALER_MANAGER' && userDealerId) {
-        reloadedOrders = await ordersAPI.getOrdersByDealerId(userDealerId);
-      }
-      else if (userRole === 'EVM_MANAGER' || userRole === 'ADMIN') {
-        reloadedOrders = await ordersAPI.getPendingEVMApproval();
+        approveResult = await ordersAPI.approveByEVM(orderId, userId, approveNotes || '');
       } else {
-        reloadedOrders = await ordersAPI.getAll();
+        showErrorToast('Your role does not have permission to approve orders.');
+        return;
       }
-      setOrders(sortOrdersByNewest(normalizeOrdersList(reloadedOrders)));
-      
+
+      // ✅ Approve thành công - đóng modal trước
       setShowApproveModal(false);
       setSelectedOrder(null);
       setApproveNotes('');
+
+      showSuccessToast('Order approved successfully');
+
+      // ✅ Reload orders trong try-catch riêng để không ảnh hưởng đến approve
+      try {
+        let reloadedOrders = [];
+        if (userRole === 'DEALER_STAFF' && userId) {
+          reloadedOrders = await ordersAPI.getByUser(userId);
+        } else if (userRole === 'DEALER_MANAGER' && userDealerId) {
+          reloadedOrders = await ordersAPI.getOrdersByDealerId(userDealerId);
+        }
+        else if (userRole === 'EVM_MANAGER' || userRole === 'ADMIN') {
+          reloadedOrders = await ordersAPI.getPendingEVMApproval();
+        } else {
+          reloadedOrders = await ordersAPI.getAll();
+        }
+        const normalizedReload = normalizeOrdersList(reloadedOrders);
+        setOrders(sortOrdersByNewest(normalizedReload));
+      } catch (reloadError) {
+        console.warn('Error reloading orders after approve (order was approved successfully):', reloadError);
+        // Không báo lỗi cho user vì approve đã thành công, chỉ log warning
+        // User có thể refresh page để thấy order đã approved
+      }
     } catch (error) {
       console.error('Error approving order:', error);
-      showErrorToast(handleAPIError(error));
+      // Hiển thị message lỗi từ backend rõ ràng hơn
+      const errorMessage = handleAPIError(error);
+      if (errorMessage.includes('inventory') || errorMessage.includes('kho')) {
+        showErrorToast(`Unable to approve the order: ${errorMessage}. Please verify dealer inventory.`);
+      } else if (errorMessage.includes('status') || errorMessage.includes('trạng thái')) {
+        showErrorToast(`Unable to approve the order: ${errorMessage}. Please verify the order status.`);
+      } else {
+        showErrorToast(`Unable to approve the order: ${errorMessage}`);
+      }
     }
   };
 
@@ -2200,15 +2727,15 @@ const Orders = ({ user }) => {
 
     try {
       const orderId = order.orderId || order.id;
-      
+
       if (userRole === 'DEALER_MANAGER') {
         await ordersAPI.rejectByDealerManager(orderId, userId, reason);
       } else if (userRole === 'EVM_MANAGER' || userRole === 'ADMIN') {
         await ordersAPI.rejectByEVM(orderId, userId, reason);
       }
-      
+
       showSuccessToast('Order rejected');
-      
+
       // Reload orders
       let reloadedOrders = [];
       if (userRole === 'DEALER_STAFF' && userId) {
@@ -2221,10 +2748,149 @@ const Orders = ({ user }) => {
       } else {
         reloadedOrders = await ordersAPI.getAll();
       }
-      setOrders(sortOrdersByNewest(normalizeOrdersList(reloadedOrders)));
+      const normalizedReload = normalizeOrdersList(reloadedOrders);
+      setOrders(sortOrdersByNewest(normalizedReload));
     } catch (error) {
       console.error('Error rejecting order:', error);
       showErrorToast(handleAPIError(error));
+    }
+  };
+
+  const handleConfirmDelivery = async (order) => {
+    if (!order) return;
+    const orderId = order.orderId || order.id;
+
+    if (!orderId) {
+      showErrorToast('Invalid Order ID');
+      return;
+    }
+
+    const confirmAction = window.confirm('Confirm that the vehicle has been delivered and inventory has been deducted?');
+    if (!confirmAction) return;
+
+    setConfirmingDeliveryId(orderId);
+    try {
+      // Check if order needs approval
+      const status = (order.normalizedStatus || order.status || '').toUpperCase();
+      const approvalStatus = (order.normalizedApprovalStatus || order.approvalStatus || '').toUpperCase();
+      const isApproved = status === 'APPROVED' || status === 'COMPLETED' || approvalStatus === 'APPROVED';
+
+      if (!isApproved) {
+        // Try to auto-approve if fully paid
+        const totalAmount = Number(order.totalAmount || order.amount || 0);
+        const paidAmount = Number(order.paidAmount || 0);
+        const remainingAmount = Number(order.remainingAmount ?? (totalAmount - paidAmount));
+
+        if (paidAmount > 0 && remainingAmount <= 0) {
+          try {
+            await ordersAPI.approveByDealerManager(orderId, userId, 'Auto-approved for delivery (Fully Paid)');
+          } catch (approveError) {
+            console.warn('Auto-approve failed:', approveError);
+            // If auto-approve fails, we can't proceed because confirmDelivery will fail
+            showErrorToast('Order is paid but requires Manager approval to deliver.');
+            setConfirmingDeliveryId(null);
+            return;
+          }
+        }
+      }
+
+      // Backend tự động xác định status dựa trên order status hiện tại:
+      // - Nếu order status là APPROVED (chưa trả hết) → DELIVERED_APPROVED
+      // - Nếu order status là COMPLETED (đã trả hết) → DELIVERED
+      await ordersAPI.confirmDelivery(orderId);
+      showSuccessToast('Delivery confirmed and inventory adjusted');
+
+      let reloadedOrders = [];
+      if (userRole === 'DEALER_STAFF' && userId) {
+        reloadedOrders = await ordersAPI.getByUser(userId);
+      } else if (userRole === 'DEALER_MANAGER' && userDealerId) {
+        reloadedOrders = await ordersAPI.getOrdersByDealerId(userDealerId);
+      } else if (userRole === 'EVM_MANAGER' || userRole === 'ADMIN') {
+        reloadedOrders = await ordersAPI.getPendingEVMApproval();
+      } else {
+        reloadedOrders = await ordersAPI.getAll();
+      }
+      const normalizedReload = normalizeOrdersList(reloadedOrders);
+      setOrders(sortOrdersByNewest(normalizedReload));
+    } catch (error) {
+      console.error('Error confirming delivery:', error);
+      showErrorToast(handleAPIError(error));
+    } finally {
+      setConfirmingDeliveryId(null);
+    }
+  };
+
+  const handleOpenPaymentModal = (order) => {
+    setSelectedOrderForPayment(order);
+    // Default to paying remaining amount or 100% if nothing paid
+    setPaymentFormData({
+      paymentMethod: order.paymentMethod || 'CASH',
+      paymentPercentage: 100, // Default to full payment of remaining
+      notes: ''
+    });
+    setShowPaymentModal(true);
+  };
+
+  const handleClosePaymentModal = () => {
+    setShowPaymentModal(false);
+    setSelectedOrderForPayment(null);
+    setPaymentFormData({
+      paymentMethod: 'CASH',
+      paymentPercentage: 100,
+      notes: ''
+    });
+  };
+
+  const handleSubmitPayment = async (e) => {
+    e.preventDefault();
+    if (!selectedOrderForPayment) return;
+
+    try {
+      setPaymentSubmitting(true);
+
+      const paymentMethod = paymentFormData.paymentMethod;
+
+      if (paymentMethod === 'VNPAY') {
+        // Handle VNPay payment
+        const payload = {
+          orderId: selectedOrderForPayment.orderId || selectedOrderForPayment.id
+        };
+
+        const response = await paymentsAPI.createVNPayPayment(payload);
+
+        if (response && response.paymentUrl) {
+          // Redirect to VNPay gateway
+          window.location.href = response.paymentUrl;
+          // Note: We don't close the modal or reload orders here because the user is navigating away
+        } else if (response && response.error) {
+          showErrorToast(`VNPay error: ${response.error}`);
+        } else {
+          showErrorToast('Unable to create VNPay payment link. Please try again.');
+        }
+
+      } else {
+        // Handle other payment methods (CASH, TRANSFER treated as manual)
+        const paymentData = {
+          paymentMethod: paymentFormData.paymentMethod,
+          paymentPercentage: Number(paymentFormData.paymentPercentage),
+          paymentNotes: paymentFormData.notes
+        };
+
+        await paymentsAPI.createDealerWorkflowPayment(
+          selectedOrderForPayment.orderId || selectedOrderForPayment.id,
+          paymentData
+        );
+
+        showSuccessToast('Payment created successfully');
+        handleClosePaymentModal();
+        loadOrders(); // Reload to update status
+      }
+
+    } catch (error) {
+      console.error('Error creating payment:', error);
+      showErrorToast(error.response?.data?.message || 'Failed to create payment');
+    } finally {
+      setPaymentSubmitting(false);
     }
   };
 
@@ -2242,7 +2908,7 @@ const Orders = ({ user }) => {
   const totalRevenue = orders.reduce((sum, o) => sum + (o.totalAmount || o.amount || 0), 0);
   const pendingOrders = orders.filter(o => ((o.normalizedApprovalStatus || o.approvalStatus || o.orderApprovalStatus || '').toUpperCase()) === 'PENDING_APPROVAL').length;
   const approvedOrders = orders.filter(o => ((o.normalizedApprovalStatus || o.approvalStatus || o.orderApprovalStatus || '').toUpperCase()) === 'APPROVED').length;
-  
+
   // Tính số lượng Orders theo tab cho Dealer Manager
   const myOrdersCount = enhancedOrders.filter((order) => {
     const creatorId =
@@ -2415,16 +3081,33 @@ const Orders = ({ user }) => {
             // Kiểm tra order có customerId không (null = EVM workflow order từ DEALER_MANAGER)
             const orderCustomerId = order.customerId || order.customer?.id || order.customer?.customerId;
             const isEVMWorkflowOrder = orderCustomerId === null || orderCustomerId === undefined;
-            
+
             // DEALER_MANAGER 的 My Orders: customerId = null 的订单不显示 customer，只显示 vehicle
             const shouldShowCustomer = !(userRole === 'DEALER_MANAGER' && isEVMWorkflowOrder);
-            
-            const customerName = shouldShowCustomer
+
+            // Lấy customer info bao gồm citizenId từ nhiều nguồn
+            const customerCitizenId = order.resolvedCustomer?.citizenId ||
+              order.resolvedCustomer?.citizen_id ||
+              order.resolvedCustomer?.citizenID ||
+              order.customer?.citizenId ||
+              order.customer?.citizen_id ||
+              order.customer?.citizenID ||
+              (orderCustomerId && customerLookup[String(orderCustomerId)]?.citizenId) ||
+              (orderCustomerId && customerLookup[String(orderCustomerId)]?.citizen_id) ||
+              (orderCustomerId && customerLookup[String(orderCustomerId)]?.citizenID) ||
+              null;
+
+            const customerNameBase = shouldShowCustomer
               ? (order.displayCustomerName ||
-                 order.customer?.fullName ||
-                 order.customerName ||
-                 'N/A')
+                order.customer?.fullName ||
+                order.customerName ||
+                'N/A')
               : null;
+
+            // Kết hợp tên và citizenId nếu có
+            const customerName = customerNameBase && customerCitizenId
+              ? `${customerNameBase} (${customerCitizenId})`
+              : customerNameBase;
             const vehicleName =
               order.displayVehicleName ||
               order.vehicle?.name ||
@@ -2447,13 +3130,19 @@ const Orders = ({ user }) => {
               order.orderApprovalStatus ||
               '';
             const statusColor = getStatusColor(status, approvalStatus);
-            const statusLabel = getStatusLabel(status, approvalStatus);
+            const statusLabel = getStatusLabel(status, approvalStatus, order);
+            const normalizedStatusText = (status || '').toUpperCase();
+            const deliveryStatusText = order.deliveryStatus ? String(order.deliveryStatus).toUpperCase() : '';
+            const isDelivered =
+              normalizedStatusText.includes('DELIVERED') || deliveryStatusText.includes('DELIVERED');
+            const canDeliver = !isDelivered && canConfirmDelivery(order);
             // Thẻ đánh dấu Order của Manager/Staff
             const isMyOrder = (order.createdBy?.id || order.createdBy?.userId || order.userId)?.toString() === userId?.toString();
             const creatorTag = userRole === 'DEALER_MANAGER' && isMyOrder ? ' (You)' : userRole === 'DEALER_MANAGER' && !isMyOrder ? ' (Staff)' : '';
+            const createdDisplay = formatOrderCreatedDisplay(order);
 
             return (
-              <div key={order.orderId || order.id} style={{ 
+              <div key={order.orderId || order.id} style={{
                 padding: '20px',
                 background: 'rgba(15,23,42,0.55)',
                 borderRadius: '20px',
@@ -2465,6 +3154,9 @@ const Orders = ({ user }) => {
                   <div style={{ flex: 1 }}>
                     <div style={{ display: 'flex', alignItems: 'center', gap: '12px', marginBottom: '8px', flexWrap: 'wrap' }}>
                       <h3 style={{ margin: '0', fontSize: '18px', fontWeight: '600', color: 'var(--color-text)' }}>{orderNumber}{creatorTag}</h3>
+                      <div style={{ fontSize: '12px', color: 'var(--color-text-muted)' }}>
+                        {createdDisplay}
+                      </div>
                       <span style={{
                         padding: '4px 12px',
                         borderRadius: 'var(--radius)',
@@ -2486,7 +3178,7 @@ const Orders = ({ user }) => {
                       </div>
                     )}
                     <div style={{ fontSize: '13px', color: 'var(--color-text-muted)' }}>
-                      Order Date · {order.orderDate ? new Date(order.orderDate).toLocaleDateString() : 'N/A'}
+                      Created · {createdDisplay}
                     </div>
                     {order.quoteId && (
                       <div style={{ fontSize: '12px', color: 'var(--color-text-muted)', marginTop: '4px' }}>
@@ -2504,12 +3196,14 @@ const Orders = ({ user }) => {
                   </div>
                 </div>
 
+
+
                 {order.notes && (
-                  <div style={{ 
-                    fontSize: '13px', 
-                    color: 'var(--color-text-muted)', 
-                    fontStyle: 'italic', 
-                    marginBottom: '12px', 
+                  <div style={{
+                    fontSize: '13px',
+                    color: 'var(--color-text-muted)',
+                    fontStyle: 'italic',
+                    marginBottom: '12px',
                     padding: '8px',
                     background: 'var(--color-surface)',
                     borderRadius: 'var(--radius)',
@@ -2524,16 +3218,16 @@ const Orders = ({ user }) => {
                   <div style={{ display: 'flex', gap: '8px' }}>
                     {canApproveOrder(order) && (
                       <>
-                        <button 
-                          className="btn btn-primary" 
+                        <button
+                          className="btn btn-primary"
                           style={{ fontSize: '12px' }}
                           onClick={() => handleApproveOrder(order)}
                         >
                           <i className="bx bx-check"></i>
                           Approve
                         </button>
-                        <button 
-                          className="btn btn-outline" 
+                        <button
+                          className="btn btn-outline"
                           style={{ fontSize: '12px', color: 'var(--color-error)' }}
                           onClick={() => handleRejectOrder(order)}
                         >
@@ -2542,10 +3236,70 @@ const Orders = ({ user }) => {
                         </button>
                       </>
                     )}
+                    {/* Shipping button */}
+                    {!isDelivered && canDeliver && (
+                      <button
+                        className="btn btn-primary"
+                        style={{ fontSize: '12px' }}
+                        onClick={() => handleConfirmDelivery(order)}
+                        disabled={confirmingDeliveryId === (order.orderId || order.id)}
+                        title="Confirm delivery and deduct inventory"
+                      >
+                        <i className="bx bx-car"></i>
+                        {confirmingDeliveryId === (order.orderId || order.id) ? 'Delivering...' : 'Shipping'}
+                      </button>
+                    )}
+                    {/* Create Payment Button - Only for DEALER_STAFF and not cancelled */}
+                    {userRole === 'DEALER_STAFF' &&
+                      !['CANCELLED', 'REJECTED'].includes(order.normalizedStatus) &&
+                      !order.isFullyPaid &&
+                      order.displayPaymentMethod === 'VNPAY' && (
+                        <button
+                          className="action-btn payment-btn"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            handleOpenPaymentModal(order);
+                          }}
+                          title="Create Payment"
+                        >
+                          <i className="bx bx-dollar-circle"></i> Create Payment
+                        </button>
+                      )}
                   </div>
                   <div style={{ display: 'flex', gap: '8px' }}>
-                    <button 
-                      className="btn btn-outline" 
+                    {/* Nút xác nhận VNPay cho đơn VNPay chưa thanh toán */}
+                    {(() => {
+                      const paymentMethod = String(order.displayPaymentMethod || order.paymentMethod || '').toUpperCase();
+                      const paymentStatusText = String(
+                        order.normalizedPaymentStatus || order.paymentStatus || order.workflowPaymentStatus || ''
+                      ).toUpperCase();
+                      const hasPendingVnpay =
+                        Array.isArray(order.orderPayments) &&
+                        order.orderPayments.some(
+                          (p) =>
+                            String(p.paymentMethod || '').toUpperCase() === 'VNPAY' &&
+                            String(p.status || '').toUpperCase() === 'PENDING'
+                        );
+                      const canQuickPay =
+                        paymentMethod === 'VNPAY' &&
+                        !paymentStatusText.includes('PAID') &&
+                        !hasPendingVnpay;
+                      if (!canQuickPay) return null;
+                      return (
+                        <button
+                          className="btn btn-primary"
+                          style={{ padding: '6px 10px', fontSize: '12px', display: 'flex', alignItems: 'center', gap: '4px' }}
+                          title="Create VNPay payment link for this order"
+                          onClick={() => handleQuickVNPayPayment(order)}
+                        >
+                          <i className="bx bx-credit-card"></i>
+                          Confirm VNPay Payment
+                        </button>
+                      );
+                    })()}
+
+                    <button
+                      className="btn btn-outline"
                       style={{ padding: '6px', fontSize: '14px' }}
                       title="View Details"
                       onClick={() => handleViewOrderDetails(order)}
@@ -2647,7 +3401,7 @@ const Orders = ({ user }) => {
           }}>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '24px' }}>
               <h3>Select Approved Quote</h3>
-              <button 
+              <button
                 onClick={() => setShowCreateFromQuoteModal(false)}
                 style={{ background: 'none', border: 'none', fontSize: '24px', cursor: 'pointer', color: 'var(--color-text-muted)' }}
               >
@@ -2666,7 +3420,7 @@ const Orders = ({ user }) => {
                   // DEALER_STAFF: 显示客户名称 + 车辆名称
                   // DEALER_MANAGER: 只显示车辆名称
                   const shouldShowCustomer = userRole === 'DEALER_STAFF';
-                  
+
                   let customerName = null;
                   if (shouldShowCustomer) {
                     // Lấy customer từ quote hoặc customerLookup
@@ -2682,10 +3436,10 @@ const Orders = ({ user }) => {
                       customerName = quote.customerName || 'N/A';
                     }
                   }
-                  
+
                   // Lấy vehicle từ nhiều nguồn
                   let vehicleName = 'N/A';
-                  
+
                   // 1. Từ quote.vehicle object
                   if (quote.vehicle) {
                     if (quote.vehicle.brand && quote.vehicle.modelName) {
@@ -2698,12 +3452,12 @@ const Orders = ({ user }) => {
                       vehicleName = `${quote.vehicle.brand} ${quote.vehicle.name}`;
                     }
                   }
-                  
+
                   // 2. Từ quote.vehicleName
                   if (vehicleName === 'N/A' && quote.vehicleName) {
                     vehicleName = quote.vehicleName;
                   }
-                  
+
                   // 3. Từ quoteDetails[0].vehicle
                   if (vehicleName === 'N/A' && Array.isArray(quote.quoteDetails) && quote.quoteDetails.length > 0) {
                     const detail = quote.quoteDetails[0];
@@ -2721,30 +3475,30 @@ const Orders = ({ user }) => {
                       vehicleName = detail.vehicleName;
                     }
                   }
-                  
+
                   // 4. Từ vehicleLookup qua vehicleId
                   if (vehicleName === 'N/A') {
                     // Tìm vehicleId từ nhiều nguồn
-                    let vehicleId = quote.vehicleId || 
-                      quote.vehicle?.id || 
+                    let vehicleId = quote.vehicleId ||
+                      quote.vehicle?.id ||
                       quote.vehicle?.vehicleId;
-                    
+
                     // Nếu chưa có vehicleId, tìm từ quoteDetails
                     if (!vehicleId && Array.isArray(quote.quoteDetails) && quote.quoteDetails.length > 0) {
                       const detail = quote.quoteDetails[0];
-                      vehicleId = detail.vehicleId || 
-                        detail.vehicle?.id || 
+                      vehicleId = detail.vehicleId ||
+                        detail.vehicle?.id ||
                         detail.vehicle?.vehicleId ||
                         detail.vehicleInfo?.id ||
                         detail.vehicleDetails?.id;
                     }
-                    
+
                     // Tìm từ quoteLookup nếu quote 已经被加载
                     if (!vehicleId && quote.quoteId) {
                       const quoteData = quoteLookup[String(quote.quoteId || quote.id)];
                       if (quoteData) {
-                        vehicleId = quoteData.vehicleId || 
-                          quoteData.vehicle?.id || 
+                        vehicleId = quoteData.vehicleId ||
+                          quoteData.vehicle?.id ||
                           quoteData.vehicle?.vehicleId;
                         if (!vehicleId && Array.isArray(quoteData.quoteDetails) && quoteData.quoteDetails.length > 0) {
                           const detail = quoteData.quoteDetails[0];
@@ -2752,7 +3506,7 @@ const Orders = ({ user }) => {
                         }
                       }
                     }
-                    
+
                     if (vehicleId && vehicleLookup[String(vehicleId)]) {
                       const lookupVehicle = vehicleLookup[String(vehicleId)];
                       if (lookupVehicle.brand && lookupVehicle.modelName) {
@@ -2771,9 +3525,9 @@ const Orders = ({ user }) => {
                       vehicleName = `Vehicle #${vehicleId}`;
                     }
                   }
-                  
+
                   const totalAmount = quote.finalTotal || quote.totalAmount || 0;
-                  
+
                   return (
                     <div
                       key={quote.quoteId || quote.id}
@@ -2798,7 +3552,9 @@ const Orders = ({ user }) => {
                       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                         <div>
                           <div style={{ fontWeight: '600', color: 'var(--color-text)', marginBottom: '4px' }}>
-                            Quote #{quote.quoteId || quote.id}
+                            Quote #{quote.quoteId || quote.id} <span style={{ fontWeight: '400', fontSize: '13px', color: 'var(--color-text-muted)', marginLeft: '8px' }}>
+                              ({new Date(quote.approvedAt || quote.createdDate).toLocaleDateString('vi-VN')})
+                            </span>
                           </div>
                           <div style={{ fontSize: '14px', color: 'var(--color-text-muted)' }}>
                             {customerName ? `${customerName} - ${vehicleName}` : vehicleName}
@@ -2815,8 +3571,8 @@ const Orders = ({ user }) => {
             )}
 
             <div style={{ display: 'flex', gap: '12px', marginTop: '24px', justifyContent: 'flex-end' }}>
-              <button 
-                className="btn btn-outline" 
+              <button
+                className="btn btn-outline"
                 onClick={() => setShowCreateFromQuoteModal(false)}
               >
                 Cancel
@@ -2851,7 +3607,7 @@ const Orders = ({ user }) => {
           }}>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '24px' }}>
               <h3>Create Order from Quote</h3>
-              <button 
+              <button
                 onClick={handleDismissOrderForm}
                 style={{ background: 'none', border: 'none', fontSize: '24px', cursor: 'pointer', color: 'var(--color-text-muted)' }}
               >
@@ -2876,7 +3632,7 @@ const Orders = ({ user }) => {
                     </label>
                     <select
                       value={orderFormData.customerId || ''}
-                      onChange={(e) => setOrderFormData({...orderFormData, customerId: e.target.value ? Number(e.target.value) : null})}
+                      onChange={(e) => setOrderFormData({ ...orderFormData, customerId: e.target.value ? Number(e.target.value) : null })}
                       style={{
                         width: '100%',
                         padding: '12px',
@@ -2909,7 +3665,7 @@ const Orders = ({ user }) => {
                   <input
                     type="date"
                     value={orderFormData.orderDate}
-                    onChange={(e) => setOrderFormData({...orderFormData, orderDate: e.target.value})}
+                    onChange={(e) => setOrderFormData({ ...orderFormData, orderDate: e.target.value })}
                     style={{
                       width: '100%',
                       padding: '12px',
@@ -2928,7 +3684,7 @@ const Orders = ({ user }) => {
                   </label>
                   <select
                     value={orderFormData.paymentMethod}
-                    onChange={(e) => setOrderFormData({...orderFormData, paymentMethod: e.target.value})}
+                    onChange={(e) => setOrderFormData({ ...orderFormData, paymentMethod: e.target.value })}
                     style={{
                       width: '100%',
                       padding: '12px',
@@ -2968,7 +3724,7 @@ const Orders = ({ user }) => {
                       color: 'var(--color-text)',
                       fontSize: '14px'
                     }}
-                    >
+                  >
                     {[0, 30, 50, 70, 100].map((percent) => (
                       <option key={percent} value={percent}>
                         {percent === 0 ? '0 (pay later via VNPay)' : `${percent}%`}
@@ -2983,7 +3739,7 @@ const Orders = ({ user }) => {
                   </label>
                   <textarea
                     value={orderFormData.notes}
-                    onChange={(e) => setOrderFormData({...orderFormData, notes: e.target.value})}
+                    onChange={(e) => setOrderFormData({ ...orderFormData, notes: e.target.value })}
                     style={{
                       width: '100%',
                       padding: '12px',
@@ -3163,8 +3919,8 @@ const Orders = ({ user }) => {
                                                 status === 'PAID'
                                                   ? 'var(--color-success)'
                                                   : status === 'PENDING'
-                                                  ? 'var(--color-warning)'
-                                                  : 'var(--color-text-muted)',
+                                                    ? 'var(--color-warning)'
+                                                    : 'var(--color-text-muted)',
                                               fontWeight: 600
                                             }}
                                           >
@@ -3197,9 +3953,9 @@ const Orders = ({ user }) => {
                 </div>
 
                 <div style={{ display: 'flex', gap: '12px', marginTop: '24px', justifyContent: 'flex-end' }}>
-                  <button 
-                    type="button" 
-                    className="btn btn-outline" 
+                  <button
+                    type="button"
+                    className="btn btn-outline"
                     onClick={handleDismissOrderForm}
                   >
                     Cancel
@@ -3280,13 +4036,16 @@ const Orders = ({ user }) => {
                   <div style={{ padding: '14px', borderRadius: 'var(--radius)', border: '1px solid var(--color-border)', background: 'var(--color-bg)' }}>
                     <div style={{ fontSize: '12px', color: 'var(--color-text-muted)', marginBottom: '4px' }}>Status</div>
                     <div style={{ fontWeight: 700, color: getStatusColor(activeOrderDetail?.status, activeOrderDetail?.approvalStatus) }}>
-                      {getStatusLabel(activeOrderDetail?.status, activeOrderDetail?.approvalStatus)}
+                      {getStatusLabel(activeOrderDetail?.status, activeOrderDetail?.approvalStatus, activeOrderDetail)}
                     </div>
                   </div>
                   <div style={{ padding: '14px', borderRadius: 'var(--radius)', border: '1px solid var(--color-border)', background: 'var(--color-bg)' }}>
                     <div style={{ fontSize: '12px', color: 'var(--color-text-muted)', marginBottom: '4px' }}>Created At</div>
                     <div style={{ fontWeight: 600, color: 'var(--color-text)' }}>
-                      {activeOrderDetail?.orderDate ? new Date(activeOrderDetail.orderDate).toLocaleString() : 'N/A'}
+                      {(() => {
+                        const createdAt = resolveOrderCreatedAt(activeOrderDetail);
+                        return createdAt ? new Date(createdAt).toLocaleString() : 'N/A';
+                      })()}
                     </div>
                   </div>
                   <div style={{ padding: '14px', borderRadius: 'var(--radius)', border: '1px solid var(--color-border)', background: 'var(--color-bg)' }}>
@@ -3305,6 +4064,111 @@ const Orders = ({ user }) => {
                   </div>
                 </div>
 
+
+
+                {/* Payment History Table */}
+                {activeOrderDetail?.orderPayments?.length > 0 && (
+                  <div style={{ marginTop: '16px', borderRadius: 'var(--radius)', border: '1px solid var(--color-border)', background: 'var(--color-bg)', overflow: 'hidden' }}>
+                    <div style={{ padding: '12px 16px', fontWeight: 600, color: 'var(--color-text)', fontSize: '14px', borderBottom: '1px solid var(--color-border)' }}>
+                      Payment History
+                    </div>
+                    <div style={{ overflowX: 'auto' }}>
+                      <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+                        <thead>
+                          <tr style={{ borderBottom: '1px solid var(--color-border)' }}>
+                            <th style={{ padding: '10px 16px', textAlign: 'left', fontSize: '12px', color: 'var(--color-text-muted)' }}>ID</th>
+                            <th style={{ padding: '10px 16px', textAlign: 'left', fontSize: '12px', color: 'var(--color-text-muted)' }}>Date</th>
+                            <th style={{ padding: '10px 16px', textAlign: 'right', fontSize: '12px', color: 'var(--color-text-muted)' }}>Amount</th>
+                            <th style={{ padding: '10px 16px', textAlign: 'left', fontSize: '12px', color: 'var(--color-text-muted)' }}>Method</th>
+                            <th style={{ padding: '10px 16px', textAlign: 'center', fontSize: '12px', color: 'var(--color-text-muted)' }}>Status</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {activeOrderDetail.orderPayments.map((payment, index) => (
+                            <tr key={index} style={{ borderTop: '1px solid var(--color-border)' }}>
+                              <td style={{ padding: '10px 16px', fontSize: '13px', color: 'var(--color-text)' }}>
+                                {payment.id || payment.paymentId || 'N/A'}
+                              </td>
+                              <td style={{ padding: '10px 16px', fontSize: '13px', color: 'var(--color-text)' }}>
+                                {(() => {
+                                  const dateStr = payment.vnpayPayDate || payment.payDate || payment.paidDate || payment.createdDate || payment.createdAt;
+                                  return dateStr ? new Date(dateStr).toLocaleString('vi-VN') : 'N/A';
+                                })()}
+                              </td>
+                              <td style={{ padding: '10px 16px', textAlign: 'right', fontSize: '13px', fontWeight: 600, color: 'var(--color-text)' }}>
+                                ${Number(payment.amount || 0).toLocaleString()}
+                              </td>
+                              <td style={{ padding: '10px 16px', fontSize: '13px', color: 'var(--color-text)' }}>
+                                {payment.paymentMethod || 'N/A'}
+                              </td>
+                              <td style={{ padding: '10px 16px', textAlign: 'center' }}>
+                                <span style={{
+                                  fontSize: '11px',
+                                  fontWeight: 600,
+                                  padding: '2px 8px',
+                                  borderRadius: '999px',
+                                  background: (payment.status || '').toUpperCase() === 'COMPLETED' ? 'rgba(16, 185, 129, 0.1)' : 'rgba(245, 158, 11, 0.1)',
+                                  color: (payment.status || '').toUpperCase() === 'COMPLETED' ? '#10b981' : '#f59e0b'
+                                }}>
+                                  {(payment.status || 'UNKNOWN').toUpperCase()}
+                                </span>
+                              </td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  </div>
+                )}
+
+                {/* Installment Schedule Table */}
+                {activeOrderDetail?.installmentSchedule?.length > 0 && (
+                  <div style={{ marginTop: '16px', borderRadius: 'var(--radius)', border: '1px solid var(--color-border)', background: 'var(--color-bg)', overflow: 'hidden' }}>
+                    <div style={{ padding: '12px 16px', fontWeight: 600, color: 'var(--color-text)', fontSize: '14px', borderBottom: '1px solid var(--color-border)' }}>
+                      Installment Schedule
+                    </div>
+                    <div style={{ overflowX: 'auto', maxHeight: '300px' }}>
+                      <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+                        <thead>
+                          <tr style={{ background: 'rgba(255,255,255,0.02)' }}>
+                            <th style={{ padding: '10px 16px', textAlign: 'left', fontSize: '12px', color: 'var(--color-text-muted)' }}>#</th>
+                            <th style={{ padding: '10px 16px', textAlign: 'left', fontSize: '12px', color: 'var(--color-text-muted)' }}>Due Date</th>
+                            <th style={{ padding: '10px 16px', textAlign: 'right', fontSize: '12px', color: 'var(--color-text-muted)' }}>Amount</th>
+                            <th style={{ padding: '10px 16px', textAlign: 'center', fontSize: '12px', color: 'var(--color-text-muted)' }}>Status</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {activeOrderDetail.installmentSchedule.map((item, index) => (
+                            <tr key={index} style={{ borderTop: '1px solid var(--color-border)' }}>
+                              <td style={{ padding: '10px 16px', fontSize: '13px', color: 'var(--color-text)' }}>
+                                {item.installmentNumber}
+                              </td>
+                              <td style={{ padding: '10px 16px', fontSize: '13px', color: 'var(--color-text)' }}>
+                                {item.dueDate ? new Date(item.dueDate).toLocaleDateString() : 'N/A'}
+                              </td>
+                              <td style={{ padding: '10px 16px', textAlign: 'right', fontSize: '13px', fontWeight: 600, color: 'var(--color-text)' }}>
+                                ${Number(item.amount || 0).toLocaleString()}
+                              </td>
+                              <td style={{ padding: '10px 16px', textAlign: 'center' }}>
+                                <span style={{
+                                  fontSize: '11px',
+                                  fontWeight: 600,
+                                  padding: '2px 8px',
+                                  borderRadius: '999px',
+                                  background: (item.status || '').toUpperCase() === 'PAID' ? 'rgba(16, 185, 129, 0.1)' : 'rgba(245, 158, 11, 0.1)',
+                                  color: (item.status || '').toUpperCase() === 'PAID' ? '#10b981' : '#f59e0b'
+                                }}>
+                                  {(item.status || 'PENDING').toUpperCase()}
+                                </span>
+                              </td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  </div>
+                )}
+
                 {/* Customer info only for Dealer Staff */}
                 {userRole === 'DEALER_STAFF' && (
                   <div style={{ padding: '16px', borderRadius: 'var(--radius)', border: '1px solid var(--color-border)', background: 'var(--color-bg)' }}>
@@ -3312,7 +4176,24 @@ const Orders = ({ user }) => {
                       Customer
                     </div>
                     <div style={{ fontSize: '13px', color: 'var(--color-text-muted)', lineHeight: 1.6 }}>
-                      <div><span style={{ color: 'var(--color-text)' }}>Name:</span> {activeOrderDetail?.displayCustomerName || 'N/A'}</div>
+                      {(() => {
+                        const customerName = activeOrderDetail?.displayCustomerName || 'N/A';
+                        const orderCustomerId = activeOrderDetail?.customerId ||
+                          activeOrderDetail?.customer?.id ||
+                          activeOrderDetail?.customer?.customerId;
+                        const citizenId = activeOrderDetail?.resolvedCustomer?.citizenId ||
+                          activeOrderDetail?.resolvedCustomer?.citizen_id ||
+                          activeOrderDetail?.resolvedCustomer?.citizenID ||
+                          activeOrderDetail?.customer?.citizenId ||
+                          activeOrderDetail?.customer?.citizen_id ||
+                          activeOrderDetail?.customer?.citizenID ||
+                          (orderCustomerId && customerLookup[String(orderCustomerId)]?.citizenId) ||
+                          (orderCustomerId && customerLookup[String(orderCustomerId)]?.citizen_id) ||
+                          (orderCustomerId && customerLookup[String(orderCustomerId)]?.citizenID) ||
+                          null;
+                        const displayName = citizenId ? `${customerName} (${citizenId})` : customerName;
+                        return <div><span style={{ color: 'var(--color-text)' }}>Name:</span> {displayName}</div>;
+                      })()}
                       {activeOrderDetail?.resolvedCustomer?.email && (
                         <div><span style={{ color: 'var(--color-text)' }}>Email:</span> {activeOrderDetail.resolvedCustomer.email}</div>
                       )}
@@ -3328,20 +4209,28 @@ const Orders = ({ user }) => {
                     Vehicle / Product
                   </div>
                   <div style={{ padding: '0 16px 16px', display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: '12px' }}>
-                    {[
-                      { label: 'Full Name', value: activeOrderDetail?.displayVehicleName || activeOrderDetail?.resolvedVehicle?.modelName || 'N/A' },
-                      { label: 'Brand', value: activeOrderDetail?.resolvedVehicle?.brand },
-                      { label: 'Model', value: activeOrderDetail?.resolvedVehicle?.modelName || activeOrderDetail?.resolvedVehicle?.model },
-                      { label: 'Variant', value: activeOrderDetail?.resolvedVehicle?.variantName },
-                      { label: 'Year', value: activeOrderDetail?.resolvedVehicle?.yearOfManufacture },
-                      { label: 'Vehicle Type', value: getVehicleTypeLabelFromOrder(activeOrderDetail) },
-                      { label: 'VIN', value: activeOrderDetail?.resolvedVehicle?.vin }
-                    ].filter(item => item.value).map((item) => (
-                      <div key={item.label} style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
-                        <div style={{ fontSize: '12px', color: 'var(--color-text-muted)', textTransform: 'uppercase', letterSpacing: '0.5px' }}>{item.label}</div>
-                        <div style={{ fontSize: '13px', color: 'var(--color-text)', fontWeight: 600 }}>{item.value}</div>
-                      </div>
-                    ))}
+                    {(() => {
+                      const deliveryStatusDisplay = activeOrderDetail?.status
+                        ? activeOrderDetail.status.replace(/_/g, ' ').toUpperCase()
+                        : null;
+                      const items = [
+                        { label: 'Brand', value: activeOrderDetail?.resolvedVehicle?.brand },
+                        { label: 'Model', value: activeOrderDetail?.resolvedVehicle?.modelName || activeOrderDetail?.resolvedVehicle?.model },
+                        { label: 'Variant', value: activeOrderDetail?.resolvedVehicle?.variantName },
+                        { label: 'Year', value: activeOrderDetail?.resolvedVehicle?.yearOfManufacture },
+                        { label: 'Vehicle Type', value: getVehicleTypeLabelFromOrder(activeOrderDetail) },
+                        { label: 'VIN', value: activeOrderDetail?.resolvedVehicle?.vin },
+                        { label: 'Delivery Status', value: deliveryStatusDisplay }
+                      ];
+                      return items
+                        .filter(item => item.value)
+                        .map((item) => (
+                          <div key={item.label} style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
+                            <div style={{ fontSize: '12px', color: 'var(--color-text-muted)', textTransform: 'uppercase', letterSpacing: '0.5px' }}>{item.label}</div>
+                            <div style={{ fontSize: '13px', color: 'var(--color-text)', fontWeight: 600 }}>{item.value}</div>
+                          </div>
+                        ));
+                    })()}
                   </div>
                 </div>
 
@@ -3362,13 +4251,99 @@ const Orders = ({ user }) => {
                   </div>
                 )}
               </div>
-            )}
-          </div>
-        </div>
+            )
+            }
+          </div >
+        </div >
       )}
 
       {/* Approve Order Modal */}
-      {showApproveModal && selectedOrder && (
+      {
+        showApproveModal && selectedOrder && (
+          <div style={{
+            position: 'fixed',
+            top: 0,
+            left: 0,
+            right: 0,
+            bottom: 0,
+            background: 'rgba(0, 0, 0, 0.5)',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            zIndex: 1000
+          }}>
+            <div style={{
+              background: 'var(--color-surface)',
+              borderRadius: 'var(--radius)',
+              padding: '24px',
+              width: '90%',
+              maxWidth: '400px'
+            }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '24px' }}>
+                <h3>Approve Order</h3>
+                <button
+                  onClick={() => {
+                    setShowApproveModal(false);
+                    setSelectedOrder(null);
+                    setApproveNotes('');
+                  }}
+                  style={{ background: 'none', border: 'none', fontSize: '24px', cursor: 'pointer', color: 'var(--color-text-muted)' }}
+                >
+                  <i className="bx bx-x"></i>
+                </button>
+              </div>
+
+              <div style={{ marginBottom: '16px' }}>
+                <div style={{ fontSize: '14px', color: 'var(--color-text-muted)', marginBottom: '4px' }}>Order</div>
+                <div style={{ fontWeight: '600', color: 'var(--color-text)' }}>
+                  {selectedOrder.displayOrderNumber || selectedOrder.orderNumber || selectedOrder.orderId}
+                </div>
+              </div>
+
+              <div style={{ marginBottom: '16px' }}>
+                <label style={{ display: 'block', marginBottom: '8px', fontSize: '14px', fontWeight: '600', color: 'var(--color-text)' }}>
+                  Approval Notes (Optional)
+                </label>
+                <textarea
+                  value={approveNotes}
+                  onChange={(e) => setApproveNotes(e.target.value)}
+                  style={{
+                    width: '100%',
+                    padding: '12px',
+                    border: '1px solid var(--color-border)',
+                    borderRadius: 'var(--radius)',
+                    background: 'var(--color-bg)',
+                    color: 'var(--color-text)',
+                    fontSize: '14px',
+                    minHeight: '80px',
+                    resize: 'vertical'
+                  }}
+                  placeholder="Add approval notes..."
+                />
+              </div>
+
+              <div style={{ display: 'flex', gap: '12px', justifyContent: 'flex-end' }}>
+                <button
+                  className="btn btn-outline"
+                  onClick={() => {
+                    setShowApproveModal(false);
+                    setSelectedOrder(null);
+                    setApproveNotes('');
+                  }}
+                >
+                  Cancel
+                </button>
+                <button className="btn btn-primary" onClick={handleConfirmApprove}>
+                  Confirm Approve
+                </button>
+              </div>
+            </div>
+          </div>
+        )
+      }
+
+      {/* Create Payment Modal */}
+      {showPaymentModal && selectedOrderForPayment && (
         <div style={{
           position: 'fixed',
           top: 0,
@@ -3386,70 +4361,127 @@ const Orders = ({ user }) => {
             borderRadius: 'var(--radius)',
             padding: '24px',
             width: '90%',
-            maxWidth: '400px'
+            maxWidth: '450px'
           }}>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '24px' }}>
-              <h3>Approve Order</h3>
-              <button 
-                onClick={() => {
-                  setShowApproveModal(false);
-                  setSelectedOrder(null);
-                  setApproveNotes('');
-                }}
+              <h3>Create Payment</h3>
+              <button
+                onClick={handleClosePaymentModal}
                 style={{ background: 'none', border: 'none', fontSize: '24px', cursor: 'pointer', color: 'var(--color-text-muted)' }}
               >
                 <i className="bx bx-x"></i>
               </button>
             </div>
 
-            <div style={{ marginBottom: '16px' }}>
-              <div style={{ fontSize: '14px', color: 'var(--color-text-muted)', marginBottom: '4px' }}>Order</div>
-              <div style={{ fontWeight: '600', color: 'var(--color-text)' }}>
-                {selectedOrder.displayOrderNumber || selectedOrder.orderNumber || selectedOrder.orderId}
+            <form onSubmit={handleSubmitPayment}>
+              <div style={{ marginBottom: '16px' }}>
+                <div style={{ fontSize: '14px', color: 'var(--color-text-muted)', marginBottom: '4px' }}>Order</div>
+                <div style={{ fontWeight: '600', color: 'var(--color-text)' }}>
+                  {selectedOrderForPayment.displayOrderNumber || selectedOrderForPayment.orderNumber || selectedOrderForPayment.orderId}
+                </div>
+                <div style={{ fontSize: '13px', color: 'var(--color-text-muted)', marginTop: '4px' }}>
+                  Total: ${Number(selectedOrderForPayment.totalAmount || 0).toLocaleString()} |
+                  Paid: ${Number(selectedOrderForPayment.paidAmount || 0).toLocaleString()} |
+                  Remaining: ${Number(selectedOrderForPayment.remainingAmount || 0).toLocaleString()}
+                </div>
               </div>
-            </div>
 
-            <div style={{ marginBottom: '16px' }}>
-              <label style={{ display: 'block', marginBottom: '8px', fontSize: '14px', fontWeight: '600', color: 'var(--color-text)' }}>
-                Approval Notes (Optional)
-              </label>
-              <textarea
-                value={approveNotes}
-                onChange={(e) => setApproveNotes(e.target.value)}
-                style={{
-                  width: '100%',
-                  padding: '12px',
-                  border: '1px solid var(--color-border)',
-                  borderRadius: 'var(--radius)',
-                  background: 'var(--color-bg)',
-                  color: 'var(--color-text)',
-                  fontSize: '14px',
-                  minHeight: '80px',
-                  resize: 'vertical'
-                }}
-                placeholder="Add approval notes..."
-              />
-            </div>
+              <div style={{ marginBottom: '16px' }}>
+                <label style={{ display: 'block', marginBottom: '8px', fontSize: '14px', fontWeight: '600', color: 'var(--color-text)' }}>
+                  Payment Method
+                </label>
+                <select
+                  value={paymentFormData.paymentMethod}
+                  onChange={(e) => setPaymentFormData({ ...paymentFormData, paymentMethod: e.target.value })}
+                  style={{
+                    width: '100%',
+                    padding: '12px',
+                    border: '1px solid var(--color-border)',
+                    borderRadius: 'var(--radius)',
+                    background: 'var(--color-bg)',
+                    color: 'var(--color-text)',
+                    fontSize: '14px'
+                  }}
+                >
+                  <option value="VNPAY">VNPAY</option>
+                </select>
+              </div>
 
-            <div style={{ display: 'flex', gap: '12px', justifyContent: 'flex-end' }}>
-              <button 
-                className="btn btn-outline" 
-                onClick={() => {
-                  setShowApproveModal(false);
-                  setSelectedOrder(null);
-                  setApproveNotes('');
-                }}
-              >
-                Cancel
-              </button>
-              <button className="btn btn-primary" onClick={handleConfirmApprove}>
-                Confirm Approve
-              </button>
-            </div>
+              <div style={{ marginBottom: '16px' }}>
+                <label style={{ display: 'block', marginBottom: '8px', fontSize: '14px', fontWeight: '600', color: 'var(--color-text)' }}>
+                  Payment Percentage (%)
+                </label>
+                <select
+                  value={paymentFormData.paymentPercentage}
+                  onChange={(e) => setPaymentFormData({ ...paymentFormData, paymentPercentage: e.target.value })}
+                  style={{
+                    width: '100%',
+                    padding: '12px',
+                    border: '1px solid var(--color-border)',
+                    borderRadius: 'var(--radius)',
+                    background: 'var(--color-bg)',
+                    color: 'var(--color-text)',
+                    fontSize: '14px'
+                  }}
+                >
+                  <option value="30">30%</option>
+                  <option value="50">50%</option>
+                  <option value="70">70%</option>
+                  <option value="100">100% (Full Remaining)</option>
+                </select>
+              </div>
+
+              <div style={{ marginBottom: '16px' }}>
+                <label style={{ display: 'block', marginBottom: '8px', fontSize: '14px', fontWeight: '600', color: 'var(--color-text)' }}>
+                  Notes (Optional)
+                </label>
+                <textarea
+                  value={paymentFormData.notes}
+                  onChange={(e) => setPaymentFormData({ ...paymentFormData, notes: e.target.value })}
+                  style={{
+                    width: '100%',
+                    padding: '12px',
+                    border: '1px solid var(--color-border)',
+                    borderRadius: 'var(--radius)',
+                    background: 'var(--color-bg)',
+                    color: 'var(--color-text)',
+                    fontSize: '14px',
+                    minHeight: '80px',
+                    resize: 'vertical'
+                  }}
+                  placeholder="Payment notes..."
+                />
+              </div>
+
+              <div style={{ display: 'flex', gap: '12px', justifyContent: 'flex-end' }}>
+                <button
+                  type="button"
+                  className="btn btn-outline"
+                  onClick={handleClosePaymentModal}
+                  disabled={paymentSubmitting}
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  className="btn btn-primary"
+                  disabled={paymentSubmitting}
+                >
+                  {paymentSubmitting ? (
+                    <>
+                      <i className="bx bx-loader-alt bx-spin" style={{ marginRight: '6px' }}></i>
+                      Processing...
+                    </>
+                  ) : (
+                    'Confirm Payment'
+                  )}
+                </button>
+              </div>
+            </form>
           </div>
         </div>
       )}
-    </div>  
+    </div >
   );
 };
 

@@ -4,109 +4,501 @@ import { LineChart, Line, BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, L
 import { paymentsAPI } from '../../utils/api/paymentsAPI';
 import { ordersAPI } from '../../utils/api/ordersAPI';
 import { customersAPI } from '../../utils/api/customersAPI';
-import { vehiclesAPI } from '../../utils/api/vehiclesAPI';
 import { installmentsAPI } from '../../utils/api/installmentsAPI';
 import { showSuccessToast, showErrorToast } from '../../utils/toast';
 import { handleAPIError } from '../../utils/apiConfig';
 import 'boxicons/css/boxicons.min.css';
 
-const PaymentManagement = ({ user }) => {
+const coalesceText = (...values) => {
+  for (const value of values) {
+    if (value === undefined || value === null) continue;
+    if (typeof value === 'string') {
+      const trimmed = value.trim();
+      if (trimmed.length > 0) return trimmed;
+    }
+    if (typeof value === 'number' && Number.isFinite(value)) {
+      return String(value);
+    }
+  }
+  return '';
+};
+
+const composeFullName = (data) => {
+  if (!data || typeof data !== 'object') return '';
+  const parts = [
+    data.fullName,
+    data.fullname,
+    data.full_name,
+    data.displayName,
+    data.display_name,
+    data.name,
+    data.customerName,
+    data.customerFullName,
+    data.customer_full_name,
+  ];
+
+  for (const part of parts) {
+    if (typeof part === 'string' && part.trim().length > 0) {
+      return part.trim();
+    }
+  }
+
+  const firstName =
+    data.firstName ||
+    data.firstname ||
+    data.first_name ||
+    data.givenName ||
+    data.given_name ||
+    '';
+  const lastName =
+    data.lastName ||
+    data.lastname ||
+    data.last_name ||
+    data.familyName ||
+    data.family_name ||
+    '';
+
+  const resolved = [firstName, lastName].map((val) => (typeof val === 'string' ? val.trim() : '')).filter(Boolean);
+  return resolved.join(' ');
+};
+
+const ensureObject = (value) => (value && typeof value === 'object' ? value : null);
+
+const PaymentManagement = ({ user, paymentTabState }) => {
   const location = useLocation();
   const [payments, setPayments] = useState([]);
-  const [approvedOrders, setApprovedOrders] = useState([]);
+  const [allOrders, setAllOrders] = useState([]); // Store all relevant orders for lookup
+  const [customerLookup, setCustomerLookup] = useState({});
+
   const [loading, setLoading] = useState(true);
   const [selectedType, setSelectedType] = useState('all');
-  const [showCreatePaymentModal, setShowCreatePaymentModal] = useState(false);
-  const [showManualPaymentModal, setShowManualPaymentModal] = useState(false);
-  const [selectedOrder, setSelectedOrder] = useState(null);
-  const [manualPaymentForm, setManualPaymentForm] = useState({
-    paymentMethod: 'CASH',
-    paymentPercentage: 30,
-    paymentNotes: ''
-  });
-  const [manualPaymentLoading, setManualPaymentLoading] = useState(false);
   const [refreshTrigger, setRefreshTrigger] = useState(0);
-  const [customerLookup, setCustomerLookup] = useState({});
-  const [vehicleLookup, setVehicleLookup] = useState({});
-  
-  // Installment states
-  const [showInstallmentModal, setShowInstallmentModal] = useState(false);
-  const [selectedPaymentForInstallment, setSelectedPaymentForInstallment] = useState(null);
-  const [installmentForm, setInstallmentForm] = useState({
-    months: 12,
-    annualInterestRate: 0,
-    firstDueDate: ''
-  });
-  const [installmentSchedule, setInstallmentSchedule] = useState([]);
-  const [installmentLoading, setInstallmentLoading] = useState(false);
-  const [installmentCreating, setInstallmentCreating] = useState(false);
-  const [installmentPreview, setInstallmentPreview] = useState(null);
-  const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
+
+
+  // Payment Detail Modal State
+  const [showDetailModal, setShowDetailModal] = useState(false);
+  const [selectedPaymentDetail, setSelectedPaymentDetail] = useState(null);
+  const [detailInstallmentSchedule, setDetailInstallmentSchedule] = useState([]);
+  const [detailLoading, setDetailLoading] = useState(false);
 
   const userRole = user?.role?.toUpperCase().replace(/-/g, '_');
   const userId = user?.id || user?.userId || user?.user?.id;
+  const userDealerId = user?.dealerId || user?.user?.dealerId;
 
-  // Load customers and vehicles for lookup
+  const getOrderNumber = (order) => {
+    if (!order) return 'ORD-N/A';
+    const raw =
+      order.displayOrderNumber ||
+      order.orderNumber ||
+      order.orderCode ||
+      null;
+    if (raw) return raw;
+    const fallbackId = order.orderId || order.id;
+    return fallbackId ? `ORD-${fallbackId}` : 'ORD-N/A';
+  };
+
+  const getCustomerName = (order) => {
+    if (!order) return 'N/A';
+    
+    // Try to get customer from lookup first
+    const orderCustomerId = order.customerId || 
+      order.customer?.id || 
+      order.customer?.customerId ||
+      order.resolvedCustomer?.id ||
+      order.resolvedCustomer?.customerId;
+    
+    const lookupCustomer = orderCustomerId ? customerLookup[String(orderCustomerId)] : null;
+    
+    const resolvedCustomer =
+      lookupCustomer ||
+      ensureObject(order.customer) ||
+      ensureObject(order.customerInfo) ||
+      ensureObject(order.customerDetails) ||
+      ensureObject(order.customerData) ||
+      ensureObject(order.customerResponse) ||
+      ensureObject(order.customerDto) ||
+      ensureObject(order.quote?.customer);
+
+    const customerName =
+      coalesceText(
+        // Try lookup customer first
+        composeFullName(lookupCustomer),
+        // Then try order's own customer data
+        order.customerName,
+        order.customerFullname,
+        order.customerFullName,
+        order.customer_full_name,
+        composeFullName(resolvedCustomer),
+        composeFullName(order.customer),
+        composeFullName(order.customerInfo),
+        composeFullName(order.customerDetails),
+        composeFullName(order.customerData),
+        composeFullName(order.customerResponse),
+        composeFullName(order.customerDto),
+        composeFullName(order.customer?.user),
+        composeFullName(order.customerInfo?.user),
+        composeFullName(order.customerDetails?.user),
+        composeFullName(order.customerData?.user),
+        resolvedCustomer?.contactName,
+        resolvedCustomer?.customerName,
+        resolvedCustomer?.customerFullName,
+        lookupCustomer?.email,
+        lookupCustomer?.phone,
+        order.customerEmail
+      ) || (order.customerId ? `Customer #${order.customerId}` : 'N/A');
+    
+    return customerName;
+  };
+
+  const getVehicleName = (order) => {
+    if (!order) return 'N/A';
+    const orderDetails = Array.isArray(order.orderDetails) ? order.orderDetails : [];
+    const firstDetail = orderDetails[0];
+
+    const vehicle =
+      firstDetail?.vehicle ||
+      order.vehicle ||
+      order.vehicleInfo ||
+      order.vehicleDetails ||
+      null;
+
+    if (vehicle) {
+      if (vehicle.brand && vehicle.modelName) {
+        return `${vehicle.brand} ${vehicle.modelName}`;
+      }
+      return (
+        vehicle.name ||
+        vehicle.modelName ||
+        vehicle.model ||
+        vehicle.vehicleName ||
+        vehicle.displayName ||
+        vehicle.title ||
+        'N/A'
+      );
+    }
+
+    if (firstDetail?.vehicleId) {
+      return `Vehicle #${firstDetail.vehicleId}`;
+    }
+    if (order.vehicleId) {
+      return `Vehicle #${order.vehicleId}`;
+    }
+    return 'N/A';
+  };
+
+  const createVnpayPaymentRecordFromOrder = (order) => {
+    if (!order) return null;
+    const orderId = order.orderId || order.id;
+    const method = (order.paymentMethod || '').toUpperCase();
+    if (!orderId || method !== 'VNPAY' || !(order.paidAmount > 0)) {
+      return null;
+    }
+
+    const normalizedStatus = (order.paymentStatus || '').toUpperCase();
+    const fallbackStatus =
+      normalizedStatus === 'PAID' || normalizedStatus === 'PARTIALLY_PAID'
+        ? 'COMPLETED'
+        : 'PENDING';
+
+    return {
+      id: `order-${orderId}-payment`,
+      orderId,
+      orderNumber: getOrderNumber(order),
+      customerName: getCustomerName(order),
+      vehicleName: getVehicleName(order),
+      amount: order.paidAmount,
+      paymentMethod: 'VNPAY',
+      status: fallbackStatus,
+      paymentDate: order.orderDate || new Date().toISOString(),
+      paymentStatus: order.paymentStatus || 'PENDING',
+    };
+  };
+
+  const getPaymentNumericId = (payment) => {
+    if (!payment) return 0;
+    const raw = payment.paymentId || payment.id || payment.txnRef || payment.vnpayTxnRef;
+    if (typeof raw === 'string' && /^\d+$/.test(raw)) {
+      return Number(raw);
+    }
+    const numeric = Number(raw);
+    return Number.isNaN(numeric) ? 0 : numeric;
+  };
+
+  const resolvePaymentTimestamp = (payment) => {
+    if (!payment) return null;
+    const candidates = [
+      payment.vnpayPayDate,
+      payment.payDate,
+      payment.paymentDate,
+      payment.createdAt,
+      payment.createdDate,
+      payment.updatedAt,
+      payment.updatedDate,
+      payment.date,
+      payment.timestamp,
+    ];
+
+    for (const candidate of candidates) {
+      if (!candidate) continue;
+      const time = new Date(candidate).getTime();
+      if (!Number.isNaN(time)) {
+        return time;
+      }
+    }
+
+    return null;
+  };
+
+  const formatPaymentTimestamp = (payment) => {
+    const timestamp = resolvePaymentTimestamp(payment);
+    if (!timestamp) return 'N/A';
+    return new Date(timestamp).toLocaleString('en-US');
+  };
+
+  const sortPaymentsByNewest = (list = []) => {
+    if (!Array.isArray(list)) return [];
+    return [...list].sort((a, b) => {
+      const idDiff = getPaymentNumericId(b) - getPaymentNumericId(a);
+      if (idDiff !== 0) return idDiff;
+      const timeB = resolvePaymentTimestamp(b) ?? 0;
+      const timeA = resolvePaymentTimestamp(a) ?? 0;
+      return timeB - timeA;
+    });
+  };
+
+
+
+  // Load Customers for Lookup
   useEffect(() => {
-    const loadLookupData = async () => {
+    let isMounted = true;
+
+    const loadCustomers = async () => {
       try {
-        const [customers, vehicles] = await Promise.all([
-          customersAPI.getAll(),
-          vehiclesAPI.getAll()
-        ]);
-        
-        const customerMap = {};
-        if (Array.isArray(customers)) {
-          customers.forEach(customer => {
-            customerMap[String(customer.id || customer.customerId)] = customer;
+        const customerPromise =
+          userDealerId && (userRole === 'DEALER_MANAGER' || userRole === 'DEALER_STAFF')
+            ? customersAPI.getByDealer(userDealerId)
+            : customersAPI.getAll();
+
+        const customersResult = await Promise.allSettled([customerPromise]);
+
+        if (!isMounted) return;
+
+        if (customersResult[0].status === 'fulfilled' && Array.isArray(customersResult[0].value)) {
+          const map = {};
+          customersResult[0].value.forEach((customer) => {
+            const candidateIds = [
+              customer.id,
+              customer.customerId,
+              customer.customerID,
+              customer.userId,
+              customer.user?.id,
+              customer.user?.userId
+            ];
+            candidateIds.forEach((candidate) => {
+              if (candidate !== undefined && candidate !== null && candidate !== '') {
+                map[String(candidate)] = customer;
+              }
+            });
           });
+          setCustomerLookup(map);
+        } else if (customersResult[0].status === 'rejected') {
+          console.error('Failed to load customers for payment management:', customersResult[0].reason);
         }
-        setCustomerLookup(customerMap);
-        
-        const vehicleMap = {};
-        if (Array.isArray(vehicles)) {
-          vehicles.forEach(vehicle => {
-            vehicleMap[String(vehicle.id || vehicle.vehicleId)] = vehicle;
-          });
-        }
-        setVehicleLookup(vehicleMap);
       } catch (error) {
-        console.error('Error loading lookup data:', error);
+        if (isMounted) {
+          console.error('Error loading customers for payment management:', error);
+        }
       }
     };
-    
-    loadLookupData();
-  }, []);
+
+    loadCustomers();
+
+    return () => {
+      isMounted = false;
+    };
+  }, [userRole, userDealerId]);
 
   // Load payments and approved orders
   useEffect(() => {
     const loadData = async () => {
       try {
         setLoading(true);
-        
-        const orders = await ordersAPI.getAll();
-        const approved = Array.isArray(orders) ? orders.filter(order => {
-          const approvalStatus = order.approvalStatus || order.orderApprovalStatus || '';
-          const status = order.status || order.orderStatus || '';
-          return approvalStatus === 'APPROVED' && status === 'APPROVED';
-        }) : [];
-        
-        const enrichedOrdersWithPayments = await Promise.all(
-          approved.map(async (order) => {
+
+        // Load orders theo role
+        let orders = [];
+        if (userRole === 'DEALER_STAFF' && userId) {
+          orders = await ordersAPI.getByUser(userId);
+        } else if (userRole === 'DEALER_MANAGER' && userDealerId) {
+          orders = await ordersAPI.getOrdersByDealerId(userDealerId);
+        } else if (userRole === 'EVM_MANAGER' || userRole === 'ADMIN') {
+          // EVM Manager và Admin có thể xem tất cả orders
+          orders = await ordersAPI.getAll();
+        } else {
+          // Fallback: thử getAll nếu không có userId hoặc dealerId
+          try {
+            orders = await ordersAPI.getAll();
+          } catch (error) {
+            console.warn('Failed to load orders:', error);
+            orders = [];
+          }
+        }
+
+        if (!Array.isArray(orders)) {
+          orders = [];
+        }
+
+        // Filter orders: Hiển thị orders đã approved HOẶC orders có payment (kể cả chưa approve)
+        // Để user có thể xem payment history ngay sau khi tạo order
+        const ordersToCheck = Array.isArray(orders) ? orders : [];
+
+        // Load payment info cho tất cả orders để quyết định hiển thị
+        const ordersWithPaymentCheck = await Promise.all(
+          ordersToCheck.map(async (order) => {
             const orderId = order.orderId || order.id;
-            const orderNumber = `ORD-${order.id}`;
+            const approvalStatus = order.approvalStatus || order.orderApprovalStatus || '';
+            const status = order.status || order.orderStatus || '';
 
-            const customer = customerLookup[String(order.customerId)];
-            const customerName =
-              customer?.fullName || customer?.name || `Customer #${order.customerId}`;
-
-            let vehicleName = 'N/A';
-            if (order.orderDetails && order.orderDetails.length > 0) {
-              const firstDetail = order.orderDetails[0];
-              const vehicle = vehicleLookup[String(firstDetail.vehicleId)];
-              vehicleName =
-                vehicle?.name || vehicle?.model || `Vehicle #${firstDetail.vehicleId}`;
+            // Fetch payments to get accurate paid amount
+            let payments = [];
+            try {
+              payments = await paymentsAPI.getDealerWorkflowPayments(orderId);
+            } catch (error) {
+              // Ignore error
             }
+
+            const calculatedPaidAmount = Array.isArray(payments)
+              ? payments
+                .filter(p => p.status === 'COMPLETED' || p.status === 'completed')
+                .reduce((sum, p) => sum + (Number(p.amount) || 0), 0)
+              : 0;
+
+            console.log(`[Debug Payment] Order ${orderId}:`, {
+              payments,
+              calculatedPaidAmount,
+              backendPaidAmount: order.paidAmount,
+              totalAmount: order.totalAmount || order.amount
+            });
+
+            const paidAmount = calculatedPaidAmount > 0 ? calculatedPaidAmount : (order.paidAmount || 0);
+            const totalAmount = order.totalAmount || order.amount || 0;
+            const remainingAmount = Math.max(totalAmount - paidAmount, 0);
+            const paymentStatus = order.paymentStatus || order.payment_status || (remainingAmount <= 0 && paidAmount > 0 ? 'PAID' : (paidAmount > 0 ? 'PARTIALLY_PAID' : 'UNPAID'));
+
+            // Case 1: Order đã approved
+            const isApproved = approvalStatus === 'APPROVED' && status === 'APPROVED';
+            // Include if needs payment OR has been paid (fully or partially) so we can show history/remaining actions
+            const hasActivity = paymentStatus === 'UNPAID' ||
+              paymentStatus === 'PARTIALLY_PAID' ||
+              paymentStatus === 'PAID' ||
+              paidAmount > 0 ||
+              remainingAmount > 0 ||
+              !paymentStatus;
+
+            if (isApproved && hasActivity) {
+              // Return enriched order with calculated values
+              return {
+                order: {
+                  ...order,
+                  paidAmount,
+                  remainingAmount,
+                  paymentStatus
+                },
+                shouldShow: true
+              };
+            }
+
+            // Case 2: Order chưa approved nhưng đã có payment (tạo order với payment percentage)
+            const isPending = approvalStatus === 'PENDING_APPROVAL' || status === 'PENDING';
+            const hasPayments = Array.isArray(payments) && payments.length > 0;
+
+            // Hiển thị nếu có payment status hoặc có payments hoặc có paidAmount
+            const hasPaymentInfo = paymentStatus === 'PARTIALLY_PAID' ||
+              paymentStatus === 'PAID' ||
+              hasPayments ||
+              paidAmount > 0 ||
+              remainingAmount > 0;
+
+            if (isPending && hasPaymentInfo) {
+              return {
+                order: {
+                  ...order,
+                  paidAmount,
+                  remainingAmount,
+                  paymentStatus
+                },
+                shouldShow: true
+              };
+            }
+
+            return { order, shouldShow: false };
+          })
+        );
+
+        // Filter chỉ lấy orders nên hiển thị cho section "Orders - Ready for Payment"
+        // CHỈ hiển thị orders chưa thanh toán lần đầu (paidAmount = 0)
+        // Nếu đã thanh toán 1 phần (paidAmount > 0), sẽ chuyển xuống phần Payment History dưới dạng "Remaining Balance"
+        // Filter orders: Lấy danh sách orders cần hiển thị (approved hoặc có payment)
+        const ordersToEnrich = ordersWithPaymentCheck
+          .filter(item => item.shouldShow)
+          .map(item => item.order);
+
+        // Load TẤT CẢ payments từ TẤT CẢ orders (không chỉ approved)
+        const allPaymentsFromAllOrders = [];
+        for (const order of ordersToCheck) {
+          const orderId = order.orderId || order.id;
+          if (!orderId) continue;
+
+          const paymentStatus = (order.paymentStatus || order.payment_status || '').toUpperCase();
+          const hasActivity =
+            paymentStatus === 'PAID' ||
+            paymentStatus === 'PARTIALLY_PAID' ||
+            (order.paidAmount && order.paidAmount > 0);
+
+          let orderPayments = [];
+          if (hasActivity) {
+            try {
+              const workflowPayments = await paymentsAPI.getDealerWorkflowPayments(orderId);
+              if (Array.isArray(workflowPayments)) {
+                orderPayments = workflowPayments;
+              } else if (Array.isArray(workflowPayments?.payments)) {
+                orderPayments = workflowPayments.payments;
+              }
+
+              if (!orderPayments.length) {
+                const fallbackPayments = await paymentsAPI.getByOrder(orderId);
+                if (Array.isArray(fallbackPayments)) {
+                  orderPayments = fallbackPayments;
+                }
+              }
+            } catch (error) {
+              console.log(`No payments for order ${orderId}:`, error.message);
+            }
+          }
+
+          if (orderPayments.length) {
+            const customerName = getCustomerName(order);
+            const vehicleName = getVehicleName(order);
+            const orderNumber = getOrderNumber(order);
+
+            const normalizedPayments = orderPayments.map((payment) => ({
+              ...payment,
+              orderId,
+              orderNumber,
+              customerName,
+              vehicleName,
+            }));
+            allPaymentsFromAllOrders.push(...normalizedPayments);
+          }
+        }
+
+        const enrichedOrdersWithPayments = await Promise.all(
+          ordersToEnrich.map(async (order) => {
+            // ... (Logic enrich order giữ nguyên, nhưng approved list đã được filter ở trên)
+            // Copy lại logic enrich để đảm bảo consistency
+            const orderId = order.orderId || order.id;
+            const orderNumber = getOrderNumber(order);
+            const customerName = getCustomerName(order);
+            const vehicleName = getVehicleName(order);
 
             let paymentOverview = null;
             try {
@@ -115,6 +507,7 @@ const PaymentManagement = ({ user }) => {
               // optional endpoint - ignore failures
             }
 
+            // Load payments cho order này để tính toán status
             let orderPayments = [];
             try {
               const workflowPayments = await paymentsAPI.getDealerWorkflowPayments(orderId);
@@ -124,12 +517,7 @@ const PaymentManagement = ({ user }) => {
                 orderPayments = workflowPayments.payments;
               }
             } catch (error) {
-              try {
-                const fallbackPayments = await paymentsAPI.getByOrder(orderId);
-                orderPayments = Array.isArray(fallbackPayments) ? fallbackPayments : [];
-              } catch (innerError) {
-                console.log('No payments for order:', orderId);
-              }
+              // ignore
             }
 
             const normalizedPayments = orderPayments.map((payment) => ({
@@ -150,23 +538,45 @@ const PaymentManagement = ({ user }) => {
               order.totalAmount ??
               order.amount ??
               0;
+
+            const calculatedPaidAmount = normalizedPayments
+              .filter((p) => p.status === 'COMPLETED' || p.status === 'completed')
+              .reduce((sum, payment) => sum + (payment.amount || 0), 0);
+
             const paidAmount =
+              (calculatedPaidAmount > 0 ? calculatedPaidAmount : null) ??
               paymentOverview?.totalPaid ??
               paymentOverview?.totalAmountPaid ??
               order.paidAmount ??
-              normalizedPayments
-                .filter((p) => p.status === 'COMPLETED' || p.status === 'completed')
-                .reduce((sum, payment) => sum + (payment.amount || 0), 0);
+              0;
+
             const remainingAmount =
-              paymentOverview?.remainingAmount ??
               Math.max(totalAmount - paidAmount, 0);
 
-            const paymentMethod =
+            let paymentMethod =
               (paymentOverview?.lastPaymentMethod ||
                 order.paymentMethod ||
                 order.payment_method ||
                 normalizedPayments?.[0]?.paymentMethod ||
                 'VNPAY')?.toUpperCase();
+
+            // Treat TRANSFER as VNPAY
+            if (paymentMethod === 'TRANSFER') {
+              paymentMethod = 'VNPAY';
+            }
+
+            let updatedStatus = order.status || order.orderStatus;
+            const currentApprovalStatus = order.approvalStatus || order.orderApprovalStatus || '';
+            const isApproved = currentApprovalStatus === 'APPROVED' ||
+              order.normalizedApprovalStatus === 'APPROVED';
+
+            if (isApproved) {
+              if (remainingAmount <= 0) {
+                updatedStatus = 'COMPLETED';
+              } else {
+                updatedStatus = 'APPROVED';
+              }
+            }
 
             return {
               ...order,
@@ -179,150 +589,113 @@ const PaymentManagement = ({ user }) => {
               paidAmount,
               remainingAmount,
               paymentOverview,
+              status: updatedStatus,
+              normalizedStatus: updatedStatus,
             };
           })
         );
 
-        const allPayments = enrichedOrdersWithPayments.flatMap(
+        // Combine payments từ approved orders và tất cả payments đã load
+        // Lưu ý: allPaymentsFromAllOrders đã bao gồm payments của approved orders nếu chúng có activity
+        // Tuy nhiên, approved orders (top section) là những order chưa thanh toán (paidAmount=0), nên có thể chưa có trong allPaymentsFromAllOrders
+
+        const paymentsFromApprovedOrders = enrichedOrdersWithPayments.flatMap(
           (order) => order.orderPayments || []
         );
+
+        const paymentMap = new Map();
+        [...allPaymentsFromAllOrders, ...paymentsFromApprovedOrders].forEach(payment => {
+          const paymentId = payment.id || payment.paymentId;
+          if (paymentId && !paymentMap.has(paymentId)) {
+            paymentMap.set(paymentId, payment);
+          }
+        });
+
+        const allPayments = sortPaymentsByNewest(Array.from(paymentMap.values()));
         setPayments(allPayments);
-        setApprovedOrders(enrichedOrdersWithPayments);
+        setAllOrders(enrichedOrdersWithPayments);
       } catch (error) {
         console.error('Error loading payments:', error);
         showErrorToast(handleAPIError(error));
         setPayments([]);
-        setApprovedOrders([]);
+        setAllOrders([]);
       } finally {
         setLoading(false);
       }
     };
 
     loadData();
-  }, [userRole, userId, refreshTrigger, customerLookup, vehicleLookup]);
+  }, [userRole, userId, userDealerId, refreshTrigger, customerLookup]);
 
   useEffect(() => {
+    // Refresh khi có fromPaymentResult hoặc orderId trong query params
     if (location.state?.fromPaymentResult) {
       console.log('Returning from payment result - reloading data...');
       setRefreshTrigger(prev => prev + 1);
       window.history.replaceState({}, document.title);
     }
+
+    // Check query params cho orderId và fromPaymentResult
+    const searchParams = new URLSearchParams(location.search);
+    const orderIdFromUrl = searchParams.get('orderId');
+    const fromPaymentResult = searchParams.get('fromPaymentResult');
+
+    if (fromPaymentResult || orderIdFromUrl) {
+      console.log('Payment result or OrderId from URL - reloading data...', { orderIdFromUrl, fromPaymentResult });
+      setRefreshTrigger(prev => prev + 1);
+
+      // Clear query params sau khi đã load
+      const newSearch = new URLSearchParams(location.search);
+      newSearch.delete('orderId');
+      newSearch.delete('fromPaymentResult');
+      window.history.replaceState({}, document.title, location.pathname + (newSearch.toString() ? '?' + newSearch.toString() : ''));
+    }
+
+    // Check sessionStorage cho orderId (khi switch từ Orders tab)
+    const orderIdFromStorage = sessionStorage.getItem('selectedOrderId');
+    if (orderIdFromStorage) {
+      console.log('OrderId from sessionStorage - reloading data...', orderIdFromStorage);
+      setRefreshTrigger(prev => prev + 1);
+      // Clear sau khi đã load
+      sessionStorage.removeItem('selectedOrderId');
+    }
   }, [location]);
 
-  const handleCreateVNPayPayment = async (order) => {
-    if (!order) {
-      showErrorToast('Please select an order');
-      return;
+  // Handle paymentTabState from DashboardApp - REMOVED logic as we don't support creating payment here anymore
+  useEffect(() => {
+    if (paymentTabState?.orderId) {
+      console.log('Payment tab state received but payment creation is disabled in this view.');
     }
+  }, [paymentTabState]);
 
-    const orderId = order.orderId || order.id;
-    const remainingAmount =
-      order.remainingAmount ??
-      (order.totalAmount || order.amount || 0) - (order.paidAmount || 0);
-    
-    if (remainingAmount <= 0) {
-      showErrorToast('Order has been fully paid');
-      return;
-    }
+
+
+  const handleViewPaymentDetail = async (payment) => {
+    setSelectedPaymentDetail(payment);
+    setShowDetailModal(true);
+    setDetailLoading(true);
+    setDetailInstallmentSchedule([]);
 
     try {
-      const paymentData = {
-        orderId: orderId
-      };
-
-      const response = await paymentsAPI.createVNPayPayment(paymentData);
-      
-      if (response.paymentUrl) {
-        window.location.href = response.paymentUrl;
-      } else if (response.error) {
-        showErrorToast(`VNPay error: ${response.error}. Please use Cash/Transfer payment instead.`);
-        setShowCreatePaymentModal(false);
-        handleOpenManualPayment(order);
-      } else {
-        showErrorToast('VNPay service is currently unavailable. Please use Cash/Transfer payment instead.');
-        setShowCreatePaymentModal(false);
-        handleOpenManualPayment(order);
+      const orderId = payment.orderId || payment.order?.id || payment.order?.orderId;
+      if (orderId) {
+        // Fetch installment schedule if it exists
+        const schedule = await installmentsAPI.getByOrder(orderId);
+        if (Array.isArray(schedule) && schedule.length > 0) {
+          setDetailInstallmentSchedule(schedule);
+        }
       }
     } catch (error) {
-      console.error('Error creating VNPay payment:', error);
-      const errorMessage = handleAPIError(error);
-      showErrorToast(`VNPay error: ${errorMessage}. Please use Cash/Transfer payment instead.`);
-      setShowCreatePaymentModal(false);
-      handleOpenManualPayment(order);
-    }
-  };
-
-  const handleSelectOrderForPayment = (order) => {
-    setSelectedOrder(order);
-    setShowCreatePaymentModal(true);
-  };
-
-  const handleOpenManualPayment = (order) => {
-    setSelectedOrder(order);
-    const totalAmount = order.totalAmount || order.amount || 0;
-    const paidAmount = order.paidAmount || 0;
-    const paidPercent = totalAmount > 0 ? Math.round((paidAmount / totalAmount) * 100) : 0;
-    const allowed = [30, 50, 70, 100].filter((percent) => percent > paidPercent);
-    const defaultPercentage = allowed.length ? allowed[0] : 100;
-
-    setManualPaymentForm({
-      paymentMethod: 'CASH',
-      paymentPercentage: defaultPercentage,
-      paymentNotes: ''
-    });
-    setShowManualPaymentModal(true);
-  };
-
-  const handleSubmitManualPayment = async (event) => {
-    event?.preventDefault();
-    if (!selectedOrder) {
-      showErrorToast('Order information is missing');
-      return;
-    }
-
-    const { paymentMethod, paymentPercentage, paymentNotes } = manualPaymentForm;
-    if (!paymentMethod) {
-      showErrorToast('Vui lòng chọn phương thức thanh toán');
-      return;
-    }
-
-    const validPercentages = [30, 50, 70, 100];
-    const percentageNum = Number(paymentPercentage);
-    if (!validPercentages.includes(percentageNum)) {
-      showErrorToast('Payment percentage phải là 30, 50, 70 hoặc 100');
-      return;
-    }
-
-    try {
-      setManualPaymentLoading(true);
-      const orderId = selectedOrder.orderId || selectedOrder.id;
-      
-      const paymentData = {
-        paymentMethod: String(paymentMethod).toUpperCase(),
-        paymentPercentage: percentageNum,
-        paymentNotes: paymentNotes?.trim() || undefined
-      };
-
-      console.log('Creating payment with data:', paymentData);
-
-      await paymentsAPI.createDealerWorkflowPayment(orderId, paymentData);
-
-      showSuccessToast(`Payment recorded via ${paymentMethod}`);
-      setShowManualPaymentModal(false);
-      setSelectedOrder(null);
-      setManualPaymentForm({
-        paymentMethod: 'CASH',
-        paymentPercentage: 30,
-        paymentNotes: ''
-      });
-      setRefreshTrigger((prev) => prev + 1);
-    } catch (error) {
-      console.error('Error recording manual payment:', error);
-      showErrorToast(handleAPIError(error));
+      console.error('Error fetching payment details:', error);
     } finally {
-      setManualPaymentLoading(false);
+      setDetailLoading(false);
     }
   };
+
+
+
+
+
 
   const getStatusColor = (status) => {
     switch (status) {
@@ -339,191 +712,19 @@ const PaymentManagement = ({ user }) => {
   const findOrderForPayment = (payment) => {
     const orderId = payment.orderId || payment.order?.orderId || payment.order?.id;
     if (!orderId) return null;
-    return approvedOrders.find(
+    return allOrders.find(
       (order) => String(order.orderId || order.id) === String(orderId)
     ) || null;
   };
 
-  // ========== INSTALLMENT FUNCTIONS - IMPROVED ==========
-  
-  const calculateInstallmentPreview = (totalAmount, months, annualInterestRate) => {
-    if (!totalAmount || !months || months <= 0) return null;
-    
-    const monthlyRate = annualInterestRate / 100 / 12;
-    let monthlyPayment;
-    
-    if (monthlyRate === 0) {
-      monthlyPayment = totalAmount / months;
-    } else {
-      monthlyPayment = totalAmount * (monthlyRate * Math.pow(1 + monthlyRate, months)) / 
-                       (Math.pow(1 + monthlyRate, months) - 1);
-    }
-    
-    const totalPayment = monthlyPayment * months;
-    const totalInterest = totalPayment - totalAmount;
-    
-    return {
-      monthlyPayment: Math.round(monthlyPayment * 100) / 100,
-      totalPayment: Math.round(totalPayment * 100) / 100,
-      totalInterest: Math.round(totalInterest * 100) / 100,
-      months
-    };
-  };
 
-  const handleOpenInstallmentModal = async (payment) => {
-    const paymentId = payment.paymentId || payment.id;
-    if (!paymentId) {
-      showErrorToast('Payment ID không hợp lệ');
-      return;
-    }
-
-    setSelectedPaymentForInstallment(payment);
-    
-    const defaultDate = new Date();
-    defaultDate.setDate(defaultDate.getDate() + 30);
-    const formData = {
-      months: 12,
-      annualInterestRate: 0,
-      firstDueDate: defaultDate.toISOString().split('T')[0]
-    };
-    setInstallmentForm(formData);
-    
-    // Calculate initial preview
-    const preview = calculateInstallmentPreview(
-      payment.amount || 0,
-      formData.months,
-      formData.annualInterestRate
-    );
-    setInstallmentPreview(preview);
-
-    try {
-      setInstallmentLoading(true);
-      const schedule = await installmentsAPI.getByPayment(paymentId);
-      setInstallmentSchedule(Array.isArray(schedule) ? schedule : []);
-    } catch (error) {
-      console.error('Error loading installment schedule:', error);
-      setInstallmentSchedule([]);
-    } finally {
-      setInstallmentLoading(false);
-    }
-
-    setShowInstallmentModal(true);
-  };
-
-  const handleInstallmentFormChange = (field, value) => {
-    const newForm = { ...installmentForm, [field]: value };
-    setInstallmentForm(newForm);
-    
-    // Update preview when form changes
-    if (field === 'months' || field === 'annualInterestRate') {
-      const preview = calculateInstallmentPreview(
-        selectedPaymentForInstallment?.amount || 0,
-        field === 'months' ? value : newForm.months,
-        field === 'annualInterestRate' ? value : newForm.annualInterestRate
-      );
-      setInstallmentPreview(preview);
-    }
-  };
-
-  const handleCreateInstallment = async (e) => {
-    e?.preventDefault();
-    if (!selectedPaymentForInstallment) {
-      showErrorToast('Payment không hợp lệ');
-      return;
-    }
-
-    const paymentId = selectedPaymentForInstallment.paymentId || selectedPaymentForInstallment.id;
-    const totalAmount = selectedPaymentForInstallment.amount || 0;
-
-    if (!installmentForm.firstDueDate) {
-      showErrorToast('Vui lòng chọn ngày đến hạn đầu tiên');
-      return;
-    }
-
-    if (!installmentForm.months || installmentForm.months <= 0) {
-      showErrorToast('Vui lòng nhập số tháng hợp lệ (1-36)');
-      return;
-    }
-
-    if (installmentForm.months > 36) {
-      showErrorToast('Số tháng tối đa là 36 tháng');
-      return;
-    }
-
-    if (installmentForm.annualInterestRate < 0 || installmentForm.annualInterestRate > 100) {
-      showErrorToast('Lãi suất phải từ 0% đến 100%');
-      return;
-    }
-
-    try {
-      setInstallmentCreating(true);
-      const payload = {
-        paymentId: Number(paymentId),
-        totalAmount: Number(totalAmount),
-        months: Number(installmentForm.months),
-        annualInterestRate: Number(installmentForm.annualInterestRate) || 0,
-        firstDueDate: installmentForm.firstDueDate
-      };
-
-      await installmentsAPI.create(payload);
-      showSuccessToast('Tạo kế hoạch trả góp thành công');
-
-      const schedule = await installmentsAPI.getByPayment(paymentId);
-      setInstallmentSchedule(Array.isArray(schedule) ? schedule : []);
-    } catch (error) {
-      console.error('Error creating installment:', error);
-      showErrorToast(handleAPIError(error));
-    } finally {
-      setInstallmentCreating(false);
-    }
-  };
-
-  const handlePayInstallment = async (transactionId) => {
-    if (!transactionId) {
-      showErrorToast('Transaction ID không hợp lệ');
-      return;
-    }
-
-    try {
-      await installmentsAPI.payInstallment(transactionId, 'INSTALLMENT');
-      showSuccessToast('Đánh dấu kỳ trả góp đã thanh toán thành công');
-
-      const paymentId = selectedPaymentForInstallment?.paymentId || selectedPaymentForInstallment?.id;
-      if (paymentId) {
-        const schedule = await installmentsAPI.getByPayment(paymentId);
-        setInstallmentSchedule(Array.isArray(schedule) ? schedule : []);
-      }
-    } catch (error) {
-      console.error('Error paying installment:', error);
-      showErrorToast(handleAPIError(error));
-    }
-  };
-
-  const handleDeleteInstallment = async () => {
-    if (!selectedPaymentForInstallment) {
-      showErrorToast('Payment không hợp lệ');
-      return;
-    }
-
-    const paymentId = selectedPaymentForInstallment.paymentId || selectedPaymentForInstallment.id;
-
-    try {
-      await installmentsAPI.delete(paymentId);
-      showSuccessToast('Đã xóa kế hoạch trả góp');
-      setInstallmentSchedule([]);
-      setShowDeleteConfirm(false);
-    } catch (error) {
-      console.error('Error deleting installment:', error);
-      showErrorToast(handleAPIError(error));
-    }
-  };
 
   const filteredPayments = payments.filter(p => {
     const status = p.status || p.paymentStatus || '';
-    return selectedType === 'all' || 
-           (selectedType === 'completed' && (status === 'COMPLETED' || status === 'completed')) ||
-           (selectedType === 'pending' && (status === 'PENDING' || status === 'pending')) ||
-           (selectedType === 'failed' && (status === 'FAILED' || status === 'failed'));
+    return selectedType === 'all' ||
+      (selectedType === 'completed' && (status === 'COMPLETED' || status === 'completed')) ||
+      (selectedType === 'pending' && (status === 'PENDING' || status === 'pending')) ||
+      (selectedType === 'failed' && (status === 'FAILED' || status === 'failed'));
   });
 
   const totalRevenue = payments
@@ -537,7 +738,7 @@ const PaymentManagement = ({ user }) => {
     const monthNames = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
     const now = new Date();
     const last6Months = [];
-    
+
     for (let i = 5; i >= 0; i--) {
       const date = new Date(now.getFullYear(), now.getMonth() - i, 1);
       last6Months.push({
@@ -559,7 +760,7 @@ const PaymentManagement = ({ user }) => {
       const amount = payment.amount || 0;
       const status = payment.status || payment.paymentStatus || '';
 
-      const monthData = last6Months.find(m => 
+      const monthData = last6Months.find(m =>
         m.monthIndex === monthIndex && m.year === year
       );
 
@@ -581,14 +782,7 @@ const PaymentManagement = ({ user }) => {
 
   const chartData = calculateChartData();
 
-  const selectedOrderTotalAmount = selectedOrder
-    ? selectedOrder.totalAmount || selectedOrder.amount || 0
-    : 0;
-  const selectedOrderPaidAmount = selectedOrder ? selectedOrder.paidAmount || 0 : 0;
-  const selectedOrderRemainingAmount = selectedOrder
-    ? selectedOrder.remainingAmount ??
-      Math.max(selectedOrderTotalAmount - selectedOrderPaidAmount, 0)
-    : 0;
+
 
   if (loading) {
     return (
@@ -633,129 +827,7 @@ const PaymentManagement = ({ user }) => {
           </div>
         </div>
 
-        <div className="card">
-          <div className="card__header">
-            <h3 className="card__title">Approved Orders</h3>
-            <div className="card__icon card__icon--success">
-              <i className="bx bx-check-circle"></i>
-            </div>
-          </div>
-          <div className="card__value">{approvedOrders.length}</div>
-          <div className="card__change card__change--positive">
-            <i className="bx bx-shopping-bag"></i>
-            Ready for Payment
-          </div>
-        </div>
       </div>
-
-      {/* Approved Orders for Payment */}
-      {approvedOrders.length > 0 && (
-        <div className="card" style={{ marginTop: '24px' }}>
-          <h3 style={{ marginBottom: '24px' }}>Approved Orders - Ready for Payment</h3>
-          <div style={{ display: 'grid', gap: '16px' }}>
-            {approvedOrders.map(order => {
-              const customerName = order.customerName || order.customer?.fullName || 'N/A';
-              const vehicleName = order.vehicleName || order.vehicle?.name || 'N/A';
-              const totalAmount = order.totalAmount || order.amount || 0;
-              const paidAmount = order.paidAmount || 0;
-              const remainingAmount =
-                order.remainingAmount ?? Math.max(totalAmount - paidAmount, 0);
-              const orderNumber = order.orderNumber || `ORD-${order.id || order.orderId}`;
-              const paymentMethod = (order.paymentMethod || 'VNPAY').toUpperCase();
-              const hasCashPaymentCompleted = order.hasCashPaymentCompleted || false;
-              
-              const shouldShowVNPayButton = remainingAmount > 0 && 
-                                           paymentMethod === 'VNPAY' && 
-                                           !hasCashPaymentCompleted;
-              const shouldShowManualPaymentButton = remainingAmount > 0;
-              
-              return (
-                <div key={order.orderId || order.id} style={{ 
-                  padding: '20px', 
-                  background: 'var(--color-bg)', 
-                  borderRadius: 'var(--radius)',
-                  border: '1px solid var(--color-border)'
-                }}>
-                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '16px' }}>
-                    <div style={{ flex: 1 }}>
-                      <div style={{ display: 'flex', alignItems: 'center', gap: '12px', marginBottom: '8px' }}>
-                        <h4 style={{ margin: '0', fontSize: '16px', fontWeight: '600' }}>{orderNumber}</h4>
-                        <span style={{ 
-                          padding: '4px 8px', 
-                          borderRadius: '4px', 
-                          fontSize: '12px',
-                          background: paymentMethod === 'CASH'
-                            ? 'var(--color-success)'
-                            : paymentMethod === 'TRANSFER'
-                            ? 'var(--color-warning)'
-                            : 'var(--color-info)',
-                          color: 'white',
-                          fontWeight: '600'
-                        }}>
-                          {paymentMethod}
-                        </span>
-                      </div>
-                      <div style={{ fontSize: '14px', color: 'var(--color-text)', marginBottom: '4px' }}>
-                        {customerName} - {vehicleName}
-                      </div>
-                      <div style={{ fontSize: '12px', color: 'var(--color-text-muted)' }}>
-                        Total: ${totalAmount.toLocaleString()} | 
-                        Paid: ${paidAmount.toLocaleString()} | 
-                        Remaining: ${remainingAmount.toLocaleString()}
-                      </div>
-                      {hasCashPaymentCompleted && (
-                        <div style={{ 
-                          fontSize: '12px', 
-                          color: 'var(--color-success)', 
-                          marginTop: '4px',
-                          display: 'flex',
-                          alignItems: 'center',
-                          gap: '4px'
-                        }}>
-                          <i className="bx bx-check-circle"></i>
-                          Cash payment completed
-                        </div>
-                      )}
-                    </div>
-                    <div style={{ textAlign: 'right' }}>
-                      <div style={{ fontSize: '18px', fontWeight: '700', color: 'var(--color-primary)', marginBottom: '4px' }}>
-                        ${remainingAmount.toLocaleString()}
-                      </div>
-                      <div style={{ fontSize: '12px', color: 'var(--color-text-muted)' }}>
-                        Remaining
-                      </div>
-                    </div>
-                  </div>
-                  {(shouldShowManualPaymentButton || shouldShowVNPayButton) && (
-                    <div style={{ display: 'flex', gap: '8px', justifyContent: 'flex-end', flexWrap: 'wrap' }}>
-                      {shouldShowManualPaymentButton && (
-                        <button
-                          className="btn btn-outline"
-                          style={{ fontSize: '12px' }}
-                          onClick={() => handleOpenManualPayment(order)}
-                        >
-                          <i className="bx bx-money"></i>
-                          Record Cash/Transfer
-                        </button>
-                      )}
-                      {shouldShowVNPayButton && (
-                        <button 
-                          className="btn btn-primary" 
-                          onClick={() => handleSelectOrderForPayment(order)}
-                          style={{ fontSize: '12px' }}
-                        >
-                          <i className="bx bx-credit-card"></i>
-                          Pay with VNPay
-                        </button>
-                      )}
-                    </div>
-                  )}
-                </div>
-              );
-            })}
-          </div>
-        </div>
-      )}
 
       {/* Payment History */}
       <div className="card" style={{ marginTop: '24px' }}>
@@ -771,9 +843,9 @@ const PaymentManagement = ({ user }) => {
               <CartesianGrid strokeDasharray="3 3" stroke="var(--color-border)" />
               <XAxis dataKey="month" stroke="var(--color-text-muted)" />
               <YAxis stroke="var(--color-text-muted)" />
-              <Tooltip 
-                contentStyle={{ 
-                  background: 'var(--color-surface)', 
+              <Tooltip
+                contentStyle={{
+                  background: 'var(--color-surface)',
                   border: '1px solid var(--color-border)',
                   borderRadius: 'var(--radius)'
                 }}
@@ -818,13 +890,17 @@ const PaymentManagement = ({ user }) => {
                 const status = payment.status || payment.paymentStatus || '';
                 const statusColor = getStatusColor(status);
                 const statusLabel = status === 'COMPLETED' || status === 'completed' ? 'Completed' :
-                                  status === 'PENDING' || status === 'pending' ? 'Pending' :
-                                  status === 'FAILED' || status === 'failed' ? 'Failed' : status;
-                
+                  status === 'PENDING' || status === 'pending' ? 'Pending' :
+                    status === 'FAILED' || status === 'failed' ? 'Failed' : status;
+                const paymentDateDisplay = formatPaymentTimestamp(payment);
+
                 return (
                   <tr key={payment.paymentId || payment.id} style={{ borderBottom: '1px solid var(--color-border)' }}>
                     <td style={{ padding: '12px', fontSize: '14px', fontWeight: '600', color: 'var(--color-text)' }}>
-                      {payment.orderNumber || payment.orderId || 'N/A'}
+                      <div>{payment.orderNumber || payment.orderId || 'N/A'}</div>
+                      <div style={{ fontSize: '12px', color: 'var(--color-text-muted)', fontWeight: 400 }}>
+                        {paymentDateDisplay}
+                      </div>
                     </td>
                     <td style={{ padding: '12px', fontSize: '14px', color: 'var(--color-text)' }}>
                       {payment.customer?.fullName || payment.customerName || 'N/A'}
@@ -833,30 +909,10 @@ const PaymentManagement = ({ user }) => {
                       ${(payment.amount || 0).toLocaleString()}
                     </td>
                     <td style={{ padding: '12px', fontSize: '14px', color: 'var(--color-text-muted)' }}>
-                      {payment.paymentMethod || 'VNPay'}
+                      {(payment.paymentMethod || '').toUpperCase() === 'TRANSFER' ? 'VNPAY' : (payment.paymentMethod || 'VNPay')}
                     </td>
                     <td style={{ padding: '12px', fontSize: '14px', color: 'var(--color-text-muted)' }}>
-                      {(() => {
-                        const dateValue = payment.paidDate || 
-                                        payment.paymentDate || 
-                                        payment.createdDate || 
-                                        payment.createdAt || 
-                                        payment.date || 
-                                        payment.timestamp || 
-                                        null;
-                        
-                        if (dateValue) {
-                          try {
-                            const date = new Date(dateValue);
-                            if (!isNaN(date.getTime())) {
-                              return date.toLocaleDateString('vi-VN');
-                            }
-                          } catch (e) {
-                            console.warn('Invalid date value:', dateValue);
-                          }
-                        }
-                        return 'N/A';
-                      })()}
+                      {paymentDateDisplay}
                     </td>
                     <td style={{ padding: '12px', textAlign: 'center' }}>
                       <span style={{
@@ -874,34 +930,14 @@ const PaymentManagement = ({ user }) => {
                     </td>
                     <td style={{ padding: '12px', textAlign: 'center' }}>
                       <div style={{ display: 'flex', gap: '8px', justifyContent: 'center', flexWrap: 'wrap' }}>
-                        {(status === 'PENDING' || status === 'pending') && (
-                          <button
-                            className="btn btn-outline"
-                            style={{ fontSize: '12px' }}
-                            onClick={() => {
-                              const order = findOrderForPayment(payment);
-                              if (order) {
-                                handleSelectOrderForPayment(order);
-                              } else {
-                                showErrorToast('Order information not available. Please refresh.');
-                              }
-                            }}
-                          >
-                            <i className="bx bx-credit-card" style={{ marginRight: '4px' }}></i>
-                            Pay Now
-                          </button>
-                        )}
-                        {(status === 'COMPLETED' || status === 'completed') && (
-                          <button
-                            className="btn btn-outline"
-                            style={{ fontSize: '12px' }}
-                            onClick={() => handleOpenInstallmentModal(payment)}
-                            title="Tạo hoặc xem kế hoạch trả góp"
-                          >
-                            <i className="bx bx-calendar" style={{ marginRight: '4px' }}></i>
-                            Trả góp
-                          </button>
-                        )}
+                        <button
+                          className="btn btn-outline"
+                          style={{ fontSize: '12px', marginLeft: '8px' }}
+                          onClick={() => handleViewPaymentDetail(payment)}
+                          title="View Details"
+                        >
+                          <i className="bx bx-show"></i>
+                        </button>
                       </div>
                     </td>
                   </tr>
@@ -919,743 +955,155 @@ const PaymentManagement = ({ user }) => {
         )}
       </div>
 
-      {/* Create Payment Modal */}
-      {showCreatePaymentModal && selectedOrder && (
-        <div style={{
-          position: 'fixed',
-          top: 0,
-          left: 0,
-          right: 0,
-          bottom: 0,
-          background: 'rgba(0, 0, 0, 0.5)',
-          display: 'flex',
-          alignItems: 'center',
-          justifyContent: 'center',
-          zIndex: 1000
-        }}>
+
+      {/* Payment Detail Modal */}
+      {
+        showDetailModal && selectedPaymentDetail && (
           <div style={{
-            background: 'var(--color-surface)',
-            borderRadius: 'var(--radius)',
-            padding: '24px',
-            width: '90%',
-            maxWidth: '500px'
+            position: 'fixed',
+            top: 0,
+            left: 0,
+            right: 0,
+            bottom: 0,
+            background: 'rgba(0, 0, 0, 0.5)',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            zIndex: 1000
           }}>
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '24px' }}>
-              <h3>Create VNPay Payment</h3>
-              <button 
-                onClick={() => {
-                  setShowCreatePaymentModal(false);
-                  setSelectedOrder(null);
-                }}
-                style={{ background: 'none', border: 'none', fontSize: '24px', cursor: 'pointer', color: 'var(--color-text-muted)' }}
-              >
-                <i className="bx bx-x"></i>
-              </button>
-            </div>
-
-            <div style={{ marginBottom: '16px', padding: '12px', background: 'var(--color-bg)', borderRadius: 'var(--radius)' }}>
-              <div style={{ fontSize: '14px', color: 'var(--color-text-muted)', marginBottom: '4px' }}>Order</div>
-              <div style={{ fontWeight: '600', color: 'var(--color-text)' }}>
-                {selectedOrder.orderNumber || selectedOrder.orderId}
-              </div>
-              <div style={{ fontSize: '12px', color: 'var(--color-text-muted)', marginTop: '4px' }}>
-                Total: ${selectedOrderTotalAmount.toLocaleString()} | 
-                Paid: ${selectedOrderPaidAmount.toLocaleString()} | 
-                Remaining: ${selectedOrderRemainingAmount.toLocaleString()}
-              </div>
-            </div>
-
-            <div style={{ marginBottom: '16px', padding: '12px', background: 'var(--color-info)', borderRadius: 'var(--radius)', color: 'white', fontSize: '14px' }}>
-              <i className="bx bx-info-circle" style={{ marginRight: '8px' }}></i>
-              <strong>Payment Amount:</strong> ${selectedOrderRemainingAmount.toLocaleString()}
-              <div style={{ marginTop: '8px', fontSize: '12px', opacity: '0.9' }}>
-                VNPay will process payment for the full remaining amount.
-              </div>
-            </div>
-
-            <div style={{ 
-              marginBottom: '16px', 
-              padding: '12px', 
-              background: 'var(--color-info)', 
-              borderRadius: 'var(--radius)',
-              color: 'white',
-              fontSize: '14px'
-            }}>
-              <i className="bx bx-info-circle" style={{ marginRight: '8px' }}></i>
-              You will be redirected to VNPay payment gateway
-            </div>
-
-            <div style={{ display: 'flex', gap: '12px', justifyContent: 'flex-end' }}>
-              <button 
-                className="btn btn-outline" 
-                onClick={() => {
-                  setShowCreatePaymentModal(false);
-                  setSelectedOrder(null);
-                }}
-              >
-                Cancel
-              </button>
-              <button 
-                className="btn btn-primary" 
-                onClick={() => handleCreateVNPayPayment(selectedOrder)}
-              >
-                <i className="bx bx-credit-card"></i>
-                Proceed to VNPay
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* Manual Payment Modal */}
-      {showManualPaymentModal && selectedOrder && (
-        <div style={{
-          position: 'fixed',
-          top: 0,
-          left: 0,
-          right: 0,
-          bottom: 0,
-          background: 'rgba(0, 0, 0, 0.5)',
-          display: 'flex',
-          alignItems: 'center',
-          justifyContent: 'center',
-          zIndex: 1000
-        }}>
-          <div style={{
-            background: 'var(--color-surface)',
-            borderRadius: 'var(--radius)',
-            padding: '24px',
-            width: '90%',
-            maxWidth: '500px'
-          }}>
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '24px' }}>
-              <h3>Record Cash / Transfer Payment</h3>
-              <button 
-                onClick={() => {
-                  setShowManualPaymentModal(false);
-                  setSelectedOrder(null);
-                  setManualPaymentForm({
-                    paymentMethod: 'CASH',
-                    paymentPercentage: 30,
-                    paymentNotes: ''
-                  });
-                }}
-                style={{ background: 'none', border: 'none', fontSize: '24px', cursor: 'pointer', color: 'var(--color-text-muted)' }}
-              >
-                <i className="bx bx-x"></i>
-              </button>
-            </div>
-
-            <form onSubmit={handleSubmitManualPayment}>
-              <div style={{ marginBottom: '16px', padding: '12px', background: 'var(--color-bg)', borderRadius: 'var(--radius)' }}>
-                <div style={{ fontSize: '14px', color: 'var(--color-text-muted)', marginBottom: '4px' }}>Order</div>
-                <div style={{ fontWeight: '600', color: 'var(--color-text)' }}>
-                  {selectedOrder.orderNumber || selectedOrder.orderId}
-                </div>
-                <div style={{ fontSize: '12px', color: 'var(--color-text-muted)', marginTop: '4px' }}>
-                  Total: ${selectedOrderTotalAmount.toLocaleString()} | 
-                  Paid: ${selectedOrderPaidAmount.toLocaleString()} | 
-                  Remaining: ${selectedOrderRemainingAmount.toLocaleString()}
-                </div>
-              </div>
-
-              <div style={{ display: 'grid', gap: '16px' }}>
-                <div>
-                  <label style={{ display: 'block', marginBottom: '8px', fontSize: '14px', fontWeight: '600', color: 'var(--color-text)' }}>
-                    Payment Method *
-                  </label>
-                  <select
-                    value={manualPaymentForm.paymentMethod}
-                    onChange={(e) =>
-                      setManualPaymentForm((prev) => ({
-                        ...prev,
-                        paymentMethod: e.target.value
-                      }))
-                    }
-                    style={{
-                      width: '100%',
-                      padding: '12px',
-                      border: '1px solid var(--color-border)',
-                      borderRadius: 'var(--radius)',
-                      background: 'var(--color-bg)',
-                      color: 'var(--color-text)',
-                      fontSize: '14px'
-                    }}
-                    required
-                  >
-                    <option value="CASH">Cash</option>
-                    <option value="TRANSFER">Transfer</option>
-                  </select>
-                </div>
-
-                <div>
-                  <label style={{ display: 'block', marginBottom: '8px', fontSize: '14px', fontWeight: '600', color: 'var(--color-text)' }}>
-                    Payment Percentage (%)
-                  </label>
-                  <select
-                    value={manualPaymentForm.paymentPercentage}
-                    onChange={(e) =>
-                      setManualPaymentForm((prev) => ({
-                        ...prev,
-                        paymentPercentage: Number(e.target.value)
-                      }))
-                    }
-                    style={{
-                      width: '100%',
-                      padding: '12px',
-                      border: '1px solid var(--color-border)',
-                      borderRadius: 'var(--radius)',
-                      background: 'var(--color-bg)',
-                      color: 'var(--color-text)',
-                      fontSize: '14px'
-                    }}
-                    required
-                  >
-                    {(() => {
-                      const paidPercent =
-                        selectedOrderTotalAmount > 0
-                          ? Math.round((selectedOrderPaidAmount / selectedOrderTotalAmount) * 100)
-                          : 0;
-                      const options = [30, 50, 70, 100].filter((percent) => percent > paidPercent);
-                      const optionList = options.length ? options : [100];
-                      return optionList.map((percent) => (
-                        <option key={percent} value={percent}>
-                          {percent}%
-                        </option>
-                      ));
-                    })()}
-                  </select>
-                  <div style={{ fontSize: '12px', color: 'var(--color-text-muted)', marginTop: '4px' }}>
-                    Allowed values: 30%, 50%, 70%, 100%. Amount is calculated from the order total.
-                  </div>
-                </div>
-
-                <div>
-                  <label style={{ display: 'block', marginBottom: '8px', fontSize: '14px', fontWeight: '600', color: 'var(--color-text)' }}>
-                    Notes
-                  </label>
-                  <textarea
-                    value={manualPaymentForm.paymentNotes}
-                    onChange={(e) =>
-                      setManualPaymentForm((prev) => ({
-                        ...prev,
-                        paymentNotes: e.target.value
-                      }))
-                    }
-                    placeholder="Add payment notes (optional)"
-                    style={{
-                      width: '100%',
-                      padding: '12px',
-                      border: '1px solid var(--color-border)',
-                      borderRadius: 'var(--radius)',
-                      background: 'var(--color-bg)',
-                      color: 'var(--color-text)',
-                      fontSize: '14px',
-                      minHeight: '80px',
-                      resize: 'vertical'
-                    }}
-                  />
-                </div>
-              </div>
-
-              <div style={{ display: 'flex', gap: '12px', justifyContent: 'flex-end', marginTop: '24px' }}>
-                <button
-                  type="button"
-                  className="btn btn-outline"
-                  onClick={() => {
-                    setShowManualPaymentModal(false);
-                    setSelectedOrder(null);
-                    setManualPaymentForm({
-                      paymentMethod: 'CASH',
-                      paymentPercentage: 30,
-                      paymentNotes: ''
-                    });
-                  }}
-                  disabled={manualPaymentLoading}
-                >
-                  Cancel
-                </button>
-                <button type="submit" className="btn btn-primary" disabled={manualPaymentLoading}>
-                  {manualPaymentLoading ? (
-                    <>
-                      <i className="bx bx-loader-alt bx-spin" style={{ marginRight: '6px' }}></i>
-                      Recording...
-                    </>
-                  ) : (
-                    <>
-                      <i className="bx bx-check" style={{ marginRight: '6px' }}></i>
-                      Confirm Payment
-                    </>
-                  )}
-                </button>
-              </div>
-            </form>
-          </div>
-        </div>
-      )}
-
-      {/* Installment Modal - IMPROVED VERSION */}
-      {showInstallmentModal && selectedPaymentForInstallment && (
-        <div style={{
-          position: 'fixed',
-          top: 0,
-          left: 0,
-          right: 0,
-          bottom: 0,
-          background: 'rgba(0, 0, 0, 0.5)',
-          display: 'flex',
-          alignItems: 'center',
-          justifyContent: 'center',
-          zIndex: 1000,
-          overflow: 'auto',
-          padding: '20px'
-        }}>
-          <div style={{
-            background: 'var(--color-surface)',
-            borderRadius: 'var(--radius)',
-            padding: '24px',
-            width: '90%',
-            maxWidth: '900px',
-            maxHeight: '90vh',
-            overflow: 'auto'
-          }}>
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '24px' }}>
-              <h3>Quản lý trả góp - Payment #{selectedPaymentForInstallment.paymentId || selectedPaymentForInstallment.id}</h3>
-              <button 
-                onClick={() => {
-                  setShowInstallmentModal(false);
-                  setSelectedPaymentForInstallment(null);
-                  setInstallmentSchedule([]);
-                  setInstallmentPreview(null);
-                }}
-                style={{ background: 'none', border: 'none', fontSize: '24px', cursor: 'pointer', color: 'var(--color-text-muted)' }}
-              >
-                <i className="bx bx-x"></i>
-              </button>
-            </div>
-
-            {/* Payment Info */}
             <div style={{
-              padding: '16px',
+              background: 'var(--color-surface)',
               borderRadius: 'var(--radius)',
-              border: '1px solid var(--color-border)',
-              background: 'var(--color-bg)',
-              marginBottom: '24px'
+              padding: '24px',
+              width: '90%',
+              maxWidth: '800px',
+              maxHeight: '90vh',
+              overflowY: 'auto'
             }}>
-              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(150px, 1fr))', gap: '12px' }}>
-                <div>
-                  <div style={{ fontSize: '12px', color: 'var(--color-text-muted)', marginBottom: '4px' }}>Số tiền</div>
-                  <div style={{ fontSize: '16px', fontWeight: '600', color: 'var(--color-primary)' }}>
-                    ${(selectedPaymentForInstallment.amount || 0).toLocaleString()}
-                  </div>
-                </div>
-                <div>
-                  <div style={{ fontSize: '12px', color: 'var(--color-text-muted)', marginBottom: '4px' }}>Phương thức</div>
-                  <div style={{ fontSize: '14px', color: 'var(--color-text)' }}>
-                    {selectedPaymentForInstallment.paymentMethod || 'VNPay'}
-                  </div>
-                </div>
-                <div>
-                  <div style={{ fontSize: '12px', color: 'var(--color-text-muted)', marginBottom: '4px' }}>Trạng thái</div>
-                  <div style={{ fontSize: '14px', color: 'var(--color-success)' }}>
-                    {selectedPaymentForInstallment.status === 'COMPLETED' ? 'Hoàn thành' : selectedPaymentForInstallment.status}
-                  </div>
-                </div>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '24px' }}>
+                <h3 style={{ margin: 0, display: 'flex', alignItems: 'center', gap: '8px' }}>
+                  <i className="bx bx-detail"></i>
+                  Payment Details
+                </h3>
+                <button
+                  onClick={() => setShowDetailModal(false)}
+                  style={{ background: 'none', border: 'none', cursor: 'pointer', fontSize: '20px', color: 'var(--color-text)' }}
+                >
+                  <i className="bx bx-x"></i>
+                </button>
               </div>
-            </div>
 
-            {/* Create Installment Form */}
-            {installmentSchedule.length === 0 && (
-              <form onSubmit={handleCreateInstallment} style={{
-                border: '1px solid var(--color-border)',
-                borderRadius: 'var(--radius)',
-                padding: '20px',
-                marginBottom: '24px',
-                background: 'var(--color-bg)'
-              }}>
-                <h4 style={{ marginBottom: '16px', fontSize: '16px', fontWeight: '600' }}>
-                  <i className="bx bx-plus-circle" style={{ marginRight: '8px' }}></i>
-                  Tạo kế hoạch trả góp
-                </h4>
-                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: '16px' }}>
-                  <div>
-                    <label style={{ display: 'block', marginBottom: '8px', fontSize: '14px', fontWeight: '600', color: 'var(--color-text)' }}>
-                      Số tháng * <span style={{ fontSize: '12px', fontWeight: 'normal', color: 'var(--color-text-muted)' }}>(1-36)</span>
-                    </label>
-                    <input
-                      type="number"
-                      min="1"
-                      max="36"
-                      value={installmentForm.months}
-                      onChange={(e) => handleInstallmentFormChange('months', Number(e.target.value))}
-                      style={{
-                        width: '100%',
-                        padding: '10px 12px',
-                        border: '1px solid var(--color-border)',
-                        borderRadius: 'var(--radius)',
-                        background: 'var(--color-surface)',
-                        color: 'var(--color-text)',
-                        fontSize: '14px'
-                      }}
-                      required
-                    />
-                  </div>
-                  <div>
-                    <label style={{ display: 'block', marginBottom: '8px', fontSize: '14px', fontWeight: '600', color: 'var(--color-text)' }}>
-                      Lãi suất năm (%) <span style={{ fontSize: '12px', fontWeight: 'normal', color: 'var(--color-text-muted)' }}>(0-100)</span>
-                    </label>
-                    <input
-                      type="number"
-                      min="0"
-                      max="100"
-                      step="0.1"
-                      value={installmentForm.annualInterestRate}
-                      onChange={(e) => handleInstallmentFormChange('annualInterestRate', Number(e.target.value))}
-                      style={{
-                        width: '100%',
-                        padding: '10px 12px',
-                        border: '1px solid var(--color-border)',
-                        borderRadius: 'var(--radius)',
-                        background: 'var(--color-surface)',
-                        color: 'var(--color-text)',
-                        fontSize: '14px'
-                      }}
-                    />
-                  </div>
-                  <div>
-                    <label style={{ display: 'block', marginBottom: '8px', fontSize: '14px', fontWeight: '600', color: 'var(--color-text)' }}>
-                      Ngày đến hạn đầu tiên *
-                    </label>
-                    <input
-                      type="date"
-                      value={installmentForm.firstDueDate}
-                      onChange={(e) => handleInstallmentFormChange('firstDueDate', e.target.value)}
-                      style={{
-                        width: '100%',
-                        padding: '10px 12px',
-                        border: '1px solid var(--color-border)',
-                        borderRadius: 'var(--radius)',
-                        background: 'var(--color-surface)',
-                        color: 'var(--color-text)',
-                        fontSize: '14px'
-                      }}
-                      required
-                    />
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '20px', marginBottom: '24px' }}>
+                <div>
+                  <label style={{ fontSize: '12px', color: 'var(--color-text-muted)' }}>Order Number</label>
+                  <div style={{ fontWeight: '600' }}>{selectedPaymentDetail.orderNumber || 'N/A'}</div>
+                </div>
+                <div>
+                  <label style={{ fontSize: '12px', color: 'var(--color-text-muted)' }}>Customer</label>
+                  <div style={{ fontWeight: '600' }}>{selectedPaymentDetail.customerName || 'N/A'}</div>
+                </div>
+                <div>
+                  <label style={{ fontSize: '12px', color: 'var(--color-text-muted)' }}>Amount</label>
+                  <div style={{ fontWeight: '600', color: 'var(--color-primary)' }}>
+                    ${(selectedPaymentDetail.amount || 0).toLocaleString()}
                   </div>
                 </div>
-
-                {/* Preview Section */}
-                {installmentPreview && (
-                  <div style={{
-                    marginTop: '20px',
-                    padding: '16px',
-                    borderRadius: 'var(--radius)',
-                    background: 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)',
-                    color: 'white'
-                  }}>
-                    <h5 style={{ marginBottom: '12px', fontSize: '14px', fontWeight: '600', display: 'flex', alignItems: 'center', gap: '8px' }}>
-                      <i className="bx bx-calculator"></i>
-                      Dự kiến thanh toán
-                    </h5>
-                    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(150px, 1fr))', gap: '12px' }}>
-                      <div>
-                        <div style={{ fontSize: '11px', opacity: '0.9', marginBottom: '4px' }}>Trả hàng tháng</div>
-                        <div style={{ fontSize: '18px', fontWeight: '700' }}>
-                          ${installmentPreview.monthlyPayment.toLocaleString()}
-                        </div>
-                      </div>
-                      <div>
-                        <div style={{ fontSize: '11px', opacity: '0.9', marginBottom: '4px' }}>Tổng tiền phải trả</div>
-                        <div style={{ fontSize: '18px', fontWeight: '700' }}>
-                          ${installmentPreview.totalPayment.toLocaleString()}
-                        </div>
-                      </div>
-                      <div>
-                        <div style={{ fontSize: '11px', opacity: '0.9', marginBottom: '4px' }}>Tổng lãi suất</div>
-                        <div style={{ fontSize: '18px', fontWeight: '700' }}>
-                          ${installmentPreview.totalInterest.toLocaleString()}
-                        </div>
-                      </div>
-                      <div>
-                        <div style={{ fontSize: '11px', opacity: '0.9', marginBottom: '4px' }}>Số kỳ</div>
-                        <div style={{ fontSize: '18px', fontWeight: '700' }}>
-                          {installmentPreview.months} tháng
-                        </div>
-                      </div>
+                <div>
+                  <label style={{ fontSize: '12px', color: 'var(--color-text-muted)' }}>Payment Method</label>
+                  <div style={{ fontWeight: '600' }}>{selectedPaymentDetail.paymentMethod || 'N/A'}</div>
+                </div>
+                <div>
+                  <label style={{ fontSize: '12px', color: 'var(--color-text-muted)' }}>Status</label>
+                  <div>
+                    <span style={{
+                      padding: '4px 8px',
+                      borderRadius: '4px',
+                      fontSize: '12px',
+                      fontWeight: '600',
+                      background: selectedPaymentDetail.status === 'COMPLETED' ? 'rgba(16, 185, 129, 0.1)' : 'rgba(245, 158, 11, 0.1)',
+                      color: selectedPaymentDetail.status === 'COMPLETED' ? 'var(--color-success)' : 'var(--color-warning)'
+                    }}>
+                      {selectedPaymentDetail.status || 'PENDING'}
+                    </span>
+                  </div>
+                </div>
+                <div>
+                  <label style={{ fontSize: '12px', color: 'var(--color-text-muted)' }}>Date</label>
+                  <div style={{ fontWeight: '600' }}>
+                    {(() => {
+                      const dateStr = selectedPaymentDetail.vnpayPayDate ||
+                        selectedPaymentDetail.payDate ||
+                        selectedPaymentDetail.createdDate ||
+                        selectedPaymentDetail.createdAt ||
+                        selectedPaymentDetail.paymentDate;
+                      return dateStr ? new Date(dateStr).toLocaleString('en-US') : 'N/A';
+                    })()}
+                  </div>
+                </div>
+                {selectedPaymentDetail.txnRef && (
+                  <div style={{ gridColumn: '1 / -1' }}>
+                    <label style={{ fontSize: '12px', color: 'var(--color-text-muted)' }}>Transaction Reference</label>
+                    <div style={{ fontFamily: 'monospace', background: 'var(--color-bg)', padding: '8px', borderRadius: '4px' }}>
+                      {selectedPaymentDetail.txnRef}
                     </div>
                   </div>
                 )}
-
-                <div style={{ display: 'flex', gap: '12px', justifyContent: 'flex-end', marginTop: '20px' }}>
-                  <button
-                    type="button"
-                    className="btn btn-outline"
-                    onClick={() => {
-                      setShowInstallmentModal(false);
-                      setSelectedPaymentForInstallment(null);
-                      setInstallmentSchedule([]);
-                      setInstallmentPreview(null);
-                    }}
-                    disabled={installmentCreating}
-                  >
-                    Hủy
-                  </button>
-                  <button
-                    type="submit"
-                    className="btn btn-primary"
-                    disabled={installmentCreating}
-                  >
-                    {installmentCreating ? (
-                      <>
-                        <i className="bx bx-loader-alt bx-spin" style={{ marginRight: '6px' }}></i>
-                        Đang tạo...
-                      </>
-                    ) : (
-                      <>
-                        <i className="bx bx-plus" style={{ marginRight: '6px' }}></i>
-                        Tạo kế hoạch trả góp
-                      </>
-                    )}
-                  </button>
-                </div>
-              </form>
-            )}
-
-            {/* Installment Schedule */}
-            {installmentLoading ? (
-              <div style={{ textAlign: 'center', padding: '40px' }}>
-                <i className="bx bx-loader-alt bx-spin" style={{ fontSize: '32px', color: 'var(--color-primary)' }}></i>
-                <div style={{ marginTop: '12px', color: 'var(--color-text-muted)' }}>Đang tải lịch trả góp...</div>
               </div>
-            ) : installmentSchedule.length > 0 ? (
-              <div>
-                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px' }}>
-                  <h4 style={{ margin: '0', fontSize: '16px', fontWeight: '600', display: 'flex', alignItems: 'center', gap: '8px' }}>
-                    <i className="bx bx-list-ul"></i>
-                    Lịch trả góp ({installmentSchedule.length} kỳ)
-                  </h4>
-                  <button
-                    className="btn btn-outline"
-                    style={{ fontSize: '12px', color: 'var(--color-error)', borderColor: 'var(--color-error)' }}
-                    onClick={() => setShowDeleteConfirm(true)}
-                  >
-                    <i className="bx bx-trash" style={{ marginRight: '4px' }}></i>
-                    Xóa kế hoạch
-                  </button>
-                </div>
 
-                {/* Summary Stats */}
-                <div style={{
-                  display: 'grid',
-                  gridTemplateColumns: 'repeat(auto-fit, minmax(150px, 1fr))',
-                  gap: '12px',
-                  marginBottom: '20px',
-                  padding: '16px',
-                  background: 'var(--color-bg)',
-                  borderRadius: 'var(--radius)',
-                  border: '1px solid var(--color-border)'
-                }}>
-                  <div>
-                    <div style={{ fontSize: '12px', color: 'var(--color-text-muted)', marginBottom: '4px' }}>Tổng số tiền</div>
-                    <div style={{ fontSize: '16px', fontWeight: '700', color: 'var(--color-primary)' }}>
-                      ${installmentSchedule.reduce((sum, item) => sum + (item.amount || 0), 0).toLocaleString()}
-                    </div>
-                  </div>
-                  <div>
-                    <div style={{ fontSize: '12px', color: 'var(--color-text-muted)', marginBottom: '4px' }}>Đã thanh toán</div>
-                    <div style={{ fontSize: '16px', fontWeight: '700', color: 'var(--color-success)' }}>
-                      {installmentSchedule.filter(item => (item.status || '').toUpperCase() === 'PAID').length} / {installmentSchedule.length}
-                    </div>
-                  </div>
-                  <div>
-                    <div style={{ fontSize: '12px', color: 'var(--color-text-muted)', marginBottom: '4px' }}>Chưa thanh toán</div>
-                    <div style={{ fontSize: '16px', fontWeight: '700', color: 'var(--color-warning)' }}>
-                      ${installmentSchedule
-                        .filter(item => (item.status || '').toUpperCase() !== 'PAID')
-                        .reduce((sum, item) => sum + (item.amount || 0), 0)
-                        .toLocaleString()}
-                    </div>
-                  </div>
-                  <div>
-                    <div style={{ fontSize: '12px', color: 'var(--color-text-muted)', marginBottom: '4px' }}>Tiến độ</div>
-                    <div style={{ fontSize: '16px', fontWeight: '700', color: 'var(--color-info)' }}>
-                      {Math.round((installmentSchedule.filter(item => (item.status || '').toUpperCase() === 'PAID').length / installmentSchedule.length) * 100)}%
-                    </div>
-                  </div>
+              {/* Installment Schedule Section */}
+              {detailLoading ? (
+                <div style={{ textAlign: 'center', padding: '20px' }}>
+                  <i className="bx bx-loader-alt bx-spin" style={{ fontSize: '24px' }}></i>
+                  <div style={{ marginTop: '8px', fontSize: '12px' }}>Checking for installment schedule...</div>
                 </div>
-
-                {/* Progress Bar */}
-                <div style={{ marginBottom: '20px' }}>
-                  <div style={{
-                    height: '8px',
-                    background: 'var(--color-bg)',
-                    borderRadius: '4px',
-                    overflow: 'hidden'
-                  }}>
-                    <div style={{
-                      height: '100%',
-                      background: 'linear-gradient(90deg, #667eea 0%, #764ba2 100%)',
-                      width: `${(installmentSchedule.filter(item => (item.status || '').toUpperCase() === 'PAID').length / installmentSchedule.length) * 100}%`,
-                      transition: 'width 0.3s ease'
-                    }}></div>
-                  </div>
-                </div>
-
-                {/* Table */}
-                <div style={{ overflowX: 'auto' }}>
-                  <table style={{ width: '100%', borderCollapse: 'collapse' }}>
-                    <thead>
-                      <tr style={{ borderBottom: '2px solid var(--color-border)' }}>
-                        <th style={{ padding: '12px', textAlign: 'center', fontSize: '14px', fontWeight: '600', color: 'var(--color-text-muted)' }}>#</th>
-                        <th style={{ padding: '12px', textAlign: 'left', fontSize: '14px', fontWeight: '600', color: 'var(--color-text-muted)' }}>Ngày đến hạn</th>
-                        <th style={{ padding: '12px', textAlign: 'right', fontSize: '14px', fontWeight: '600', color: 'var(--color-text-muted)' }}>Số tiền</th>
-                        <th style={{ padding: '12px', textAlign: 'center', fontSize: '14px', fontWeight: '600', color: 'var(--color-text-muted)' }}>Trạng thái</th>
-                        <th style={{ padding: '12px', textAlign: 'center', fontSize: '14px', fontWeight: '600', color: 'var(--color-text-muted)' }}>Thao tác</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {installmentSchedule.map((item, index) => {
-                        const status = (item.status || '').toUpperCase();
-                        const transactionId = item.transactionId || item.id;
-                        const isPaid = status === 'PAID';
-                        const dueDate = item.dueDate ? new Date(item.dueDate) : null;
-                        const isOverdue = dueDate && !isPaid && dueDate < new Date();
-                        
-                        return (
-                          <tr key={transactionId || index} style={{ 
-                            borderBottom: '1px solid var(--color-border)',
-                            background: isPaid ? 'rgba(16, 185, 129, 0.05)' : isOverdue ? 'rgba(239, 68, 68, 0.05)' : 'transparent'
-                          }}>
-                            <td style={{ padding: '12px', textAlign: 'center', fontSize: '14px', fontWeight: '600', color: 'var(--color-text)' }}>
-                              {item.installmentNumber || index + 1}
-                            </td>
-                            <td style={{ padding: '12px', fontSize: '14px', color: 'var(--color-text)' }}>
-                              <div>
-                                {dueDate ? dueDate.toLocaleDateString('vi-VN') : 'N/A'}
-                              </div>
-                              {isOverdue && (
-                                <div style={{ fontSize: '11px', color: 'var(--color-error)', marginTop: '2px', display: 'flex', alignItems: 'center', gap: '4px' }}>
-                                  <i className="bx bx-error-circle"></i>
-                                  Quá hạn
-                                </div>
-                              )}
-                            </td>
-                            <td style={{ padding: '12px', textAlign: 'right', fontSize: '14px', fontWeight: '600', color: 'var(--color-primary)' }}>
+              ) : detailInstallmentSchedule.length > 0 && (
+                <div style={{ marginTop: '24px', borderTop: '1px solid var(--color-border)', paddingTop: '24px' }}>
+                  <h4 style={{ marginBottom: '16px', fontSize: '16px', fontWeight: '600' }}>Installment Schedule</h4>
+                  <div style={{ overflowX: 'auto' }}>
+                    <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '14px' }}>
+                      <thead>
+                        <tr style={{ background: 'var(--color-bg)', borderBottom: '1px solid var(--color-border)' }}>
+                          <th style={{ padding: '10px', textAlign: 'center' }}>#</th>
+                          <th style={{ padding: '10px', textAlign: 'left' }}>Due Date</th>
+                          <th style={{ padding: '10px', textAlign: 'right' }}>Amount</th>
+                          <th style={{ padding: '10px', textAlign: 'center' }}>Status</th>
+                          <th style={{ padding: '10px', textAlign: 'center' }}>Action</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {detailInstallmentSchedule.map((item, index) => (
+                          <tr key={index} style={{ borderBottom: '1px solid var(--color-border)' }}>
+                            <td style={{ padding: '10px', textAlign: 'center' }}>{item.installmentNumber}</td>
+                            <td style={{ padding: '10px' }}>{new Date(item.dueDate).toLocaleDateString('en-US')}</td>
+                            <td style={{ padding: '10px', textAlign: 'right', fontWeight: '600' }}>
                               ${(item.amount || 0).toLocaleString()}
                             </td>
-                            <td style={{ padding: '12px', textAlign: 'center' }}>
+                            <td style={{ padding: '10px', textAlign: 'center' }}>
                               <span style={{
-                                padding: '4px 12px',
-                                borderRadius: 'var(--radius)',
-                                background: isPaid ? 'var(--color-success)' : isOverdue ? 'var(--color-error)' : 'var(--color-warning)',
-                                color: 'white',
-                                fontSize: '12px',
-                                fontWeight: '600',
-                                display: 'inline-flex',
-                                alignItems: 'center',
-                                gap: '4px'
+                                padding: '2px 8px',
+                                borderRadius: '10px',
+                                fontSize: '11px',
+                                background: item.status === 'PAID' ? 'var(--color-success)' : 'var(--color-warning)',
+                                color: 'white'
                               }}>
-                                {isPaid ? (
-                                  <>
-                                    <i className="bx bx-check-circle"></i>
-                                    Đã trả
-                                  </>
-                                ) : isOverdue ? (
-                                  <>
-                                    <i className="bx bx-error-circle"></i>
-                                    Quá hạn
-                                  </>
-                                ) : (
-                                  <>
-                                    <i className="bx bx-time"></i>
-                                    Chờ trả
-                                  </>
-                                )}
+                                {item.status}
                               </span>
                             </td>
-                            <td style={{ padding: '12px', textAlign: 'center' }}>
-                              {isPaid ? (
-                                <span style={{ fontSize: '12px', color: 'var(--color-success)', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '4px' }}>
-                                  <i className="bx bx-check-double"></i>
-                                  Hoàn thành
-                                </span>
-                              ) : (
-                                <button
-                                  className="btn btn-primary"
-                                  style={{ fontSize: '12px' }}
-                                  onClick={() => handlePayInstallment(transactionId)}
-                                >
-                                  <i className="bx bx-check" style={{ marginRight: '4px' }}></i>
-                                  Đánh dấu đã trả
-                                </button>
-                              )}
+                            <td style={{ padding: '10px', textAlign: 'center' }}>
+                              {/* Read-only view */}
                             </td>
                           </tr>
-                        );
-                      })}
-                    </tbody>
-                  </table>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
                 </div>
-              </div>
-            ) : (
-              <div style={{ textAlign: 'center', padding: '40px', color: 'var(--color-text-muted)' }}>
-                <i className="bx bx-calendar-x" style={{ fontSize: '48px', marginBottom: '16px', opacity: '0.5' }}></i>
-                <div style={{ fontSize: '16px', fontWeight: '600', marginBottom: '8px' }}>Chưa có lịch trả góp</div>
-                <div style={{ fontSize: '14px' }}>Vui lòng tạo kế hoạch trả góp ở form bên trên</div>
-              </div>
-            )}
-          </div>
-        </div>
-      )}
-
-      {/* Delete Confirmation Modal */}
-      {showDeleteConfirm && (
-        <div style={{
-          position: 'fixed',
-          top: 0,
-          left: 0,
-          right: 0,
-          bottom: 0,
-          background: 'rgba(0, 0, 0, 0.7)',
-          display: 'flex',
-          alignItems: 'center',
-          justifyContent: 'center',
-          zIndex: 1100
-        }}>
-          <div style={{
-            background: 'var(--color-surface)',
-            borderRadius: 'var(--radius)',
-            padding: '24px',
-            width: '90%',
-            maxWidth: '400px'
-          }}>
-            <div style={{ textAlign: 'center', marginBottom: '20px' }}>
-              <i className="bx bx-error-circle" style={{ fontSize: '48px', color: 'var(--color-error)' }}></i>
-            </div>
-            <h3 style={{ textAlign: 'center', marginBottom: '12px' }}>Xác nhận xóa</h3>
-            <p style={{ textAlign: 'center', color: 'var(--color-text-muted)', marginBottom: '24px' }}>
-              Bạn có chắc chắn muốn xóa kế hoạch trả góp này? Hành động này không thể hoàn tác.
-            </p>
-            <div style={{ display: 'flex', gap: '12px', justifyContent: 'center' }}>
-              <button
-                className="btn btn-outline"
-                onClick={() => setShowDeleteConfirm(false)}
-              >
-                Hủy
-              </button>
-              <button
-                className="btn btn-primary"
-                style={{ background: 'var(--color-error)' }}
-                onClick={handleDeleteInstallment}
-              >
-                <i className="bx bx-trash" style={{ marginRight: '6px' }}></i>
-                Xóa
-              </button>
+              )}
             </div>
           </div>
-        </div>
-      )}
-    </div>
+        )
+      }
+    </div >
   );
 };
 

@@ -1,5 +1,4 @@
-import React, { useEffect, useMemo, useRef, useState } from 'react';
-import { jsPDF } from 'jspdf';
+import React, { useEffect, useMemo, useState } from 'react';
 import { contractsAPI, ordersAPI, customersAPI, vehiclesAPI } from '../../utils/api';
 import { showSuccessToast, showErrorToast } from '../../utils/toast';
 import { handleAPIError } from '../../utils/apiConfig';
@@ -51,7 +50,7 @@ export const uploadFile = async (file, resourceType = 'auto') => {
 };
 
 // ----------------------
-// HELPERS (same as your file, lightly adjusted)
+// HELPERS
 // ----------------------
 const parseContractDocumentMeta = (value) => {
   if (!value) return null;
@@ -75,7 +74,21 @@ const normalizeContract = (contract) => {
 
   const documentMeta = parseContractDocumentMeta(contract.documentImage);
 
-  let documentImage = documentMeta?.cachedPdfUrl || documentMeta?.pdfUrl || contract.documentImage || '';
+  // Nếu documentImage là JSON meta (format cũ), parse để lấy URL
+  // Nếu là URL string (format mới), dùng trực tiếp
+  let documentImage = contract.documentImage || '';
+  if (documentImage && documentImage.startsWith('{')) {
+    // Format cũ: JSON meta
+    documentImage = documentMeta?.cachedPdfUrl || documentMeta?.pdfUrl || documentMeta?.signatureUrl || documentImage;
+  } else if (documentImage && !documentImage.startsWith('http') && !documentImage.startsWith('data:')) {
+    // Có thể là JSON string chưa parse
+    try {
+      const parsed = JSON.parse(documentImage);
+      documentImage = parsed.cachedPdfUrl || parsed.pdfUrl || parsed.signatureUrl || documentImage;
+    } catch (e) {
+      // Không phải JSON, dùng trực tiếp
+    }
+  }
 
   return {
     raw: contract,
@@ -90,9 +103,8 @@ const normalizeContract = (contract) => {
     orderNumber: order.orderNumber || `ORD-${order.orderId || order.id || 'N/A'}`,
     dealerId: contract.dealerId || order.dealerId || null,
     status,
-    documentImage,
+    documentImage, // URL string hoặc từ meta
     documentMeta,
-    signatureUrl: documentMeta?.signatureUrl || contract.signatureUrl || null,
     notes: documentMeta?.notes || contract.notes || '',
     signedDate: contract.signedDate || contract.createdDate || contract.createdAt || '',
     createdAt: contract.createdAt || contract.createdDate || '',
@@ -100,31 +112,6 @@ const normalizeContract = (contract) => {
     totalAmount: order.totalAmount || order.amount || 0,
   };
 };
-
-function formatCurrency(value) {
-  const numeric = Number(value || 0);
-  if (Number.isNaN(numeric)) {
-    return '0 ₫';
-  }
-  const formatted = new Intl.NumberFormat('vi-VN', {
-    style: 'currency',
-    currency: 'VND',
-    currencyDisplay: 'code',
-    maximumFractionDigits: 0,
-  }).format(numeric);
-  return formatted.replace(/\u00A0/g, ' ');
-}
-
-async function getBase64FromUrl(url) {
-  const response = await fetch(url);
-  const blob = await response.blob();
-  return new Promise((resolve, reject) => {
-    const reader = new FileReader();
-    reader.onloadend = () => resolve(reader.result);
-    reader.onerror = reject;
-    reader.readAsDataURL(blob);
-  });
-}
 
 const enrichOrderWithVehicles = async (order) => {
   if (!order) return order;
@@ -176,105 +163,6 @@ const enrichOrderWithVehicles = async (order) => {
   };
 };
 
-const extractCustomerSnapshot = (customer) => {
-  if (!customer) return null;
-  const address =
-    customer.address ||
-    [
-      customer.addressLine1,
-      customer.addressLine2,
-      customer.city,
-      customer.province,
-      customer.country,
-    ]
-      .filter(Boolean)
-      .join(', ');
-
-  return {
-    id: customer.id || customer.customerId || null,
-    fullName: customer.fullName || customer.name || customer.customerName || '',
-    email: customer.email || '',
-    phone: customer.phone || customer.phoneNumber || '',
-    address,
-  };
-};
-
-const extractOrderSnapshot = (order) => {
-  if (!order) return null;
-  const resolvedOrderId = order.orderId || order.id || null;
-  const baseFields = {
-    id: resolvedOrderId,
-    orderId: resolvedOrderId,
-    quoteId: order.quoteId || null,
-    dealerId: order.dealerId || null,
-    customerId: order.customerId || null,
-    orderDate: order.orderDate || null,
-    deliveryDate: order.deliveryDate || order.expectedDeliveryDate || null,
-    paymentMethod: order.paymentMethod || order.payment_method || null,
-    paymentStatus: order.paymentStatus || null,
-    totalAmount: order.totalAmount,
-    paidAmount: order.paidAmount,
-    remainingAmount: order.remainingAmount,
-  };
-
-  const items = Array.isArray(order.orderDetails)
-    ? order.orderDetails.map((detail) => ({
-        vehicleId: detail.vehicleId || null,
-        vehicleName:
-          detail.vehicleName ||
-          detail.vehicle?.name ||
-          detail.vehicle?.modelName ||
-          null,
-        quantity: detail.quantity || detail.qty || 1,
-        unitPrice: detail.unitPrice || detail.price || 0,
-        totalAmount: detail.totalAmount || detail.lineTotal || 0,
-      }))
-    : [];
-
-  return {
-    ...baseFields,
-    orderDetails: items,
-  };
-};
-
-const isDataUri = (value) => typeof value === 'string' && value.startsWith('data:');
-
-const extractMimeFromDataUri = (dataUri) => {
-  if (!dataUri) return '';
-  const match = dataUri.match(/^data:(.*?);/);
-  return match ? match[1] : '';
-};
-
-const dataUriToBlob = (dataUri) => {
-  if (!dataUri) return null;
-  const arr = dataUri.split(',');
-  if (arr.length < 2) return null;
-  const mimeMatch = arr[0].match(/:(.*?);/);
-  const mime = mimeMatch ? mimeMatch[1] : 'application/pdf';
-  const binaryString = atob(arr[1]);
-  const len = binaryString.length;
-  const u8arr = new Uint8Array(len);
-  for (let i = 0; i < len; i += 1) {
-    u8arr[i] = binaryString.charCodeAt(i);
-  }
-  return new Blob([u8arr], { type: mime });
-};
-
-const dataUriToFile = (dataUri, filename) => {
-  const blob = dataUriToBlob(dataUri);
-  if (!blob) return null;
-  if (typeof File !== 'undefined') {
-    return new File([blob], filename, { type: blob.type || 'application/pdf' });
-  }
-  const fallbackBlob = new Blob([blob], { type: blob.type || 'application/pdf' });
-  try {
-    fallbackBlob.name = filename;
-  } catch (error) {
-    // ignore
-  }
-  return fallbackBlob;
-};
-
 const inferMimeFromUrl = (url) => {
   if (!url) return '';
   const clean = url.split('?')[0].toLowerCase();
@@ -282,286 +170,6 @@ const inferMimeFromUrl = (url) => {
   if (clean.match(/\.(png|jpg|jpeg|gif)$/)) return 'image/png';
   return '';
 };
-
-const getExtensionFromMime = (mimeType) => {
-  const normalized = (mimeType || '').toLowerCase();
-  if (normalized === 'application/pdf') return 'pdf';
-  if (normalized === 'image/png') return 'png';
-  if (normalized === 'image/jpeg' || normalized === 'image/jpg') return 'jpg';
-  if (normalized === 'image/gif') return 'gif';
-  return '';
-};
-
-const sanitizeFilenameSegment = (value) => {
-  return String(value || 'contract')
-    .trim()
-    .toLowerCase()
-    .replace(/[^a-z0-9-_]+/g, '-')
-    .replace(/^-+|-+$/g, '') || 'contract';
-};
-
-const buildContractFilename = (contract, mimeType = 'application/pdf') => {
-  const reference =
-    contract?.orderId ||
-    contract?.raw?.orderId ||
-    contract?.raw?.contractId ||
-    contract?.id ||
-    'contract';
-  const extension = getExtensionFromMime(mimeType) || 'pdf';
-  return `sales-contract-${sanitizeFilenameSegment(reference)}.${extension}`;
-};
-
-const createObjectUrl = (blob) => {
-  if (typeof URL === 'undefined' || typeof URL.createObjectURL !== 'function') {
-    throw new Error('Object URL API is not available.');
-  }
-  return URL.createObjectURL(blob);
-};
-
-const revokeObjectUrl = (objectUrl) => {
-  if (!objectUrl) return;
-  if (typeof URL !== 'undefined' && typeof URL.revokeObjectURL === 'function') {
-    URL.revokeObjectURL(objectUrl);
-  }
-};
-
-// ----------------------
-// generateContractPdf (unchanged, returns data URI string)
-// ----------------------
-async function generateContractPdf({
-  order,
-  customer,
-  dealer,
-  dealerName,
-  staff,
-  notes,
-  signatureUrl,
-  contractDate,
-}) {
-  if (!order || !customer) {
-    throw new Error('Missing order or customer information for contract PDF.');
-  }
-
-  const doc = new jsPDF({ unit: 'mm', format: 'a4' });
-  doc.setProperties({
-    title: `Sales Contract #${order.orderId || order.id || ''}`,
-    subject: 'Electric Vehicle Sales Contract',
-  });
-  doc.setFont('helvetica', 'normal');
-
-  const pageWidth = doc.internal.pageSize.getWidth();
-  let cursorY = 25;
-  const marginX = 20;
-
-  const moveCursor = (spacing = 8) => {
-    cursorY += spacing;
-    if (cursorY > 280) {
-      doc.addPage();
-      cursorY = 20;
-      doc.setFontSize(12);
-    }
-  };
-
-  const addSectionTitle = (title) => {
-    doc.setFont('helvetica', 'bold');
-    doc.setFontSize(13);
-    doc.text(title, marginX, cursorY);
-    moveCursor(6);
-    doc.setFont('helvetica', 'normal');
-    doc.setFontSize(11);
-  };
-
-  const addText = (text, indent = 0, spacing = 7) => {
-    const x = marginX + indent;
-    const lines = Array.isArray(text) ? text : [text];
-    lines.forEach((line) => {
-      const wrapped = doc.splitTextToSize(line, pageWidth - x - 20);
-      wrapped.forEach((wrappedLine) => {
-        doc.text(wrappedLine, x, cursorY);
-        moveCursor(spacing);
-      });
-    });
-  };
-
-  doc.setFontSize(18);
-  doc.text('Electric Vehicle Sales Contract', pageWidth / 2, cursorY, {
-    align: 'center',
-  });
-  doc.setFontSize(12);
-  moveCursor(12);
-
-  addSectionTitle('General Information');
-  const contractDateText = contractDate
-    ? new Date(contractDate).toLocaleDateString('vi-VN')
-    : new Date().toLocaleDateString('vi-VN');
-  addText(`Contract Date: ${contractDateText}`);
-  if (dealerName) addText(`Dealer: ${dealerName}`);
-  addText(`Dealer ID: ${dealer || 'N/A'}`);
-  addText(`Order ID: ${order.orderId || order.id || 'N/A'}`);
-  moveCursor(2);
-
-  addSectionTitle('Customer Information');
-  addText(`Name: ${customer.fullName || customer.name || customer.customerName || 'N/A'}`);
-  if (customer.email) addText(`Email: ${customer.email}`);
-  if (customer.phone || customer.phoneNumber) {
-    addText(`Phone: ${customer.phone || customer.phoneNumber}`);
-  }
-  const customerAddress =
-    customer.address ||
-    [customer.addressLine1, customer.addressLine2, customer.city, customer.province]
-      .filter(Boolean)
-      .join(', ');
-  if (customerAddress) {
-    addText(`Address: ${customerAddress}`);
-  }
-  moveCursor(2);
-
-  addSectionTitle('Order Summary');
-  const orderDate = order.orderDate ? new Date(order.orderDate).toLocaleDateString('vi-VN') : null;
-  if (orderDate) addText(`Order Date: ${orderDate}`);
-  if (order.deliveryDate) {
-    addText(`Expected Delivery: ${new Date(order.deliveryDate).toLocaleDateString('vi-VN')}`);
-  }
-  if (order.paymentMethod || order.payment_method) {
-    addText(`Payment Method: ${order.paymentMethod || order.payment_method}`);
-  }
-  moveCursor(2);
-
-  addSectionTitle('Vehicle Details');
-  const orderItems = order.orderDetails || order.orderDetailDTOList || order.items || [];
-
-  if (Array.isArray(orderItems) && orderItems.length > 0) {
-    const columnHeaders = ['Vehicle', 'Qty', 'Unit Price', 'Line Total'];
-    const columnWidths = [80, 20, 35, 35];
-
-    doc.setFont('helvetica', 'bold');
-    columnHeaders.reduce((currentX, header, index) => {
-      doc.text(header, marginX + currentX, cursorY);
-      return currentX + columnWidths[index];
-    }, 0);
-    moveCursor(6);
-    doc.setFont('helvetica', 'normal');
-
-    orderItems.forEach((detail) => {
-      const vehicleInfo = detail.vehicle || detail.vehicleInfo || {};
-      const vehicleName =
-        detail.vehicleName ||
-        vehicleInfo.name ||
-        vehicleInfo.modelName ||
-        `Vehicle #${detail.vehicleId || ''}`;
-      const quantity = detail.quantity || detail.qty || 1;
-      const unitPriceRaw =
-        detail.unitPrice !== undefined && detail.unitPrice !== null
-          ? detail.unitPrice
-          : detail.price !== undefined && detail.price !== null
-            ? detail.price
-            : detail.listedPrice || 0;
-      const unitPrice = Number(unitPriceRaw || 0);
-      const lineTotalValue =
-        detail.totalAmount !== undefined && detail.totalAmount !== null
-          ? Number(detail.totalAmount)
-          : unitPrice * quantity;
-      const vehicleLines = doc.splitTextToSize(vehicleName, columnWidths[0] - 2);
-      const requiredHeight = Math.max(vehicleLines.length * 6, 8);
-
-      vehicleLines.forEach((line, i) => {
-        doc.text(line, marginX, cursorY + i * 6);
-      });
-      doc.text(String(quantity), marginX + columnWidths[0], cursorY + 4);
-      doc.text(formatCurrency(unitPrice), marginX + columnWidths[0] + columnWidths[1], cursorY + 4);
-      doc.text(formatCurrency(lineTotalValue), marginX + columnWidths[0] + columnWidths[1] + columnWidths[2], cursorY + 4);
-      moveCursor(requiredHeight + 2);
-    });
-  } else {
-    addText('No detailed vehicle information available.', 4, 8);
-  }
-
-  const totalAmount =
-    order.totalAmount ||
-    order.amount ||
-    order.finalTotal ||
-    order.summaryTotal ||
-    0;
-  const paidAmount = order.paidAmount || 0;
-  const remainingAmount =
-    order.remainingAmount !== undefined ? order.remainingAmount : Math.max(totalAmount - paidAmount, 0);
-
-  moveCursor(2);
-  addSectionTitle('Financial Summary');
-  addText(`Total Amount: ${formatCurrency(totalAmount)}`, 4);
-  addText(`Paid Amount: ${formatCurrency(paidAmount)}`, 4);
-  addText(`Outstanding Balance: ${formatCurrency(remainingAmount)}`, 4);
-  if (order.depositAmount) {
-    addText(`Deposit: ${formatCurrency(order.depositAmount)}`, 4);
-  }
-  if (order.paymentStatus) {
-    addText(`Payment Status: ${order.paymentStatus}`, 4);
-  }
-  if (notes) {
-    moveCursor(2);
-    addSectionTitle('Additional Notes');
-    addText(notes, 4);
-  }
-
-  moveCursor(2);
-  addSectionTitle('Terms & Conditions');
-  const terms = [
-    'The customer agrees to the purchase details as outlined in this contract.',
-    'Payment obligations must be fulfilled according to the agreed schedule. Late payments may incur additional charges.',
-    'Vehicle delivery will be coordinated by the dealer upon confirmation of payment and completion of necessary paperwork.',
-    'Warranty and after-sales services are provided according to manufacturer and dealer policies.',
-    'Any amendments to this contract must be confirmed in writing and signed by both parties.',
-  ];
-  terms.forEach((term, idx) => addText(`${idx + 1}. ${term}`, 4));
-
-  moveCursor(6);
-  addSectionTitle('Signatures');
-  const signatureBlockHeight = 30;
-  const sectionWidth = (pageWidth - marginX * 2) / 2;
-
-  doc.setFont('helvetica', 'bold');
-  doc.text('Dealer Representative', marginX, cursorY);
-  doc.text('Customer', marginX + sectionWidth, cursorY);
-  moveCursor(8);
-  doc.setFont('helvetica', 'normal');
-
-  const staffName = staff?.name || 'Authorized Representative';
-  const staffContact = [staff?.email, staff?.phone].filter(Boolean).join(' • ');
-  doc.text(staffName, marginX, cursorY + signatureBlockHeight - 12);
-  if (staffContact) {
-    doc.setFont('helvetica', 'italic');
-    doc.text(staffContact, marginX, cursorY + signatureBlockHeight - 6);
-    doc.setFont('helvetica', 'normal');
-  }
-
-  const customerName = customer.fullName || customer.name || customer.customerName || 'Customer';
-  doc.text(customerName, marginX + sectionWidth, cursorY + signatureBlockHeight - 6);
-
-  if (signatureUrl) {
-    try {
-      const signatureDataUrl = await getBase64FromUrl(signatureUrl);
-      doc.addImage(signatureDataUrl, 'PNG', marginX + sectionWidth, cursorY, Math.min(sectionWidth - 10, 60), signatureBlockHeight - 12);
-    } catch (e) {
-      console.warn('Failed to load signature image from URL:', signatureUrl, e);
-      doc.setFont('helvetica', 'italic');
-      doc.text('(Signature load failed)', marginX + sectionWidth, cursorY + 10);
-      doc.setFont('helvetica', 'normal');
-    }
-  } else {
-    doc.setFont('helvetica', 'italic');
-    doc.text('(Signature on file)', marginX + sectionWidth, cursorY + 10);
-    doc.setFont('helvetica', 'normal');
-  }
-  moveCursor(signatureBlockHeight + 4);
-
-  doc.setFont('helvetica', 'italic');
-  doc.setFontSize(10);
-  addText('This contract is generated electronically. Please keep a copy for your records.', 0, 6);
-  doc.setFont('helvetica', 'normal');
-  doc.setFontSize(11);
-
-  return doc.output('datauristring');
-}
 
 // ----------------------
 // SalesContracts component
@@ -589,9 +197,10 @@ const SalesContracts = ({ user }) => {
   const [showOrderModal, setShowOrderModal] = useState(false);
   const [orderModalLoading, setOrderModalLoading] = useState(false);
   const [viewingContract, setViewingContract] = useState(null);
-  const [uploadingSignature, setUploadingSignature] = useState(false);
-  const [signatureUrl, setSignatureUrl] = useState('');
-  const [signatureError, setSignatureError] = useState('');
+  const [uploadingImage, setUploadingImage] = useState(false);
+  const [contractImageUrl, setContractImageUrl] = useState('');
+  const [contractImageFile, setContractImageFile] = useState(null);
+  const [imageError, setImageError] = useState('');
   const [documentPreviewUrl, setDocumentPreviewUrl] = useState('');
   const [documentPreviewLoading, setDocumentPreviewLoading] = useState(false);
   const [documentPreviewMime, setDocumentPreviewMime] = useState('');
@@ -605,17 +214,6 @@ const SalesContracts = ({ user }) => {
     user?.email ||
     'Authorized Representative';
   const dealerDisplayName = user?.dealerName || user?.dealer?.name || (dealerId ? `Dealer #${dealerId}` : '');
-
-  const canvasRef = useRef(null);
-  const drawingStateRef = useRef({ isDrawing: false, lastX: 0, lastY: 0 });
-  const previewObjectUrlRef = useRef(null);
-
-  const releasePreviewObjectUrl = () => {
-    if (previewObjectUrlRef.current) {
-      revokeObjectUrl(previewObjectUrlRef.current);
-      previewObjectUrlRef.current = null;
-    }
-  };
 
   const normalizedRole = user?.role?.toUpperCase().replace(/-/g, '_');
   const isDealerRole = normalizedRole === 'DEALER_MANAGER' || normalizedRole === 'DEALER_STAFF';
@@ -648,17 +246,11 @@ const SalesContracts = ({ user }) => {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [normalizedRole, dealerId]);
 
-  useEffect(() => {
-    return () => {
-      releasePreviewObjectUrl();
-    };
-  }, []);
-
   const resetForm = () => {
     setFormData({ ...defaultFormState, dealerId: dealerId ? String(dealerId) : '' });
-    setSignatureUrl('');
-    setSignatureError('');
-    releasePreviewObjectUrl();
+    setContractImageUrl('');
+    setContractImageFile(null);
+    setImageError('');
     setDocumentPreviewUrl('');
     setDocumentPreviewMime('');
     setDocumentPreviewLoading(false);
@@ -669,9 +261,6 @@ const SalesContracts = ({ user }) => {
     resetForm();
     setShowModal(true);
     setReferenceLoading(true);
-    setTimeout(() => {
-      initializeCanvas();
-    }, 50);
 
     try {
       const [orders, customers] = await Promise.all([
@@ -701,8 +290,8 @@ const SalesContracts = ({ user }) => {
       showErrorToast('Dealer information is required');
       return;
     }
-    if (!signatureUrl) {
-      showErrorToast('Please capture and upload the contract signature before saving.');
+    if (!contractImageUrl && !contractImageFile) {
+      showErrorToast('Vui lòng upload hình ảnh hợp đồng trước khi lưu.');
       return;
     }
 
@@ -711,69 +300,37 @@ const SalesContracts = ({ user }) => {
       const orderId = Number(formData.orderId);
       const customerId = Number(formData.customerId);
 
-      const [orderResponse, customerResponse] = await Promise.all([
-        ordersAPI.getById(orderId),
-        customersAPI.getById(customerId),
-      ]);
+      let imageUrl = contractImageUrl;
 
-      if (!orderResponse) throw new Error('Unable to load order details for contract PDF.');
-      if (!customerResponse) throw new Error('Unable to load customer details for contract PDF.');
+      // Nếu có file mới, upload lên Cloudinary
+      if (contractImageFile) {
+        setUploadingImage(true);
+        try {
+          const uploaded = await uploadFile(contractImageFile, 'image');
+          imageUrl = uploaded.secure_url;
+        } catch (uploadError) {
+          console.error('Error uploading contract image:', uploadError);
+          showErrorToast('Không thể upload hình ảnh hợp đồng. Vui lòng thử lại.');
+          return;
+        } finally {
+          setUploadingImage(false);
+        }
+      }
 
-      const hydratedOrder = await enrichOrderWithVehicles(orderResponse);
-      const pdfDataUri = await generateContractPdf({
-        order: hydratedOrder,
-        customer: customerResponse,
-        dealer: Number(dealerId || formData.dealerId),
-        dealerName: dealerDisplayName,
-        staff: {
-          name: staffDisplayName,
-          email: user?.email,
-          phone: user?.phoneNumber || user?.phone,
-        },
-        notes: formData.notes || '',
-        signatureUrl,
-        contractDate: new Date().toISOString(),
-      });
-
-      const pdfFile = dataUriToFile(pdfDataUri, `sales-contract-${orderId}.pdf`);
-      if (!pdfFile) throw new Error('Failed to prepare contract PDF file.');
-
-      // Upload original PDF as raw (preserve original) and also upload image to generate thumbnail
-      const uploadRaw = await uploadFile(pdfFile, 'raw');    // original pdf
-      // Upload image to rasterize first page as thumbnail
-      const uploadThumb = await uploadFile(pdfFile, 'image'); // cloud will rasterize page 1
-
-      const pdfUrl = uploadRaw.secure_url;
-      const pdfPublicId = uploadRaw.public_id;
-      const thumbUrl = uploadThumb.secure_url;
-      const thumbPublicId = uploadThumb.public_id;
-
-      const documentMeta = {
-        type: 'CONTRACT_META_V1',
-        signatureUrl,
-        notes: formData.notes || '',
-        dealerId: Number(dealerId || formData.dealerId),
-        customerId,
-        orderId,
-        staffName: staffDisplayName,
-        generatedAt: new Date().toISOString(),
-        cachedPdfUrl: thumbUrl,
-        cachedPdfPublicId: thumbPublicId,
-        pdfUrl,
-        pdfPublicId,
-        customerSnapshot: extractCustomerSnapshot(customerResponse),
-        orderSnapshot: extractOrderSnapshot(hydratedOrder),
-      };
+      if (!imageUrl) {
+        showErrorToast('Vui lòng upload hình ảnh hợp đồng.');
+        return;
+      }
 
       const payload = {
-        documentImage: JSON.stringify(documentMeta),
+        documentImage: imageUrl, // Chỉ lưu URL string, không cần JSON meta
         customerId,
         orderId,
         dealerId: Number(dealerId || formData.dealerId),
       };
 
       await contractsAPI.create(payload);
-      showSuccessToast('Contract created successfully');
+      showSuccessToast('Hợp đồng đã được tạo thành công');
       setShowModal(false);
       resetForm();
       loadContracts();
@@ -825,277 +382,45 @@ const SalesContracts = ({ user }) => {
     }
   };
 
-  // --------------- Canvas signature handlers (unchanged except upload usage) ---------------
-  const initializeCanvas = () => {
-    const canvas = canvasRef.current;
-    if (!canvas) return;
-    const context = canvas.getContext('2d');
-    const ratio = window.devicePixelRatio || 1;
-    const width = 480;
-    const height = 220;
-    canvas.width = width * ratio;
-    canvas.height = height * ratio;
-    canvas.style.width = `${width}px`;
-    canvas.style.height = `${height}px`;
-    context.scale(ratio, ratio);
-    context.lineJoin = 'round';
-    context.lineCap = 'round';
-    context.lineWidth = 2.5;
-    context.strokeStyle = '#111827';
-    context.fillStyle = '#ffffff';
-    context.fillRect(0, 0, width, height);
-  };
-
-  const getCanvasCoordinates = (event) => {
-    const canvas = canvasRef.current;
-    const rect = canvas.getBoundingClientRect();
-    if (event.touches && event.touches[0]) {
-      return { x: event.touches[0].clientX - rect.left, y: event.touches[0].clientY - rect.top };
-    }
-    return { x: event.clientX - rect.left, y: event.clientY - rect.top };
-  };
-
-  const handleDrawStart = (event) => {
-    const { x, y } = getCanvasCoordinates(event);
-    drawingStateRef.current.isDrawing = true;
-    drawingStateRef.current.lastX = x;
-    drawingStateRef.current.lastY = y;
-    event.preventDefault();
-    setSignatureError('');
-  };
-
-  const handleDrawMove = (event) => {
-    if (!drawingStateRef.current.isDrawing) return;
-    event.preventDefault();
-    const canvas = canvasRef.current;
-    const context = canvas.getContext('2d');
-    const { x, y } = getCanvasCoordinates(event);
-
-    context.beginPath();
-    context.moveTo(drawingStateRef.current.lastX, drawingStateRef.current.lastY);
-    context.lineTo(x, y);
-    context.stroke();
-
-    drawingStateRef.current.lastX = x;
-    drawingStateRef.current.lastY = y;
-  };
-
-  const handleDrawEnd = (event) => {
-    if (!drawingStateRef.current.isDrawing) return;
-    handleDrawMove(event);
-    drawingStateRef.current.isDrawing = false;
-    event.preventDefault();
-  };
-
-  const handleClearSignature = () => {
-    initializeCanvas();
-    setSignatureUrl('');
-  };
-
-  const handleUploadSignature = async () => {
-    try {
-      const canvas = canvasRef.current;
-      if (!canvas) {
-        setSignatureError('Canvas is not ready. Please try again.');
-        return;
-      }
-
-      const blank = document.createElement('canvas');
-      blank.width = canvas.width;
-      blank.height = canvas.height;
-      if (canvas.toDataURL() === blank.toDataURL()) {
-        setSignatureError('Please provide a signature before uploading.');
-        return;
-      }
-
-      setUploadingSignature(true);
-      setSignatureError('');
-      const dataUrl = canvas.toDataURL('image/png');
-      const blob = await (await fetch(dataUrl)).blob();
-      const file = new File([blob], `contract-signature-${Date.now()}.png`, { type: 'image/png' });
-
-      // Upload signature as image
-      const uploaded = await uploadFile(file, 'image');
-      setSignatureUrl(uploaded.secure_url);
-      showSuccessToast('Signature uploaded successfully');
-    } catch (error) {
-      console.error('Signature upload failed:', error);
-      setSignatureError(error.message || 'Failed to upload the signature');
-      showErrorToast(handleAPIError(error));
-    } finally {
-      setUploadingSignature(false);
-    }
-  };
-
-  // --------------- prepareContractDocument & preview/download ---------------
-  const prepareContractDocument = async (contract) => {
-    if (!contract) throw new Error('Contract data is missing.');
-    const existingMeta = contract.documentMeta || parseContractDocumentMeta(contract.documentImage);
-
-    let documentUrl = existingMeta?.cachedPdfUrl || existingMeta?.pdfUrl || null;
-
-    if (!documentUrl && contract.documentImage && typeof contract.documentImage === 'string' && !contract.documentImage.startsWith('{')) {
-      documentUrl = contract.documentImage;
-    }
-
-    if (documentUrl && typeof documentUrl === 'string' && !isDataUri(documentUrl)) {
-      return {
-        url: documentUrl,
-        mime: inferMimeFromUrl(documentUrl) || 'image/png',
-        meta: existingMeta || null,
-      };
-    }
-    if (isDataUri(documentUrl)) {
-      return {
-        url: documentUrl,
-        mime: extractMimeFromDataUri(documentUrl) || 'application/pdf',
-        meta: existingMeta || null,
-      };
-    }
-
-    // regenerate PDF if not found
-    const contractId = contract.raw?.contractId || contract.raw?.id || contract.id;
-    if (!contractId || !contract.customerId) {
-      throw new Error('Cannot regenerate contract: missing order/customer info.');
-    }
-
-    let order = existingMeta?.orderSnapshot || null;
-    if (contract.orderId && !order) {
-      try {
-        order = await ordersAPI.getById(contract.orderId);
-      } catch (error) {
-        console.warn('Unable to fetch order by ID:', error);
-      }
-    }
-    if (!order) order = await contractsAPI.getOrderByContract(contractId);
-
-    order = await enrichOrderWithVehicles(order);
-    const customer = existingMeta?.customerSnapshot || (await customersAPI.getById(contract.customerId));
-    const signatureSource = existingMeta?.signatureUrl || contract.signatureUrl || null;
-
-    const dataUri = await generateContractPdf({
-      order,
-      customer,
-      dealer: contract.dealerId || dealerId,
-      dealerName: dealerDisplayName,
-      staff: {
-        name: existingMeta?.staffName || staffDisplayName,
-        email: user?.email,
-        phone: user?.phoneNumber || user?.phone,
-      },
-      notes: existingMeta?.notes || contract.notes || '',
-      signatureUrl: signatureSource,
-      contractDate: contract.signedDate || contract.createdAt || existingMeta?.generatedAt,
-    });
-
-    const file = dataUriToFile(dataUri, `contract-regenerated-${contractId}.pdf`);
-    if (!file) throw new Error('Failed to regenerate PDF file.');
-
-    // Upload regenerated files (raw + image thumbnail)
-    const uploadRaw = await uploadFile(file, 'raw');
-    const uploadThumb = await uploadFile(file, 'image');
-
-    // Optionally, could update contract meta via API here to persist regenerated urls (left to you)
-    return {
-      url: uploadThumb.secure_url,
-      mime: inferMimeFromUrl(uploadThumb.secure_url) || 'image/png',
-      meta: {
-        ...existingMeta,
-        cachedPdfUrl: uploadThumb.secure_url,
-        cachedPdfPublicId: uploadThumb.public_id,
-        pdfUrl: uploadRaw.secure_url,
-        pdfPublicId: uploadRaw.public_id,
-      },
-    };
-  };
-
   const handlePreviewContractDocument = async (contract) => {
     try {
       setShowDocumentModal(true);
       setDocumentPreviewLoading(true);
       setDocumentPreviewUrl('');
       setDocumentPreviewMime('');
-      releasePreviewObjectUrl();
 
-      const prepared = await prepareContractDocument(contract);
-      if (!prepared || !prepared.url) throw new Error('Contract document is not available.');
+      // Lấy image URL từ contract
+      let imageUrl = contract.documentImage || '';
 
-      if (isDataUri(prepared.url)) {
-        const blob = dataUriToBlob(prepared.url);
-        const mimeType = extractMimeFromDataUri(prepared.url) || 'application/pdf';
-        const objectUrl = createObjectUrl(blob);
-        previewObjectUrlRef.current = objectUrl;
-        setDocumentPreviewMime(mimeType);
-        setDocumentPreviewUrl(objectUrl);
-      } else {
-        // direct url (Cloudinary secure_url). If it's an image, show <img>, if pdf show iframe.
-        const mimeType = prepared.mime || inferMimeFromUrl(prepared.url);
-        setDocumentPreviewMime(mimeType || 'image/png');
-        setDocumentPreviewUrl(prepared.url);
+      // Nếu là JSON meta (format cũ), parse để lấy URL
+      if (imageUrl && imageUrl.startsWith('{')) {
+        try {
+          const meta = JSON.parse(imageUrl);
+          imageUrl = meta.cachedPdfUrl || meta.pdfUrl || meta.signatureUrl || imageUrl;
+        } catch (e) {
+          // Không phải JSON, dùng trực tiếp
+        }
       }
+
+      if (!imageUrl) {
+        throw new Error('Hợp đồng chưa có hình ảnh.');
+      }
+
+      // Xác định mime type
+      const mimeType = inferMimeFromUrl(imageUrl) || 'image/png';
+      setDocumentPreviewMime(mimeType);
+      setDocumentPreviewUrl(imageUrl);
     } catch (error) {
-      releasePreviewObjectUrl();
-      console.error('Error preparing contract document for preview:', error);
-      showErrorToast(error.message || 'Unable to load contract document.');
+      console.error('Error loading contract image:', error);
+      showErrorToast(error.message || 'Không thể tải hình ảnh hợp đồng.');
       setShowDocumentModal(false);
     } finally {
       setDocumentPreviewLoading(false);
     }
   };
 
-  const handleDownloadContract = async (contract) => {
-    try {
-      const meta = contract.documentMeta || parseContractDocumentMeta(contract.documentImage);
-      if (!meta) throw new Error('No document meta');
-
-      const cloud = CLOUDINARY_CONFIG.cloud_name;
-      const filename = buildContractFilename(contract, 'application/pdf');
-      const safeFilename = filename.replace(/\s/g, '_');
-
-      // Prefer original raw pdf public_id
-      if (meta.pdfPublicId) {
-        const downloadUrl = `https://res.cloudinary.com/${cloud}/raw/upload/fl_attachment:${encodeURIComponent(safeFilename)}/${meta.pdfPublicId}`;
-        const link = document.createElement('a');
-        link.href = downloadUrl;
-        link.download = filename;
-        document.body.appendChild(link);
-        link.click();
-        document.body.removeChild(link);
-        return;
-      }
-
-      // Fallback: direct secure_url (pdfUrl)
-      if (meta.pdfUrl) {
-        const link = document.createElement('a');
-        link.href = meta.pdfUrl;
-        link.download = filename;
-        document.body.appendChild(link);
-        link.click();
-        document.body.removeChild(link);
-        return;
-      }
-
-      // If only have thumbnail image, try to convert/raster -> pdf via transformation
-      if (meta.cachedPdfPublicId) {
-        const downloadUrl = `https://res.cloudinary.com/${cloud}/image/upload/fl_attachment:${encodeURIComponent(safeFilename)},f_pdf/${meta.cachedPdfPublicId}`;
-        const link = document.createElement('a');
-        link.href = downloadUrl;
-        link.download = filename;
-        document.body.appendChild(link);
-        link.click();
-        document.body.removeChild(link);
-        return;
-      }
-
-      throw new Error('No downloadable document available.');
-    } catch (err) {
-      console.error(err);
-      showErrorToast(err.message || 'Unable to download contract document.');
-    }
-  };
 
   const handleCloseDocumentPreview = () => {
-    releasePreviewObjectUrl();
     setShowDocumentModal(false);
     setDocumentPreviewUrl('');
     setDocumentPreviewMime('');
@@ -1213,10 +538,7 @@ const SalesContracts = ({ user }) => {
                       <td style={{ ...tableCellStyle, textAlign: 'center' }}>
                         <div style={{ display: 'flex', gap: '8px', justifyContent: 'center', flexWrap: 'wrap' }}>
                           <button className="btn btn-outline" style={{ padding: '6px 10px', fontSize: '12px' }} onClick={() => handlePreviewContractDocument(contract)}>
-                            <i className="bx bx-show"></i> Preview
-                          </button>
-                          <button className="btn btn-outline" style={{ padding: '6px 10px', fontSize: '12px' }} onClick={() => handleDownloadContract(contract)}>
-                            <i className="bx bx-download"></i> Download
+                            <i className="bx bx-show"></i> View
                           </button>
                           <button className="btn btn-outline" style={{ padding: '6px 10px', fontSize: '12px' }} onClick={() => handleViewOrder(contract)}>
                             <i className="bx bx-spreadsheet"></i> Order
@@ -1288,32 +610,85 @@ const SalesContracts = ({ user }) => {
                   )}
 
                   <div>
-                    <label style={labelStyle}>Contract Signature *</label>
+                    <label style={labelStyle}>Hình ảnh hợp đồng *</label>
                     <div style={{ border: '1px solid var(--color-border)', borderRadius: 'var(--radius)', background: 'var(--color-bg)', padding: '12px', display: 'flex', flexDirection: 'column', gap: '12px' }}>
-                      <canvas
-                        ref={canvasRef}
-                        onMouseDown={handleDrawStart}
-                        onMouseMove={handleDrawMove}
-                        onMouseUp={handleDrawEnd}
-                        onMouseLeave={handleDrawEnd}
-                        onTouchStart={handleDrawStart}
-                        onTouchMove={handleDrawMove}
-                        onTouchEnd={handleDrawEnd}
-                        style={{ border: '1px dashed var(--color-border)', borderRadius: '8px', background: '#ffffff', touchAction: 'none' }}
+                      <input
+                        type="file"
+                        accept="image/*"
+                        onChange={(e) => {
+                          const file = e.target.files?.[0];
+                          if (file) {
+                            // Validate file type
+                            if (!file.type.startsWith('image/')) {
+                              setImageError('Vui lòng chọn file hình ảnh (PNG, JPG, JPEG, etc.)');
+                              return;
+                            }
+                            // Validate file size (max 10MB)
+                            if (file.size > 10 * 1024 * 1024) {
+                              setImageError('Kích thước file không được vượt quá 10MB');
+                              return;
+                            }
+                            setContractImageFile(file);
+                            setImageError('');
+                            // Create preview URL
+                            const reader = new FileReader();
+                            reader.onload = (event) => {
+                              setContractImageUrl(event.target.result);
+                            };
+                            reader.readAsDataURL(file);
+                          }
+                        }}
+                        style={{ display: 'none' }}
+                        id="contract-image-input"
                       />
-                      <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
-                        <button type="button" className="btn btn-outline" onClick={handleClearSignature} disabled={uploadingSignature}><i className="bx bx-eraser"></i> Clear</button>
-                        <button type="button" className="btn btn-primary" onClick={handleUploadSignature} disabled={uploadingSignature}>
-                          {uploadingSignature ? <><i className="bx bx-loader-alt bx-spin" style={{ marginRight: '6px' }}></i> Uploading...</> : <><i className="bx bx-cloud-upload" style={{ marginRight: '6px' }}></i> Upload Signature</>}
-                        </button>
-                      </div>
-                      {signatureError && <div style={{ color: 'var(--color-error)', fontSize: '12px' }}>{signatureError}</div>}
-                      {signatureUrl && (
-                        <div style={{ border: '1px solid var(--color-border)', borderRadius: '8px', padding: '12px', background: 'var(--color-surface)' }}>
-                          <div style={{ fontSize: '13px', color: 'var(--color-text-muted)' }}>Uploaded Signature URL</div>
-                          <a href={signatureUrl} target="_blank" rel="noopener noreferrer" style={{ fontSize: '14px', wordBreak: 'break-all' }}>{signatureUrl}</a>
+                      <label
+                        htmlFor="contract-image-input"
+                        style={{
+                          display: 'flex',
+                          flexDirection: 'column',
+                          alignItems: 'center',
+                          justifyContent: 'center',
+                          padding: '24px',
+                          border: '2px dashed var(--color-border)',
+                          borderRadius: 'var(--radius)',
+                          background: 'var(--color-surface)',
+                          cursor: 'pointer',
+                          transition: 'all 0.3s ease'
+                        }}
+                        onMouseEnter={(e) => {
+                          e.currentTarget.style.borderColor = 'var(--color-primary)';
+                          e.currentTarget.style.background = 'var(--color-bg)';
+                        }}
+                        onMouseLeave={(e) => {
+                          e.currentTarget.style.borderColor = 'var(--color-border)';
+                          e.currentTarget.style.background = 'var(--color-surface)';
+                        }}
+                      >
+                        <i className="bx bx-cloud-upload" style={{ fontSize: '48px', color: 'var(--color-primary)', marginBottom: '8px' }}></i>
+                        <div style={{ fontSize: '14px', color: 'var(--color-text)', marginBottom: '4px' }}>
+                          Click để chọn hình ảnh hợp đồng
+                        </div>
+                        <div style={{ fontSize: '12px', color: 'var(--color-text-muted)' }}>
+                          PNG, JPG, JPEG (Tối đa 10MB)
+                        </div>
+                      </label>
+                      {contractImageUrl && (
+                        <div style={{ marginTop: '12px' }}>
+                          <div style={{ fontSize: '13px', color: 'var(--color-text-muted)', marginBottom: '8px' }}>Preview:</div>
+                          <img
+                            src={contractImageUrl}
+                            alt="Contract preview"
+                            style={{
+                              maxWidth: '100%',
+                              maxHeight: '300px',
+                              borderRadius: 'var(--radius)',
+                              border: '1px solid var(--color-border)',
+                              objectFit: 'contain'
+                            }}
+                          />
                         </div>
                       )}
+                      {imageError && <div style={{ color: 'var(--color-error)', fontSize: '12px' }}>{imageError}</div>}
                     </div>
                   </div>
 
@@ -1399,16 +774,25 @@ const SalesContracts = ({ user }) => {
             {documentPreviewLoading ? (
               <div style={{ textAlign: 'center', padding: '40px 0', color: 'var(--color-text-muted)' }}>
                 <i className="bx bx-loader-alt bx-spin" style={{ fontSize: '48px' }}></i>
-                <div style={{ marginTop: '12px' }}>Preparing document preview...</div>
+                <div style={{ marginTop: '12px' }}>Đang tải hình ảnh hợp đồng...</div>
               </div>
             ) : documentPreviewUrl ? (
-              isPdfDocument(documentPreviewUrl) ? (
-                <iframe src={documentPreviewUrl} title="Contract Document" style={{ width: '100%', height: 'calc(80vh - 80px)', border: 'none', borderRadius: 'var(--radius)', background: '#f5f5f5' }} />
-              ) : (
-                <img src={documentPreviewUrl} alt="Contract Document" style={{ width: '100%', maxHeight: '70vh', objectFit: 'contain', borderRadius: 'var(--radius)', border: '1px solid var(--color-border)' }} />
-              )
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '16px', height: 'calc(80vh - 80px)', overflow: 'auto' }}>
+                <img
+                  src={documentPreviewUrl}
+                  alt="Hình ảnh hợp đồng"
+                  style={{
+                    width: '100%',
+                    maxHeight: '100%',
+                    objectFit: 'contain',
+                    borderRadius: 'var(--radius)',
+                    border: '1px solid var(--color-border)',
+                    background: 'var(--color-bg)'
+                  }}
+                />
+              </div>
             ) : (
-              <div style={{ textAlign: 'center', padding: '40px 0', color: 'var(--color-text-muted)' }}>Unable to load contract preview.</div>
+              <div style={{ textAlign: 'center', padding: '40px 0', color: 'var(--color-text-muted)' }}>Không thể tải hình ảnh hợp đồng.</div>
             )}
           </div>
         </div>

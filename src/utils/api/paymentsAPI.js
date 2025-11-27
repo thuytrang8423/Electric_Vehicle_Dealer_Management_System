@@ -13,6 +13,8 @@ export const paymentsAPI = {
     return response.data;
   },
 
+
+
   // Get payment by transaction reference (VNPay)
   getByTxnRef: async (txnRef) => {
     const response = await apiClient.get(`/api/payments/vnpay/txn/${txnRef}`);
@@ -65,6 +67,21 @@ export const paymentsAPI = {
   getDealerWorkflowPaymentStatus: async (orderId) => {
     const response = await apiClient.get(
       `/api/dealer-workflow/orders/${orderId}/payment-status`
+    );
+    return response.data;
+  },
+
+  // Handle VNPay return callback via dealer workflow
+  handleVNPayReturnDealerWorkflow: async (params) => {
+    // Convert params object to URLSearchParams for proper encoding
+    const searchParams = new URLSearchParams();
+    Object.keys(params).forEach(key => {
+      if (params[key] !== null && params[key] !== undefined) {
+        searchParams.append(key, params[key]);
+      }
+    });
+    const response = await apiClient.get(
+      `/api/dealer-workflow/payment/vnpay-return?${searchParams.toString()}`
     );
     return response.data;
   }

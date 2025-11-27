@@ -55,14 +55,6 @@ const Header = ({ user, onLogout, onProfileClick, notifications, onMarkAsRead, o
   return (
     <div className="header">
       <div className="header__left">
-        {/* <div className="header__search">
-          <i className="bx bx-search header__search-icon"></i>
-          <input
-            type="text"
-            className="header__search-input"
-            placeholder="Search vehicles, orders, customers..."
-          />
-        </div> */}
       </div>
 
       <div className="header__right">
